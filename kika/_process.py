@@ -71,8 +71,11 @@ def process(source, *, kind: Optional[str] = None, temperatures: Optional[Sequen
         Kelvin. Neutron and dosimetry: default 293.6 K. Thermal: default every
         temperature the evaluation tabulates.
     heating
-        Neutron: compute KERMA (MT301) and damage (MT444) in the processing stage
-        too. Their ACE and HDF5 files carry heating either way.
+        Neutron. Not given: the ACE and HDF5 files carry KERMA (MT301) and
+        damage (MT444), computed when they are written. ``True``: the processing
+        stage computes them too (in the PENDF). ``False``: no heating anywhere,
+        and the files are faster to write; an ACE table's heating numbers are
+        then 0 (``ProcessingPlan.heating``).
     name
         Thermal: the OpenMC name of the table (``"c_H_in_H2O"``), when kika cannot
         tell it from the tape.
@@ -352,6 +355,9 @@ class ThermalProcessing(Processing):
         try:
             if fmt == "ace":
                 from kika._utils import ace_temperature_suffix
+                from kika.ace.xsdir import XsdirEntryExists, add_xsdir_entry, build_xsdir_line
+                from kika.endf.process import ProcessingOutputError
+                from kika.tsl.ace import read_ace_thermal_header
                 from kika.tsl.ace_writer import write_thermal_suite
                 directory.mkdir(parents=True, exist_ok=True)
                 paths, extra = [], 40
@@ -362,8 +368,17 @@ class ThermalProcessing(Processing):
                         # A scattering law tabulates temperatures the standard suffixes
                         # do not name; they are numbered from .40t up, in order.
                         extension, extra = f"{extra}t", extra + 1
-                    paths.append(write_thermal_suite(self.suite, directory / f"{self.name}_{T:g}K.t", T,
-                                                     extension=extension))
+                    path = write_thermal_suite(self.suite, directory / f"{self.name}_{T:g}K.t", T,
+                                               extension=extension)
+                    # Its xsdir line, as for the neutron tables: the file relative to
+                    # the xsdir, the XSS length NXS(1), kT in MeV.
+                    h = read_ace_thermal_header(path)
+                    try:
+                        add_xsdir_entry(directory / "xsdir", build_xsdir_line(h.zaid, h.awr, path.name, h.nxs[1], h.kt),
+                                        replace=replace)
+                    except XsdirEntryExists as error:
+                        raise ProcessingOutputError("ace-table-exists", str(error)) from error
+                    paths.append(path)
             else:
                 import kika
                 kika.write(self.suite, directory, format="hdf5")

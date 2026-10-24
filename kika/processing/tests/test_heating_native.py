@@ -260,3 +260,14 @@ def test_native_unit_base_integral_equals_numpy_bit_for_bit(flat, kalbach):
             angular = rng.uniform(-1.0, 1.0, n)
         args = (x, p, angular, nodes, ww, a, width, qa, qw, flat, kalbach)
         assert H._unitBaseIntegral(*args) == H._unitBaseIntegralNumpy(*args)
+
+
+def test_the_kernels_sum_a_whole_array_as_this_numpy_does():
+    # NumPy 2.5 sums a contiguous array pairwise over all of it; older NumPy went
+    # by buffers of 8192. The kernel takes whichever this NumPy does (heating.py
+    # measures it on import), else every sum longer than a buffer is an ulp off.
+    rng = np.random.default_rng(5)
+    buffer = H._numpySumBuffer()
+    for n in (100, 8191, 8193, 20000, 70001):
+        a = rng.normal(size=n) * 10.0 ** rng.uniform(-8, 8, n)
+        assert native.total(a, buffer) == float(np.sum(a))

@@ -54,14 +54,47 @@ static double pairwise_sum(const double *a, Py_ssize_t n)
     return pairwise_sum(a, n2) + pairwise_sum(a + n2, n - n2);
 }
 
-/* np.sum of a whole contiguous array: the reduction runs over buffers of
- * NPY_BUFSIZE (8192) elements, each summed pairwise, accumulated in order. */
+/* np.sum of a whole contiguous array. NumPy before 2.x reduced it over buffers
+ * of NPY_BUFSIZE (8192) elements, each summed pairwise and accumulated in order;
+ * NumPy 2.5 sums the whole array pairwise at once. Which one the NumPy kika runs
+ * with does is measured when heating.py loads (set_sum_buffer): 0 is the whole
+ * array, else the buffer length. */
+static Py_ssize_t sum_buffer = 0;
+
 static double numpy_total(const double *a, Py_ssize_t n)
 {
+    if (sum_buffer <= 0) return pairwise_sum(a, n);
     double res = 0.;
-    for (Py_ssize_t k = 0; k < n; k += 8192)
-        res += pairwise_sum(a + k, (n - k) < 8192 ? (n - k) : 8192);
+    for (Py_ssize_t k = 0; k < n; k += sum_buffer)
+        res += pairwise_sum(a + k, (n - k) < sum_buffer ? (n - k) : sum_buffer);
     return res;
+}
+
+/* set_sum_buffer(n): how numpy_total sums (0, the whole array; else per buffer of n). */
+static PyObject *set_sum_buffer(PyObject *self, PyObject *args)
+{
+    Py_ssize_t n;
+    if (!PyArg_ParseTuple(args, "n", &n)) return NULL;
+    if (n < 0) { PyErr_SetString(PyExc_ValueError, "native heating: a buffer length is >= 0"); return NULL; }
+    sum_buffer = n;
+    Py_RETURN_NONE;
+}
+
+/* total(a, buffer): numpy_total of a with that buffer, to measure NumPy's against. */
+static int get_vector(PyObject *object, Py_buffer *view, const char *what);
+static PyObject *total(PyObject *self, PyObject *args)
+{
+    PyObject *object;
+    Py_ssize_t n;
+    Py_buffer b = {0};
+    if (!PyArg_ParseTuple(args, "On", &object, &n)) return NULL;
+    if (get_vector(object, &b, "a") < 0) { if (b.obj) PyBuffer_Release(&b); return NULL; }
+    Py_ssize_t saved = sum_buffer;
+    sum_buffer = n;
+    double res = numpy_total(b.buf, b.len / (Py_ssize_t)sizeof(double));
+    sum_buffer = saved;
+    PyBuffer_Release(&b);
+    return PyFloat_FromDouble(res);
 }
 
 /* np.maximum(a, b): a >= b or a is NaN gives a. */
@@ -169,6 +202,83 @@ static int get_vector(PyObject *object, Py_buffer *view, const char *what)
     return 0;
 }
 
+/* The sums of the chunk kernels, without the GIL: the Python-facing chunk
+ * functions and the batches over incident energies below share them, so both
+ * give the same bits. terms holds nc*n (times 3 for the joint sums), row m
+ * (times 3). */
+
+/* emission_chunk's sum. */
+static double emission_sum1(const double *cuts, Py_ssize_t nk, const double *g, const double *w, Py_ssize_t n,
+                            const double *mu, const double *wm, Py_ssize_t m, const double *x, const double *p,
+                            Py_ssize_t nx, double low, double width, double oldwidth, double incident,
+                            double denominator, double edDenominator, double el, double fl, double ed, int hist,
+                            int lab, int noRecoil, const displacement_model *model, double *terms, double *row)
+{
+    Py_ssize_t nc = nk - 1;
+    for (Py_ssize_t i = 0; i < nc; ++i) {
+        double aa = sqrt(cuts[i]), bb = sqrt(cuts[i + 1]);
+        double half = (bb - aa) / 2;
+        double mid = (aa + bb) / 2;
+        for (Py_ssize_t j = 0; j < n; ++j) {
+            double v = mid + half * g[j];
+            double ep = v * v;
+            double source = x[0] + ((ep - low) * oldwidth) / width;
+            double density;
+            if (hist) {
+                Py_ssize_t pos = search_right(source, x, nx) - 1;
+                if (pos < 0) pos = 0;
+                if (pos > nx - 2) pos = nx - 2;
+                density = p[pos];
+            } else {
+                density = np_interp1(source, x, p, nx);
+            }
+            double angular;
+            if (lab) {
+                angular = noRecoil ? 0. : damage1(ep, el, fl, ed, model);
+            } else {
+                double root = sqrt(incident * ep);
+                double last = (root > 0) ? ((incident + ep) - edDenominator) / (2 * root) : 1.;
+                last = np_minimum(np_maximum(last, -1.), 1.);
+                for (Py_ssize_t k = 0; k < m; ++k) {
+                    double angle = (last - 1) / 2 + ((last + 1) / 2) * mu[k];
+                    double recoil = np_maximum(0., ((incident + ep) - (2 * root) * angle) / denominator);
+                    row[k] = wm[k] * (noRecoil ? 0. : damage1(recoil, el, fl, ed, model));
+                }
+                angular = (pairwise_sum(row, m) * (last + 1)) / 4;
+            }
+            terms[i * n + j] = (((((w[j] * half) * 2) * v) * density) * oldwidth) / width * angular;
+        }
+    }
+    return numpy_total(terms, nc * n);
+}
+
+/* twobody_chunk's sum. */
+static double twobody_sum1(const double *cuts, Py_ssize_t nk, const double *u, const double *w, Py_ssize_t n,
+                           const double *x, const double *p, Py_ssize_t nx, double offset, double slope, double el,
+                           double fl, double ed, int hist, const displacement_model *model, double *terms)
+{
+    Py_ssize_t nc = nk - 1;
+    for (Py_ssize_t i = 0; i < nc; ++i) {
+        double half = (cuts[i + 1] - cuts[i]) / 2;
+        double mid = (cuts[i] + cuts[i + 1]) / 2;
+        for (Py_ssize_t j = 0; j < n; ++j) {
+            double mu = mid + half * u[j];
+            double density;
+            if (hist) {
+                Py_ssize_t pos = search_right(mu, x, nx) - 1;
+                if (pos < 0) pos = 0;
+                if (pos > nx - 1) pos = nx - 1;
+                density = p[pos];
+            } else {
+                density = np_interp1(mu, x, p, nx);
+            }
+            double recoil = np_maximum(offset - slope * mu, 0.);
+            terms[i * n + j] = ((half * w[j]) * density) * damage1(recoil, el, fl, ed, model);
+        }
+    }
+    return numpy_total(terms, nc * n);
+}
+
 /* One chunk of _tabulatedEmissionDamage's at(E): the sum NumPy forms as
  *   np.sum(w*half[:,None]*2*v*density*oldwidth/width*angular)
  * over the panels whose sqrt-edges are sqrt(cuts[k]), sqrt(cuts[k+1]). */
@@ -209,41 +319,8 @@ static PyObject *emission_chunk(PyObject *self, PyObject *args)
     if (!terms || !row) { PyErr_NoMemory(); goto done; }
     double total;
     Py_BEGIN_ALLOW_THREADS
-    for (Py_ssize_t i = 0; i < nc; ++i) {
-        double aa = sqrt(cuts[i]), bb = sqrt(cuts[i + 1]);
-        double half = (bb - aa) / 2;
-        double mid = (aa + bb) / 2;
-        for (Py_ssize_t j = 0; j < n; ++j) {
-            double v = mid + half * g[j];
-            double ep = v * v;
-            double source = x[0] + ((ep - low) * oldwidth) / width;
-            double density;
-            if (hist) {
-                Py_ssize_t pos = search_right(source, x, nx) - 1;
-                if (pos < 0) pos = 0;
-                if (pos > nx - 2) pos = nx - 2;
-                density = p[pos];
-            } else {
-                density = np_interp1(source, x, p, nx);
-            }
-            double angular;
-            if (lab) {
-                angular = noRecoil ? 0. : damage1(ep, el, fl, ed, &model);
-            } else {
-                double root = sqrt(incident * ep);
-                double last = (root > 0) ? ((incident + ep) - edDenominator) / (2 * root) : 1.;
-                last = np_minimum(np_maximum(last, -1.), 1.);
-                for (Py_ssize_t k = 0; k < m; ++k) {
-                    double angle = (last - 1) / 2 + ((last + 1) / 2) * mu[k];
-                    double recoil = np_maximum(0., ((incident + ep) - (2 * root) * angle) / denominator);
-                    row[k] = wm[k] * (noRecoil ? 0. : damage1(recoil, el, fl, ed, &model));
-                }
-                angular = (pairwise_sum(row, m) * (last + 1)) / 4;
-            }
-            terms[i * n + j] = (((((w[j] * half) * 2) * v) * density) * oldwidth) / width * angular;
-        }
-    }
-    total = numpy_total(terms, nc * n);
+    total = emission_sum1(cuts, nk, g, w, n, mu, wm, m, x, p, nx, low, width, oldwidth, incident, denominator,
+                          edDenominator, el, fl, ed, hist, lab, noRecoil, &model, terms, row);
     Py_END_ALLOW_THREADS
     result = PyFloat_FromDouble(total);
  done:
@@ -288,25 +365,7 @@ static PyObject *twobody_chunk(PyObject *self, PyObject *args)
     if (!terms) { PyErr_NoMemory(); goto done; }
     double total;
     Py_BEGIN_ALLOW_THREADS
-    for (Py_ssize_t i = 0; i < nc; ++i) {
-        double half = (cuts[i + 1] - cuts[i]) / 2;
-        double mid = (cuts[i] + cuts[i + 1]) / 2;
-        for (Py_ssize_t j = 0; j < n; ++j) {
-            double mu = mid + half * u[j];
-            double density;
-            if (hist) {
-                Py_ssize_t pos = search_right(mu, x, nx) - 1;
-                if (pos < 0) pos = 0;
-                if (pos > nx - 1) pos = nx - 1;
-                density = p[pos];
-            } else {
-                density = np_interp1(mu, x, p, nx);
-            }
-            double recoil = np_maximum(offset - slope * mu, 0.);
-            terms[i * n + j] = ((half * w[j]) * density) * damage1(recoil, el, fl, ed, &model);
-        }
-    }
-    total = numpy_total(terms, nc * n);
+    total = twobody_sum1(cuts, nk, u, w, n, x, p, nx, offset, slope, el, fl, ed, hist, &model, terms);
     Py_END_ALLOW_THREADS
     result = PyFloat_FromDouble(total);
  done:
@@ -351,6 +410,99 @@ static int parse_models(displacement_model *m1, displacement_model *m2)
     return 0;
 }
 
+/* emission_chunk_joint's sums; edD as the caller gives them (sorted here). */
+static void emission_sum3(const double *cuts, Py_ssize_t nk, const double *g, const double *w, Py_ssize_t n,
+                          const double *mu, const double *wm, Py_ssize_t m, const double *x, const double *p,
+                          Py_ssize_t nx, double low, double width, double oldwidth, double incident,
+                          double denominator, const double edD[3], double el, double fl, double ed, int hist,
+                          int lab, int noRecoil, const displacement_model *m1, const displacement_model *m2,
+                          double *terms, double *row, double total[3])
+{
+    Py_ssize_t nc = nk - 1;
+    /* The thresholds in decreasing order (the cosines then increase). */
+    double thr[3] = {edD[0], edD[1], edD[2]};
+    for (int s = 0; s < 2; ++s)
+        for (int q = 0; q < 2 - s; ++q)
+            if (thr[q] < thr[q + 1]) { double tmp = thr[q]; thr[q] = thr[q + 1]; thr[q + 1] = tmp; }
+    for (Py_ssize_t i = 0; i < nc; ++i) {
+        double aa = sqrt(cuts[i]), bb = sqrt(cuts[i + 1]);
+        double half = (bb - aa) / 2;
+        double mid = (aa + bb) / 2;
+        for (Py_ssize_t j = 0; j < n; ++j) {
+            double v = mid + half * g[j];
+            double ep = v * v;
+            double source = x[0] + ((ep - low) * oldwidth) / width;
+            double density;
+            if (hist) {
+                Py_ssize_t pos = search_right(source, x, nx) - 1;
+                if (pos < 0) pos = 0;
+                if (pos > nx - 2) pos = nx - 2;
+                density = p[pos];
+            } else {
+                density = np_interp1(source, x, p, nx);
+            }
+            double angular[3];
+            if (lab) {
+                if (noRecoil) angular[0] = angular[1] = angular[2] = 0.;
+                else damage3(ep, el, fl, ed, m1, m2, angular);
+            } else {
+                double root = sqrt(incident * ep);
+                angular[0] = angular[1] = angular[2] = 0.;
+                double start = -1.;
+                for (int s = 0; s < 3; ++s) {
+                    if (s && thr[s] == thr[s - 1]) continue;
+                    double stop = (root > 0) ? ((incident + ep) - thr[s]) / (2 * root) : 1.;
+                    stop = np_minimum(np_maximum(stop, -1.), 1.);
+                    if (!(stop > start)) continue;
+                    for (Py_ssize_t k = 0; k < m; ++k) {
+                        double angle = (start + stop) / 2 + ((stop - start) / 2) * mu[k];
+                        double recoil = np_maximum(0., ((incident + ep) - (2 * root) * angle) / denominator);
+                        double d[3] = {0., 0., 0.};
+                        if (!noRecoil) damage3(recoil, el, fl, ed, m1, m2, d);
+                        for (int c = 0; c < 3; ++c) row[c * m + k] = wm[k] * d[c];
+                    }
+                    for (int c = 0; c < 3; ++c) angular[c] += (pairwise_sum(row + c * m, m) * (stop - start)) / 4;
+                    start = stop;
+                }
+            }
+            double factor = (((((w[j] * half) * 2) * v) * density) * oldwidth) / width;
+            for (int c = 0; c < 3; ++c) terms[c * nc * n + i * n + j] = factor * angular[c];
+        }
+    }
+    for (int c = 0; c < 3; ++c) total[c] = numpy_total(terms + c * nc * n, nc * n);
+}
+
+/* twobody_chunk_joint's sums. */
+static void twobody_sum3(const double *cuts, Py_ssize_t nk, const double *u, const double *w, Py_ssize_t n,
+                         const double *x, const double *p, Py_ssize_t nx, double offset, double slope, double el,
+                         double fl, double ed, int hist, const displacement_model *m1,
+                         const displacement_model *m2, double *terms, double total[3])
+{
+    Py_ssize_t nc = nk - 1;
+    for (Py_ssize_t i = 0; i < nc; ++i) {
+        double half = (cuts[i + 1] - cuts[i]) / 2;
+        double mid = (cuts[i] + cuts[i + 1]) / 2;
+        for (Py_ssize_t j = 0; j < n; ++j) {
+            double mu = mid + half * u[j];
+            double density;
+            if (hist) {
+                Py_ssize_t pos = search_right(mu, x, nx) - 1;
+                if (pos < 0) pos = 0;
+                if (pos > nx - 1) pos = nx - 1;
+                density = p[pos];
+            } else {
+                density = np_interp1(mu, x, p, nx);
+            }
+            double recoil = np_maximum(offset - slope * mu, 0.);
+            double d[3];
+            damage3(recoil, el, fl, ed, m1, m2, d);
+            double factor = (half * w[j]) * density;
+            for (int c = 0; c < 3; ++c) terms[c * nc * n + i * n + j] = factor * d[c];
+        }
+    }
+    for (int c = 0; c < 3; ++c) total[c] = numpy_total(terms + c * nc * n, nc * n);
+}
+
 /* emission_chunk for MT444 and two models at once: a 3-tuple of its sums.
  * edD[c] = denominator x the recoil threshold of component c: the angular range
  * runs from -1 to the cosine where the recoil meets the lowest of them, split at
@@ -388,58 +540,9 @@ static PyObject *emission_chunk_joint(PyObject *self, PyObject *args)
     row = PyMem_Malloc(sizeof(double) * (size_t)(3 * (m > 0 ? m : 1)));
     if (!terms || !row) { PyErr_NoMemory(); goto done; }
     double total[3];
-    /* The thresholds in decreasing order (the cosines then increase). */
-    double thr[3] = {edD[0], edD[1], edD[2]};
-    for (int s = 0; s < 2; ++s)
-        for (int q = 0; q < 2 - s; ++q)
-            if (thr[q] < thr[q + 1]) { double tmp = thr[q]; thr[q] = thr[q + 1]; thr[q + 1] = tmp; }
     Py_BEGIN_ALLOW_THREADS
-    for (Py_ssize_t i = 0; i < nc; ++i) {
-        double aa = sqrt(cuts[i]), bb = sqrt(cuts[i + 1]);
-        double half = (bb - aa) / 2;
-        double mid = (aa + bb) / 2;
-        for (Py_ssize_t j = 0; j < n; ++j) {
-            double v = mid + half * g[j];
-            double ep = v * v;
-            double source = x[0] + ((ep - low) * oldwidth) / width;
-            double density;
-            if (hist) {
-                Py_ssize_t pos = search_right(source, x, nx) - 1;
-                if (pos < 0) pos = 0;
-                if (pos > nx - 2) pos = nx - 2;
-                density = p[pos];
-            } else {
-                density = np_interp1(source, x, p, nx);
-            }
-            double angular[3];
-            if (lab) {
-                if (noRecoil) angular[0] = angular[1] = angular[2] = 0.;
-                else damage3(ep, el, fl, ed, &m1, &m2, angular);
-            } else {
-                double root = sqrt(incident * ep);
-                angular[0] = angular[1] = angular[2] = 0.;
-                double start = -1.;
-                for (int s = 0; s < 3; ++s) {
-                    if (s && thr[s] == thr[s - 1]) continue;
-                    double stop = (root > 0) ? ((incident + ep) - thr[s]) / (2 * root) : 1.;
-                    stop = np_minimum(np_maximum(stop, -1.), 1.);
-                    if (!(stop > start)) continue;
-                    for (Py_ssize_t k = 0; k < m; ++k) {
-                        double angle = (start + stop) / 2 + ((stop - start) / 2) * mu[k];
-                        double recoil = np_maximum(0., ((incident + ep) - (2 * root) * angle) / denominator);
-                        double d[3] = {0., 0., 0.};
-                        if (!noRecoil) damage3(recoil, el, fl, ed, &m1, &m2, d);
-                        for (int c = 0; c < 3; ++c) row[c * m + k] = wm[k] * d[c];
-                    }
-                    for (int c = 0; c < 3; ++c) angular[c] += (pairwise_sum(row + c * m, m) * (stop - start)) / 4;
-                    start = stop;
-                }
-            }
-            double factor = (((((w[j] * half) * 2) * v) * density) * oldwidth) / width;
-            for (int c = 0; c < 3; ++c) terms[c * nc * n + i * n + j] = factor * angular[c];
-        }
-    }
-    for (int c = 0; c < 3; ++c) total[c] = numpy_total(terms + c * nc * n, nc * n);
+    emission_sum3(cuts, nk, g, w, n, mu, wm, m, x, p, nx, low, width, oldwidth, incident, denominator, edD,
+                  el, fl, ed, hist, lab, noRecoil, &m1, &m2, terms, row, total);
     Py_END_ALLOW_THREADS
     result = Py_BuildValue("(ddd)", total[0], total[1], total[2]);
  done:
@@ -478,28 +581,7 @@ static PyObject *twobody_chunk_joint(PyObject *self, PyObject *args)
     if (!terms) { PyErr_NoMemory(); goto done; }
     double total[3];
     Py_BEGIN_ALLOW_THREADS
-    for (Py_ssize_t i = 0; i < nc; ++i) {
-        double half = (cuts[i + 1] - cuts[i]) / 2;
-        double mid = (cuts[i] + cuts[i + 1]) / 2;
-        for (Py_ssize_t j = 0; j < n; ++j) {
-            double mu = mid + half * u[j];
-            double density;
-            if (hist) {
-                Py_ssize_t pos = search_right(mu, x, nx) - 1;
-                if (pos < 0) pos = 0;
-                if (pos > nx - 1) pos = nx - 1;
-                density = p[pos];
-            } else {
-                density = np_interp1(mu, x, p, nx);
-            }
-            double recoil = np_maximum(offset - slope * mu, 0.);
-            double d[3];
-            damage3(recoil, el, fl, ed, &m1, &m2, d);
-            double factor = (half * w[j]) * density;
-            for (int c = 0; c < 3; ++c) terms[c * nc * n + i * n + j] = factor * d[c];
-        }
-    }
-    for (int c = 0; c < 3; ++c) total[c] = numpy_total(terms + c * nc * n, nc * n);
+    twobody_sum3(cuts, nk, u, w, n, x, p, nx, offset, slope, el, fl, ed, hist, &m1, &m2, terms, total);
     Py_END_ALLOW_THREADS
     result = Py_BuildValue("(ddd)", total[0], total[1], total[2]);
  done:
@@ -774,33 +856,11 @@ static PyObject *points_bin(PyObject *self, PyObject *args)
  *   np.sum((right-left)/2*ww*2*r*r*width/qw*density*angle)/norm
  * with density, and angle (mu, or Kalbach r * Langevin(a)), read lin-lin (or held) at the
  * source energy of each node. Bit for bit heating._unitBaseIntegralNumpy. */
-static PyObject *unit_base_integral(PyObject *self, PyObject *args)
+/* unit_base_integral's quadrature; terms holds (n-1)*m, dnorm n-1. */
+static double unit_base_sum(const double *x, const double *p, const double *ang, const double *sl, Py_ssize_t n,
+                            const double *nodes, const double *ww, Py_ssize_t m, double a, double width, double qa,
+                            double qw, int flat, int kalbach, double *terms, double *dnorm)
 {
-    PyObject *objects[6];
-    Py_buffer b[6] = {{0}};
-    static const char *names[6] = {"x", "p", "angle", "slope", "nodes", "weights"};
-    double a, width, qa, qw;
-    int flat, kalbach;
-    double *terms = NULL, *dnorm = NULL;
-    PyObject *result = NULL;
-    if (!PyArg_ParseTuple(args, "OOOOOOddddpp", &objects[0], &objects[1], &objects[2], &objects[3],
-                          &objects[4], &objects[5], &a, &width, &qa, &qw, &flat, &kalbach))
-        return NULL;
-    for (int k = 0; k < 6; ++k)
-        if (get_vector(objects[k], &b[k], names[k]) < 0) goto done;
-    const double *x = b[0].buf, *p = b[1].buf, *ang = b[2].buf, *sl = b[3].buf;
-    const double *nodes = b[4].buf, *ww = b[5].buf;
-    Py_ssize_t n = b[0].len / sizeof(double), m = b[4].len / sizeof(double);
-    if (n < 2 || b[1].len != b[0].len || b[2].len != b[0].len || (kalbach && b[3].len != b[0].len)
-        || b[5].len != b[4].len || m < 1) {
-        PyErr_SetString(PyExc_ValueError, "native heating: inconsistent unit-base buffers");
-        goto done;
-    }
-    terms = PyMem_Malloc(sizeof(double) * (size_t)((n - 1) * m));
-    dnorm = PyMem_Malloc(sizeof(double) * (size_t)(n - 1));
-    if (!terms || !dnorm) { PyErr_NoMemory(); goto done; }
-    double integral;
-    Py_BEGIN_ALLOW_THREADS
     for (Py_ssize_t i = 0; i < n - 1; ++i) {
         double dx = x[i + 1] - x[i];
         dnorm[i] = flat ? dx * p[i] : (dx * (p[i] + p[i + 1])) / 2;
@@ -828,7 +888,37 @@ static PyObject *unit_base_integral(PyObject *self, PyObject *args)
             terms[i * m + k] = t;
         }
     }
-    integral = numpy_total(terms, (n - 1) * m) / numpy_total(dnorm, n - 1);
+    return numpy_total(terms, (n - 1) * m) / numpy_total(dnorm, n - 1);
+}
+
+static PyObject *unit_base_integral(PyObject *self, PyObject *args)
+{
+    PyObject *objects[6];
+    Py_buffer b[6] = {{0}};
+    static const char *names[6] = {"x", "p", "angle", "slope", "nodes", "weights"};
+    double a, width, qa, qw;
+    int flat, kalbach;
+    double *terms = NULL, *dnorm = NULL;
+    PyObject *result = NULL;
+    if (!PyArg_ParseTuple(args, "OOOOOOddddpp", &objects[0], &objects[1], &objects[2], &objects[3],
+                          &objects[4], &objects[5], &a, &width, &qa, &qw, &flat, &kalbach))
+        return NULL;
+    for (int k = 0; k < 6; ++k)
+        if (get_vector(objects[k], &b[k], names[k]) < 0) goto done;
+    const double *x = b[0].buf, *p = b[1].buf, *ang = b[2].buf, *sl = b[3].buf;
+    const double *nodes = b[4].buf, *ww = b[5].buf;
+    Py_ssize_t n = b[0].len / sizeof(double), m = b[4].len / sizeof(double);
+    if (n < 2 || b[1].len != b[0].len || b[2].len != b[0].len || (kalbach && b[3].len != b[0].len)
+        || b[5].len != b[4].len || m < 1) {
+        PyErr_SetString(PyExc_ValueError, "native heating: inconsistent unit-base buffers");
+        goto done;
+    }
+    terms = PyMem_Malloc(sizeof(double) * (size_t)((n - 1) * m));
+    dnorm = PyMem_Malloc(sizeof(double) * (size_t)(n - 1));
+    if (!terms || !dnorm) { PyErr_NoMemory(); goto done; }
+    double integral;
+    Py_BEGIN_ALLOW_THREADS
+    integral = unit_base_sum(x, p, ang, sl, n, nodes, ww, m, a, width, qa, qw, flat, kalbach, terms, dnorm);
     Py_END_ALLOW_THREADS
     result = PyFloat_FromDouble(integral);
  done:
@@ -838,7 +928,455 @@ static PyObject *unit_base_integral(PyObject *self, PyObject *args)
     return result;
 }
 
+/* ------------------------------------------------------------------------
+ * The at(E) of _twoBodyDamage and _tabulatedEmissionDamage (and their joint
+ * forms) for many incident energies in one call, without the GIL: the cuts,
+ * the interpolation between the two tables around E and the doubling of the
+ * Gauss orders to convergence, in the Python's order of operations, so each
+ * value is the bits at(E) gives. An energy the Python handles itself (the
+ * slope-0 two-body recoil, a quadrature that does not converge, a table
+ * the chunk kernels refuse) gets status 1 and is left to it, which then gives
+ * the value or raises as before.
+ * ------------------------------------------------------------------------ */
+
+/* np.clip(np.searchsorted(e, E, side='right') - 1, 0, n - 1). */
+static inline Py_ssize_t table_below(double E, const double *e, Py_ssize_t n)
+{
+    Py_ssize_t j = search_right(E, e, n) - 1;
+    if (j < 0) j = 0;
+    if (j > n - 1) j = n - 1;
+    return j;
+}
+
+static int compare_doubles(const void *a, const void *b)
+{
+    double x = *(const double *)a, y = *(const double *)b;
+    return (x < y) ? -1 : (x > y) ? 1 : 0;
+}
+
+/* np.unique in place: sorted, each value once. */
+static Py_ssize_t unique_sorted(double *a, Py_ssize_t n)
+{
+    if (n < 2) return n;
+    qsort(a, (size_t)n, sizeof(double), compare_doubles);
+    Py_ssize_t k = 1;
+    for (Py_ssize_t i = 1; i < n; ++i)
+        if (a[i] != a[i - 1]) a[k++] = a[i];
+    return k;
+}
+
+/* The tables of a form, concatenated: table t is xs/ps[starts[t]:starts[t+1]]. */
+typedef struct {
+    const double *xs, *ps, *starts, *flags, *values, *energies;
+    Py_ssize_t count, longest;
+} table_set;
+
+static int table_set_check(table_set *t, Py_ssize_t nstarts, Py_ssize_t npoints, Py_ssize_t nflags,
+                           Py_ssize_t nvalues, Py_ssize_t nenergies)
+{
+    t->count = nstarts - 1;
+    t->longest = 0;
+    if (t->count < 1 || nflags != t->count || nvalues != t->count || nenergies != t->count) return -1;
+    for (Py_ssize_t k = 0; k < t->count; ++k) {
+        double a = t->starts[k], b = t->starts[k + 1];
+        if (!(a >= 0) || !(b <= (double)npoints) || !(b > a)) return -1;
+        if ((Py_ssize_t)(b - a) > t->longest) t->longest = (Py_ssize_t)(b - a);
+    }
+    return 0;
+}
+
+static inline Py_ssize_t table_first(const table_set *t, Py_ssize_t k) { return (Py_ssize_t)t->starts[k]; }
+static inline Py_ssize_t table_length(const table_set *t, Py_ssize_t k)
+{
+    return (Py_ssize_t)t->starts[k + 1] - (Py_ssize_t)t->starts[k];
+}
+
+/* Whether every component agrees with the previous order's to its tolerance. */
+static inline int converged(const double *now, const double *before, int ncomp, double absolute,
+                            const double *scales, const double *rels)
+{
+    for (int c = 0; c < ncomp; ++c)
+        if (!(fabs(now[c] - before[c]) <= absolute * scales[c] + rels[c] * fabs(now[c]))) return 0;
+    return 1;
+}
+
+static int buffers_in(PyObject **objects, Py_buffer *b, const char **names, int count)
+{
+    for (int k = 0; k < count; ++k)
+        if (get_vector(objects[k], &b[k], names[k]) < 0) return -1;
+    return 0;
+}
+
+static int buffer_out(PyObject *object, Py_buffer *view, const char *what)
+{
+    if (PyObject_GetBuffer(object, view, PyBUF_FORMAT | PyBUF_C_CONTIGUOUS | PyBUF_WRITABLE) < 0) return -1;
+    if (view->itemsize != sizeof(double) || !view->format ||
+        (strcmp(view->format, "d") && strcmp(view->format, "=d") && strcmp(view->format, "@d")) ||
+        view->len % sizeof(double) || (uintptr_t)view->buf % sizeof(double)) {
+        PyErr_Format(PyExc_ValueError, "native heating: %s must be a writable contiguous float64 array", what);
+        return -1;
+    }
+    return 0;
+}
+
+#define NLEN(view) ((Py_ssize_t)((view).len / (Py_ssize_t)sizeof(double)))
+
+/* _twoBodyDamage's at(E) (joint: _twoBodyDamageJoint's) at every energy:
+ * out[i] (joint: out[3i..3i+2]), status[i] 0 when computed here. */
+static PyObject *twobody_batch(PyObject *self, PyObject *args)
+{
+    enum { NIN = 12 };
+    PyObject *objects[NIN], *outObject, *statusObject;
+    Py_buffer b[NIN] = {{0}}, out = {0}, status = {0};
+    static const char *names[NIN] = {"energies", "xs", "ps", "starts", "hists", "norms", "tableEnergies",
+                                     "u", "w", "rcuts", "scales", "rels"};
+    double A, denA, cutoff, threshold, edLast, el, fl, ed;
+    int flat, joint;
+    displacement_model m1 = {0, 0., 0., 1., 0., 0.}, m2 = {0, 0., 0., 1., 0., 0.};
+    double *work = NULL;
+    PyObject *result = NULL;
+    if (!PyArg_ParseTuple(args, "OOOOOOOOOOOOOOddddddddppidddiddd", &objects[0], &outObject, &statusObject,
+                          &objects[1], &objects[2], &objects[3], &objects[4], &objects[5], &objects[6],
+                          &objects[7], &objects[8], &objects[9], &objects[10], &objects[11],
+                          &A, &denA, &cutoff, &threshold, &edLast, &el, &fl, &ed, &flat, &joint,
+                          &m1.mode, &m1.Ed, &m1.b, &m1.c, &m2.mode, &m2.Ed, &m2.b, &m2.c))
+        return NULL;
+    if (buffers_in(objects, b, names, NIN) < 0) goto done;
+    if (buffer_out(outObject, &out, "out") < 0 || buffer_out(statusObject, &status, "status") < 0) goto done;
+    int ncomp = joint ? 3 : 1;
+    const double *energies = b[0].buf, *u = b[7].buf, *w = b[8].buf, *rcuts = b[9].buf;
+    const double *scales = b[10].buf, *rels = b[11].buf;
+    Py_ssize_t ne = NLEN(b[0]), nr = NLEN(b[9]);
+    table_set t = {b[1].buf, b[2].buf, b[3].buf, b[4].buf, b[5].buf, b[6].buf, 0, 0};
+    if (table_set_check(&t, NLEN(b[3]), NLEN(b[1]), NLEN(b[4]), NLEN(b[5]), NLEN(b[6])) < 0 ||
+        NLEN(b[2]) != NLEN(b[1]) || NLEN(b[7]) != 120 || NLEN(b[8]) != 120 || NLEN(b[10]) < ncomp ||
+        NLEN(b[11]) < ncomp || NLEN(out) != ncomp * ne || NLEN(status) != ne) {
+        PyErr_SetString(PyExc_ValueError, "native heating: inconsistent two-body batch buffers");
+        goto done;
+    }
+    if (joint ? parse_models(&m1, &m2) < 0
+              : (m1.mode < 0 || m1.mode > 2 || (m1.mode && !(m1.Ed > 0)))) {
+        if (!PyErr_Occurred()) PyErr_SetString(PyExc_ValueError, "native heating: invalid displacement model");
+        goto done;
+    }
+    if (!joint) displacement_prepare(&m1);
+    /* cuts: -1, the table's interior points, the recoil cuts and last; terms: 64 nodes on each panel. */
+    Py_ssize_t ncutsMax = t.longest + nr + 2;
+    Py_ssize_t nterms = 3 * (ncutsMax > 1 ? ncutsMax - 1 : 1) * 64;
+    work = malloc(sizeof(double) * (size_t)(2 * ncutsMax + nterms));
+    if (!work) { PyErr_NoMemory(); goto done; }
+    double *cuts = work, *mcuts = work + ncutsMax, *terms = work + 2 * ncutsMax;
+    double *values = out.buf, *flags = status.buf;
+    Py_BEGIN_ALLOW_THREADS
+    for (Py_ssize_t e = 0; e < ne; ++e) {
+        double E = energies[e];
+        double *value = values + ncomp * e;
+        for (int c = 0; c < ncomp; ++c) value[c] = 0.;
+        flags[e] = 0.;
+        if (E < cutoff || E < threshold) continue;
+        /* r = np.sqrt(max(0., 1 - threshold/max(E, 1e-300))) */
+        double q = 1 - threshold / ((1e-300 > E) ? 1e-300 : E);
+        double r = sqrt((q > 0.) ? q : 0.);
+        double cc = E * A / denA;
+        double offset = cc * (1 + r * r), slope = 2 * cc * r;
+        if (slope == 0) { flags[e] = 1.; continue; }
+        double lastValue = (offset - edLast) / slope;
+        double last = (lastValue < 1.) ? lastValue : 1.;
+        if (last <= -1) continue;
+        Py_ssize_t j = table_below(E, t.energies, t.count), k = (j + 1 < t.count - 1) ? j + 1 : t.count - 1;
+        double f = 0.;
+        if (k != j && !flat)
+            f = np_minimum(np_maximum((E - t.energies[j]) / (t.energies[k] - t.energies[j]), 0.), 1.);
+        Py_ssize_t nm = 0;
+        for (Py_ssize_t i = 0; i < nr; ++i) {
+            double mc = (offset - rcuts[i]) / slope;
+            if (mc > -1 && mc < last) mcuts[nm++] = mc;
+        }
+        int failed = 0;
+        Py_ssize_t idx[2] = {j, k};
+        double weights[2] = {1 - f, f};
+        for (int side = 0; side < 2 && !failed; ++side) {
+            if (weights[side] == 0) continue;
+            Py_ssize_t first = table_first(&t, idx[side]), nx = table_length(&t, idx[side]);
+            const double *x = t.xs + first, *p = t.ps + first;
+            int hist = t.flags[idx[side]] != 0.;
+            double norm = t.values[idx[side]];
+            if (nx < 2) { failed = 1; break; }
+            Py_ssize_t nk = 0;
+            cuts[nk++] = -1.;
+            for (Py_ssize_t i = 0; i < nx; ++i)
+                if (x[i] > -1 && x[i] < last) cuts[nk++] = x[i];
+            for (Py_ssize_t i = 0; i < nm; ++i) cuts[nk++] = mcuts[i];
+            cuts[nk++] = last;
+            nk = unique_sorted(cuts, nk);
+            if (nk < 2) { failed = 1; break; }
+            double integral[3], previous[3];
+            int have = 0, done = 0;
+            for (int order = 8; order <= 64; order *= 2) {
+                const double *uu = u + (order - 8), *ww = w + (order - 8);
+                if (joint) {
+                    twobody_sum3(cuts, nk, uu, ww, order, x, p, nx, offset, slope, el, fl, ed, hist, &m1, &m2,
+                                 terms, integral);
+                } else {
+                    integral[0] = twobody_sum1(cuts, nk, uu, ww, order, x, p, nx, offset, slope, el, fl, ed, hist,
+                                               &m1, terms);
+                }
+                for (int c = 0; c < ncomp; ++c) integral[c] = integral[c] / norm;
+                if (have && converged(integral, previous, ncomp, .001, scales, rels)) { done = 1; break; }
+                for (int c = 0; c < ncomp; ++c) previous[c] = integral[c];
+                have = 1;
+            }
+            if (!done) { failed = 1; break; }
+            for (int c = 0; c < ncomp; ++c) value[c] = value[c] + weights[side] * integral[c];
+        }
+        if (failed) flags[e] = 1.;
+    }
+    Py_END_ALLOW_THREADS
+    result = Py_None;
+    Py_INCREF(result);
+ done:
+    free(work);
+    for (int k = 0; k < NIN; ++k) if (b[k].obj) PyBuffer_Release(&b[k]);
+    if (out.obj) PyBuffer_Release(&out);
+    if (status.obj) PyBuffer_Release(&status);
+    return result;
+}
+
+/* _tabulatedEmissionDamage's at(E) (joint: _tabulatedEmissionDamageJoint's) at every
+ * energy, as twobody_batch. The tables are the prepared ones (pdf over its mass). */
+static PyObject *emission_batch(PyObject *self, PyObject *args)
+{
+    enum { NIN = 12 };
+    PyObject *objects[NIN], *outObject, *statusObject;
+    Py_buffer b[NIN] = {{0}}, out = {0}, status = {0};
+    static const char *names[NIN] = {"energies", "xs", "ps", "starts", "hists", "widths", "tableEnergies",
+                                     "g", "w", "extra", "scales", "rels"};
+    double incidentFactor, denominator, edDenominator, edD[3], el, fl, ed;
+    int flat, lab, noRecoil, joint;
+    displacement_model m1 = {0, 0., 0., 1., 0., 0.}, m2 = {0, 0., 0., 1., 0., 0.};
+    double *work = NULL;
+    PyObject *result = NULL;
+    if (!PyArg_ParseTuple(args, "OOOOOOOOOOOOOOdddddddddppppidddiddd", &objects[0], &outObject, &statusObject,
+                          &objects[1], &objects[2], &objects[3], &objects[4], &objects[5], &objects[6],
+                          &objects[7], &objects[8], &objects[9], &objects[10], &objects[11],
+                          &incidentFactor, &denominator, &edDenominator, &edD[0], &edD[1], &edD[2], &el, &fl, &ed,
+                          &flat, &lab, &noRecoil, &joint,
+                          &m1.mode, &m1.Ed, &m1.b, &m1.c, &m2.mode, &m2.Ed, &m2.b, &m2.c))
+        return NULL;
+    if (buffers_in(objects, b, names, NIN) < 0) goto done;
+    if (buffer_out(outObject, &out, "out") < 0 || buffer_out(statusObject, &status, "status") < 0) goto done;
+    int ncomp = joint ? 3 : 1;
+    const double *energies = b[0].buf, *g = b[7].buf, *w = b[8].buf, *extra = b[9].buf;
+    const double *scales = b[10].buf, *rels = b[11].buf;
+    Py_ssize_t ne = NLEN(b[0]), nr = NLEN(b[9]);
+    table_set t = {b[1].buf, b[2].buf, b[3].buf, b[4].buf, b[5].buf, b[6].buf, 0, 0};
+    /* g, w: Gauss-Legendre of orders 8, 16, 32, 64 and 128 one after the other. */
+    if (table_set_check(&t, NLEN(b[3]), NLEN(b[1]), NLEN(b[4]), NLEN(b[5]), NLEN(b[6])) < 0 ||
+        NLEN(b[2]) != NLEN(b[1]) || NLEN(b[7]) != 248 || NLEN(b[8]) != 248 || NLEN(b[10]) < ncomp ||
+        NLEN(b[11]) < ncomp || NLEN(out) != ncomp * ne || NLEN(status) != ne) {
+        PyErr_SetString(PyExc_ValueError, "native heating: inconsistent emission batch buffers");
+        goto done;
+    }
+    if (joint ? parse_models(&m1, &m2) < 0
+              : (m1.mode < 0 || m1.mode > 2 || (m1.mode && !(m1.Ed > 0)))) {
+        if (!PyErr_Occurred()) PyErr_SetString(PyExc_ValueError, "native heating: invalid displacement model");
+        goto done;
+    }
+    if (!joint) displacement_prepare(&m1);
+    Py_ssize_t ncutsMax = t.longest + 2 * nr;
+    Py_ssize_t nterms = 3 * 256 * 64, nrow = 3 * 128;
+    work = malloc(sizeof(double) * (size_t)(ncutsMax + t.longest + nterms + nrow));
+    if (!work) { PyErr_NoMemory(); goto done; }
+    double *cuts = work, *mapped = work + ncutsMax, *terms = mapped + t.longest, *row = terms + nterms;
+    double *values = out.buf, *flags = status.buf;
+    Py_BEGIN_ALLOW_THREADS
+    for (Py_ssize_t e = 0; e < ne; ++e) {
+        double E = energies[e];
+        double *value = values + ncomp * e;
+        flags[e] = 0.;
+        Py_ssize_t j = table_below(E, t.energies, t.count), k = (j + 1 < t.count - 1) ? j + 1 : t.count - 1;
+        double f = 0.;
+        if (j != k && !flat)
+            f = np_minimum(np_maximum((E - t.energies[j]) / (t.energies[k] - t.energies[j]), 0.), 1.);
+        double low = (1 - f) * t.xs[table_first(&t, j)] + f * t.xs[table_first(&t, k)];
+        double width = (1 - f) * t.values[j] + f * t.values[k];
+        Py_ssize_t idx[2] = {j, k};
+        double weights[2] = {1 - f, f};
+        double previous[3];
+        int have = 0, done = 0, failed = 0;
+        for (int order = 8; order <= 64 && !failed; order *= 2) {
+            const double *gg = g + (order - 8), *gw = w + (order - 8);
+            const double *mu = g + (2 * order - 8), *wm = w + (2 * order - 8);
+            for (int c = 0; c < ncomp; ++c) value[c] = 0.;
+            for (int side = 0; side < 2; ++side) {
+                if (weights[side] == 0) continue;
+                Py_ssize_t first = table_first(&t, idx[side]), nx = table_length(&t, idx[side]);
+                const double *x = t.xs + first, *p = t.ps + first;
+                int hist = t.flags[idx[side]] != 0.;
+                double oldwidth = t.values[idx[side]];
+                if (nx < 2) { failed = 1; break; }
+                for (Py_ssize_t i = 0; i < nx; ++i) mapped[i] = low + (x[i] - x[0]) * width / oldwidth;
+                double incident = incidentFactor * E;
+                Py_ssize_t nk = 0;
+                for (Py_ssize_t i = 0; i < nx; ++i) cuts[nk++] = mapped[i];
+                for (Py_ssize_t i = 0; i < nr; ++i) {
+                    cuts[nk++] = crt_pow(sqrt(incident) + (-1.) * sqrt(denominator * extra[i]), 2.);
+                    cuts[nk++] = crt_pow(sqrt(incident) + 1. * sqrt(denominator * extra[i]), 2.);
+                }
+                nk = unique_sorted(cuts, nk);
+                Py_ssize_t kept = 0;
+                for (Py_ssize_t i = 0; i < nk; ++i)
+                    if (cuts[i] >= mapped[0] && cuts[i] <= mapped[nx - 1]) cuts[kept++] = cuts[i];
+                for (Py_ssize_t start = 0; start < kept - 1; start += 256) {
+                    Py_ssize_t stop = (start + 256 < kept - 1) ? start + 256 : kept - 1;
+                    double chunk[3];
+                    if (joint) {
+                        emission_sum3(cuts + start, stop - start + 1, gg, gw, order, mu, wm, 2 * order, x, p, nx,
+                                      low, width, oldwidth, incident, denominator, edD, el, fl, ed, hist, lab,
+                                      noRecoil, &m1, &m2, terms, row, chunk);
+                    } else {
+                        chunk[0] = emission_sum1(cuts + start, stop - start + 1, gg, gw, order, mu, wm, 2 * order,
+                                                 x, p, nx, low, width, oldwidth, incident, denominator,
+                                                 edDenominator, el, fl, ed, hist, lab, noRecoil, &m1, terms, row);
+                    }
+                    for (int c = 0; c < ncomp; ++c) value[c] = value[c] + weights[side] * chunk[c];
+                }
+            }
+            if (failed) break;
+            if (have && converged(value, previous, ncomp, .01, scales, rels)) { done = 1; break; }
+            for (int c = 0; c < ncomp; ++c) previous[c] = value[c];
+            have = 1;
+        }
+        if (!done) flags[e] = 1.;
+    }
+    Py_END_ALLOW_THREADS
+    result = Py_None;
+    Py_INCREF(result);
+ done:
+    free(work);
+    for (int k = 0; k < NIN; ++k) if (b[k].obj) PyBuffer_Release(&b[k]);
+    if (out.obj) PyBuffer_Release(&out);
+    if (status.obj) PyBuffer_Release(&status);
+    return result;
+}
+
+/* _unitBaseCMMean's at(E) at every energy, as twobody_batch. The tables are the
+ * spectrum's (pdf as stated); angle/slope its mean cosines (twice) or its Kalbach r and
+ * a; lows, widths and means its (xs[0], xs[-1] - xs[0], <E'>). nodes/weights: Gauss
+ * orders 4, 8, 16, 32 one after the other (only 4 without Kalbach). The centre of
+ * mass's energy is boostFactor*E for a neutron, halfMass*beta^2 for a photon. */
+static PyObject *unitbase_batch(PyObject *self, PyObject *args)
+{
+    enum { NIN = 13 };
+    PyObject *objects[NIN], *outObject, *statusObject;
+    Py_buffer b[NIN] = {{0}}, out = {0}, status = {0};
+    static const char *names[NIN] = {"energies", "xs", "ps", "starts", "flats", "angle", "slope", "tableEnergies",
+                                     "lows", "widths", "means", "nodes", "weights"};
+    double awp, A, boostFactor, halfMass, restMass;
+    int kalbach, photon;
+    double *work = NULL;
+    PyObject *result = NULL;
+    if (!PyArg_ParseTuple(args, "OOOOOOOOOOOOOOOdddddpp", &objects[0], &outObject, &statusObject,
+                          &objects[1], &objects[2], &objects[3], &objects[4], &objects[5], &objects[6],
+                          &objects[7], &objects[8], &objects[9], &objects[10], &objects[11], &objects[12],
+                          &awp, &A, &boostFactor, &halfMass, &restMass, &kalbach, &photon))
+        return NULL;
+    if (buffers_in(objects, b, names, NIN) < 0) goto done;
+    if (buffer_out(outObject, &out, "out") < 0 || buffer_out(statusObject, &status, "status") < 0) goto done;
+    const double *energies = b[0].buf, *angle = b[5].buf, *slope = b[6].buf;
+    const double *lows = b[8].buf, *widths = b[9].buf, *means = b[10].buf, *nodes = b[11].buf, *weights = b[12].buf;
+    Py_ssize_t ne = NLEN(b[0]);
+    table_set t = {b[1].buf, b[2].buf, b[3].buf, b[4].buf, b[9].buf, b[7].buf, 0, 0};
+    if (table_set_check(&t, NLEN(b[3]), NLEN(b[1]), NLEN(b[4]), NLEN(b[9]), NLEN(b[7])) < 0 ||
+        NLEN(b[2]) != NLEN(b[1]) || NLEN(b[5]) != NLEN(b[1]) || NLEN(b[6]) != NLEN(b[1]) ||
+        NLEN(b[8]) != t.count || NLEN(b[10]) != t.count || NLEN(b[11]) != (kalbach ? 60 : 4) ||
+        NLEN(b[12]) != NLEN(b[11]) || NLEN(out) != ne || NLEN(status) != ne) {
+        PyErr_SetString(PyExc_ValueError, "native heating: inconsistent unit-base batch buffers");
+        goto done;
+    }
+    work = malloc(sizeof(double) * (size_t)(t.longest * 33));
+    if (!work) { PyErr_NoMemory(); goto done; }
+    double *terms = work, *dnorm = work + t.longest * 32;
+    double *values = out.buf, *flags = status.buf;
+    Py_BEGIN_ALLOW_THREADS
+    for (Py_ssize_t e = 0; e < ne; ++e) {
+        double E = energies[e];
+        flags[e] = 0.;
+        Py_ssize_t j = table_below(E, t.energies, t.count), upper = (j + 1 < t.count - 1) ? j + 1 : t.count - 1;
+        double theta = (t.energies[upper] > t.energies[j])
+                           ? (E - t.energies[j]) / (t.energies[upper] - t.energies[j]) : 0.;
+        theta = np_minimum(np_maximum(theta, 0.), 1.);
+        Py_ssize_t idx[2] = {j, upper};
+        double w[2] = {1 - theta, theta};
+        /* sum(w*ranges[i][0] ...) from Python's int 0 */
+        double qa = 0. + w[0] * lows[j];
+        qa = qa + w[1] * lows[upper];
+        double qw = 0. + w[0] * widths[j];
+        qw = qw + w[1] * widths[upper];
+        double mean = 0., cross = 0.;
+        int failed = 0;
+        double Em = (0 > E) ? 0. : E;   /* max(E, 0) */
+        for (int side = 0; side < 2 && !failed; ++side) {
+            if (w[side] == 0) continue;
+            Py_ssize_t i = idx[side], first = table_first(&t, i), nx = table_length(&t, i);
+            double a = lows[i], width = widths[i];
+            const double *x = t.xs + first, *p = t.ps + first, *an = angle + first, *sl = slope + first;
+            int flat = t.flags[i] != 0.;
+            if (nx < 2) { failed = 1; break; }
+            double integral = 0., previous = 0.;
+            int have = 0, done = 0;
+            for (int order = 4; order <= 32; order *= 2) {
+                integral = unit_base_sum(x, p, an, sl, nx, nodes + (order - 4), weights + (order - 4), order, a,
+                                         width, qa, qw, flat, kalbach, terms, dnorm);
+                if (!kalbach) { done = 1; break; }
+                if (have) {
+                    double scale;
+                    if (photon) {
+                        double beta = Em / (Em + restMass);
+                        scale = 2 * sqrt(halfMass * beta * beta);
+                    } else {
+                        scale = 2 * sqrt(awp * Em) / (A + 1);
+                    }
+                    if (scale * fabs(integral - previous) <= .001 + 1e-8 * Em) { done = 1; break; }
+                }
+                previous = integral;
+                have = 1;
+            }
+            if (!done) { failed = 1; break; }
+            cross = cross + w[side] * integral;
+            mean = mean + w[side] * (qa + qw * (means[i] - a) / width);
+        }
+        if (failed) { flags[e] = 1.; values[e] = 0.; continue; }
+        double boost;
+        if (photon) {
+            double beta = E / (E + restMass);
+            boost = halfMass * beta * beta;
+        } else {
+            boost = boostFactor * E;
+        }
+        values[e] = mean + boost + 2 * sqrt(boost) * cross;
+    }
+    Py_END_ALLOW_THREADS
+    result = Py_None;
+    Py_INCREF(result);
+ done:
+    free(work);
+    for (int k = 0; k < NIN; ++k) if (b[k].obj) PyBuffer_Release(&b[k]);
+    if (out.obj) PyBuffer_Release(&out);
+    if (status.obj) PyBuffer_Release(&status);
+    return result;
+}
+
 static PyMethodDef methods[] = {
+    {"set_sum_buffer", set_sum_buffer, METH_VARARGS,
+     "How the kernels' whole-array sums go: 0 pairwise over the whole array, else per buffer of n (NumPy's way)."},
+    {"total", total, METH_VARARGS, "The kernels' whole-array sum of a with buffer n (0: none)."},
+    {"unitbase_batch", unitbase_batch, METH_VARARGS,
+     "_unitBaseCMMean's at(E) at many energies without the GIL, bit for bit the Python's."},
+    {"twobody_batch", twobody_batch, METH_VARARGS,
+     "_twoBodyDamage's at(E) at many energies without the GIL, bit for bit the Python's."},
+    {"emission_batch", emission_batch, METH_VARARGS,
+     "_tabulatedEmissionDamage's at(E) at many energies without the GIL, bit for bit the Python's."},
     {"unit_base_integral", unit_base_integral, METH_VARARGS,
      "One quadrature of the unit-base centre-of-mass cross moment, bit for bit the NumPy reference."},
     {"points_bin", points_bin, METH_VARARGS,
@@ -885,6 +1423,6 @@ PyMODINIT_FUNC PyInit__heating_native(void)
     crt_tanh = (cbrt_function)(void (*)(void))hyperbolic;
 #endif
     PyObject *mod = PyModule_Create(&module);
-    if (mod && PyModule_AddIntConstant(mod, "API_VERSION", 6) < 0) { Py_DECREF(mod); return NULL; }
+    if (mod && PyModule_AddIntConstant(mod, "API_VERSION", 8) < 0) { Py_DECREF(mod); return NULL; }
     return mod;
 }

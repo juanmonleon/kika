@@ -518,3 +518,28 @@ def test_a_heated_table_is_within_the_tolerance_it_states():
         x, y = x[inside], y[inside]
         error = np.abs(np.interp(x, *stated.cross_sections(T)[mt]) - y) / y
         assert np.all(error <= (stated.plan.thinning + reference) / thermalFactor(x)), mt
+
+
+@pytest.mark.parametrize("heating", [None, False])
+def test_the_files_carry_heating_unless_the_plan_says_no(heating, tmp_path, monkeypatch):
+    """``heating=None`` (the default) puts KERMA in the ACE table; ``False`` leaves it out
+    (heating numbers 0, said in ``omitted``) and does not compute it."""
+    from kika.ace import read_ace
+    import kika.processing.heating as H
+    if heating is False:
+        def refused(*args, **kwargs):
+            raise AssertionError("heatingOf ran under heating=False")
+        monkeypatch.setattr(H, "heatingOf", refused)
+    result = process_endf(TAPE, ProcessingPlan(temperatures=(293.6,), heating=heating, workers=2))
+    assert result.stage("heating").status == "skipped"
+    [table] = result.write_ace(tmp_path)
+    heat = np.asarray(read_ace(str(table)).esz_block.heating_numbers)
+    omitted = result.stages[-1].details["omitted"]
+    if heating is None:
+        assert np.any(heat > 0)
+        assert staged.NO_HEATING_ACE not in omitted
+    else:
+        assert not np.any(heat)
+        assert staged.NO_HEATING_ACE in omitted
+        result.write_hdf5(tmp_path / "fe56.h5")
+        assert staged.NO_HEATING_HDF5 in result.stages[-1].details["omitted"]

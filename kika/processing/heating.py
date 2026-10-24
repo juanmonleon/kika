@@ -91,7 +91,27 @@ HEATR_APPROXIMATIONS = (
 
 from kika._native import load as _load_native
 # The NumPy reference path stays the definition.
-_heating_native = _load_native("kika.processing._heating_native", 6)
+_heating_native = _load_native("kika.processing._heating_native", 8)
+
+
+def _numpySumBuffer() -> int:
+    """How this NumPy sums a whole contiguous array: 0 if pairwise over all of it (NumPy
+    2.5), else the buffer it goes by (8192 before), so the kernel sums as it does."""
+    rng = np.random.default_rng(20261024)
+    for _ in range(64):
+        a = rng.normal(size=40000) * 10.0 ** rng.uniform(-8, 8, 40000)
+        whole, buffered = _heating_native.total(a, 0), _heating_native.total(a, 8192)
+        if whole != buffered:
+            reference = float(np.sum(a))
+            if reference == whole:
+                return 0
+            if reference == buffered:
+                return 8192
+    return 0
+
+
+if _heating_native is not None:
+    _heating_native.set_sum_buffer(_numpySumBuffer())
 
 #: Threads for the independent incident energies of a damage quadrature: set by
 #: heatingOf from the processing's ``workers`` for the length of one call.
@@ -156,15 +176,48 @@ def displacementModels(Z: int, ed: float) -> Dict[str, DisplacementModel]:
 _DISPLACEMENTS = contextvars.ContextVar("kika_displacement_model", default=None)
 
 
+class _Batched:
+    """A damage quadrature's ``at(E)`` whose energies the native kernel computes many at a time.
+
+    ``compute(energies)`` gives ``at``'s value at each of them (the kernel's
+    ``*_batch``, which leaves its rare cases to ``at``). :meth:`fill` computes the
+    energies not known yet, in slices on the processing's threads, each slice one
+    call without the GIL; calling it gives the value it found, else ``at(E)``. The
+    values are ``at``'s bit for bit (``test_heating_native``), so the quadrature's
+    refinement takes the same nodes and gives the same result.
+    """
+
+    def __init__(self, at, compute):
+        self.at, self.compute, self.known = at, compute, {}
+
+    def __call__(self, E):
+        value = self.known.get(E)
+        return self.at(E) if value is None else value
+
+    def fill(self, energies):
+        missing = [E for E in dict.fromkeys(float(E) for E in energies) if E not in self.known]
+        if not missing:
+            return
+        threads = _energyThreads.get()
+        # A few slices per thread, so that a slice of slow energies does not hold the rest.
+        size = max(1, -(-len(missing) // (4 * threads))) if threads > 1 else len(missing)
+        slices = [missing[i:i + size] for i in range(0, len(missing), size)]
+        for part, values in zip(slices, _threadMap(self.compute, slices)):
+            self.known.update(zip(part, values))
+
+
 def _evaluateAll(at, energies) -> np.ndarray:
     """``[at(E) for E in energies]``, the distinct energies computed on threads.
 
     ``at`` is a pure, memoised function of one energy whose heavy part runs in
     the native kernel without the GIL, so the values are those of the
     sequential loop whatever thread computes them. An energy that fails raises
-    as it would there.
+    as it would there. A :class:`_Batched` ``at`` computes them in slices.
     """
     energies = [float(E) for E in energies]
+    if isinstance(at, _Batched):
+        at.fill(energies)
+        return np.array([at(E) for E in energies])
     distinct = list(dict.fromkeys(energies))
     threads = _energyThreads.get()
     if threads > 1 and len(distinct) > 1:
@@ -181,6 +234,9 @@ def _evaluateAll(at, energies) -> np.ndarray:
 def _evaluateAllRows(at, energies):
     """:func:`_evaluateAll` for an ``at`` that returns a row (a joint quadrature)."""
     energies = [float(E) for E in energies]
+    if isinstance(at, _Batched):
+        at.fill(energies)
+        return [at(E) for E in energies]
     distinct = list(dict.fromkeys(energies))
     threads = _energyThreads.get()
     if threads > 1 and len(distinct) > 1:
@@ -711,6 +767,7 @@ def _unitBaseCMMean(form, grid, k):
         if components:return mean,cross
         boost=k.boost(E)
         return mean+boost+2*np.sqrt(boost)*cross
+    batched=_unitBaseBatch(at,tables,parameters if kalbach else mus,energies,ranges,means,gauss,kalbach,k)
     lo=max(float(np.min(grid)),float(energies[0]));hi=min(float(np.max(grid)),float(energies[-1]))
     def held(query, first):
         source=float(np.nextafter(energies[0],-np.inf)) if first else float(energies[-1])
@@ -729,14 +786,17 @@ def _unitBaseCMMean(form, grid, k):
         nodes=np.unique(np.r_[a0,energies[(energies>a0)&(energies<b0)],b0])
         right=float(np.nextafter(b0,-np.inf)) if b0 in steps else float(b0)
         def value(E,right=right,b0=b0):
-            return at(right) if E==b0 else at(float(E))
+            return batched(right) if E==b0 else batched(float(E))
+        _evaluateAll(batched,[right if float(E)==b0 else float(E) for E in nodes])
         values=np.array([value(float(E)) for E in nodes])
         for iteration in range(30):
             additions=[]
+            _evaluateAll(batched,[float(a+(b-a)*fraction) for a,b in zip(nodes[:-1],nodes[1:]) if b!=a
+                                  for fraction in (.25,.5,.75)])
             for a,b,va,vb in zip(nodes[:-1],nodes[1:],values[:-1],values[1:]):
                 if b==a:continue
                 for fraction in (.25,.5,.75):
-                    E=a+(b-a)*fraction;v=at(float(E))
+                    E=a+(b-a)*fraction;v=batched(float(E))
                     if abs(v-(va+(vb-va)*fraction))>.1+1e-7*E:additions.append((E,v))
             if not additions:break
             if total+len(nodes)+len(additions)>20000:raise ValueError("unit-base mean refinement exceeds capacity")
@@ -1200,6 +1260,132 @@ def _emissionChunkJointNumpy(cuts,g,w,mu,wm,x,p,low,width,oldwidth,incident,deno
     return np.array([float(np.sum(factor*angular[c])) for c in range(3)])
 
 
+_ORDERS_TWO_BODY = (8, 16, 32, 64)
+_ORDERS_EMISSION = (8, 16, 32, 64, 128)
+
+
+def _gaussConcatenated(orders):
+    """The Gauss-Legendre nodes and weights of ``orders``, one order after the other."""
+    rules = [np.polynomial.legendre.leggauss(n) for n in orders]
+    return (np.ascontiguousarray(np.concatenate([r[0] for r in rules])),
+            np.ascontiguousarray(np.concatenate([r[1] for r in rules])))
+
+
+def _packedTables(tables):
+    """``(xs, ps, starts)``: the tables' points one table after the other."""
+    xs = np.ascontiguousarray(np.concatenate([np.asarray(t[0], dtype=float) for t in tables]))
+    ps = np.ascontiguousarray(np.concatenate([np.asarray(t[1], dtype=float) for t in tables]))
+    starts = np.cumsum([0] + [len(t[0]) for t in tables]).astype(float)
+    return xs, ps, starts
+
+
+def _packedModels(models):
+    """(mode, ed, b, c) twice for the batches: the joint models, else the active one."""
+    if models is not None:
+        return _jointPacked(models)
+    return _nativeModel() + (0, 0.0, 0.0, 1.0)
+
+
+def _twoBodyBatch(at, data, energies, flat, A, cutoff, threshold, edLast, rcuts, partition, ed,
+                  scales, rels, models=None):
+    """:func:`_twoBodyDamage`'s ``at`` (joint: :func:`_twoBodyDamageJoint`'s) as a
+    :class:`_Batched` over the native ``twobody_batch``; ``at`` itself without the kernel.
+    The arguments are those ``at`` closes over, its constants formed as it forms them."""
+    if _heating_native is None:
+        return at
+    xs, ps, starts = _packedTables(data)
+    hists = np.array([float(bool(d[2])) for d in data])
+    norms = np.array([float(d[3]) for d in data])
+    u, w = _gaussConcatenated(_ORDERS_TWO_BODY)
+    el, fl = (float(c) for c in _lindhardConstants(*partition))
+    joint = models is not None
+    constants = (float(A), float((A + 1) ** 2), float(cutoff), float(threshold), float(edLast), el, fl,
+                 float(ed), bool(flat), joint) + _packedModels(models)
+    vectors = (xs, ps, starts, hists, norms, np.ascontiguousarray(energies, dtype=float), u, w,
+               np.ascontiguousarray(rcuts, dtype=float), np.ascontiguousarray(scales, dtype=float),
+               np.ascontiguousarray(rels, dtype=float))
+
+    def compute(points):
+        points = np.ascontiguousarray(points, dtype=float)
+        out = np.empty(len(points) * (3 if joint else 1))
+        status = np.empty(len(points))
+        _heating_native.twobody_batch(points, out, status, *vectors, *constants)
+        values = [np.array(row) for row in out.reshape(-1, 3)] if joint else out.tolist()
+        for i in np.flatnonzero(status):
+            values[i] = at(float(points[i]))
+        return values
+    return _Batched(at, compute)
+
+
+def _emissionBatch(at, prepared, energies, flat, incidentFactor, denominator, extra, partition, ed,
+                   edDenominators, lab, scales, rels, models=None):
+    """:func:`_tabulatedEmissionDamage`'s ``at`` (joint: its joint form's) as a
+    :class:`_Batched` over the native ``emission_batch``; ``at`` itself without the
+    kernel. ``extra`` are the recoil energies whose outgoing-energy cuts ``at`` adds;
+    ``edDenominators`` the chunk's ``denominator*ed`` (one) or its three thresholds'."""
+    if _heating_native is None:
+        return at
+    xs, ps, starts = _packedTables(prepared)
+    hists = np.array([float(bool(t[2])) for t in prepared])
+    widths = np.array([float(t[3]) for t in prepared])
+    g, w = _gaussConcatenated(_ORDERS_EMISSION)
+    noRecoil = partition[0] == 0
+    el, fl = (1., 1.) if noRecoil else (float(c) for c in _lindhardConstants(*partition))
+    joint = models is not None
+    three = (list(edDenominators) + [0.0] * 3)[:3]
+    constants = (float(incidentFactor), float(denominator), float(edDenominators[0]),
+                 *(float(v) for v in three), el, fl, float(ed), bool(flat), bool(lab), bool(noRecoil),
+                 joint) + _packedModels(models)
+    vectors = (xs, ps, starts, hists, widths, np.ascontiguousarray(energies, dtype=float), g, w,
+               np.ascontiguousarray(extra, dtype=float), np.ascontiguousarray(scales, dtype=float),
+               np.ascontiguousarray(rels, dtype=float))
+
+    def compute(points):
+        points = np.ascontiguousarray(points, dtype=float)
+        out = np.empty(len(points) * (3 if joint else 1))
+        status = np.empty(len(points))
+        _heating_native.emission_batch(points, out, status, *vectors, *constants)
+        values = [np.array(row) for row in out.reshape(-1, 3)] if joint else out.tolist()
+        for i in np.flatnonzero(status):
+            values[i] = at(float(points[i]))
+        return values
+    return _Batched(at, compute)
+
+
+def _unitBaseBatch(at, tables, angular, energies, ranges, means, gauss, kalbach, k):
+    """:func:`_unitBaseCMMean`'s ``at`` as a :class:`_Batched` over the native
+    ``unitbase_batch``; ``at`` itself without the kernel. ``angular`` is each table's
+    mean cosines, or its Kalbach ``(r, a)``."""
+    if _heating_native is None:
+        return at
+    data = [(np.asarray(t.xs, dtype=float), np.asarray(t.pdf, dtype=float)) for t in tables]
+    xs, ps, starts = _packedTables(data)
+    flats = np.array([float(bool(_isFlat(t))) for t in tables])
+    pairs = [a if kalbach else (a, a) for a in angular]
+    angle = np.ascontiguousarray(np.concatenate([np.asarray(r, dtype=float) for r, _ in pairs]))
+    slope = np.ascontiguousarray(np.concatenate([np.asarray(s, dtype=float) for _, s in pairs]))
+    rules = [gauss[n] for n in ((4, 8, 16, 32) if kalbach else (4,))]
+    nodes = np.ascontiguousarray(np.concatenate([r[0] for r in rules]))
+    weights = np.ascontiguousarray(np.concatenate([r[1] for r in rules]))
+    vectors = (xs, ps, starts, flats, angle, slope, np.ascontiguousarray(energies, dtype=float),
+               np.array([float(a) for a, _ in ranges]), np.array([float(w) for _, w in ranges]),
+               np.array([float(m_) for m_ in means]), nodes, weights)
+    constants = (float(k.awp), float(k.A), float(k.awp / (k.A + 1.0) ** 2),
+                 float(0.5 * k.awp * NEUTRON_REST_ENERGY), float(k.A * NEUTRON_REST_ENERGY),
+                 bool(kalbach), bool(k.photon))
+
+    def compute(points):
+        points = np.ascontiguousarray(points, dtype=float)
+        out = np.empty(len(points))
+        status = np.empty(len(points))
+        _heating_native.unitbase_batch(points, out, status, *vectors, *constants)
+        values = out.tolist()
+        for i in np.flatnonzero(status):
+            values[i] = at(float(points[i]))
+        return values
+    return _Batched(at, compute)
+
+
 def _twoBodyDamage(form,grid,A,Q,Z,ed,elastic):
  """Two-body recoil damage on normalized angular panels.
 
@@ -1257,6 +1443,8 @@ def _twoBodyDamage(form,grid,A,Q,Z,ed,elastic):
    else:raise ValueError('two-body damage angular quadrature did not converge')
    value+=weight*integral
   return value
+ at=_twoBodyBatch(at,data if not isotropic else [(np.array([-1.,1.]),np.array([.5,.5]),False,1.)],energies,flat,A,
+                  cutoff,threshold,ed,np.r_[max(ed,1e-12)*10.**np.arange(13),kink],(Z,A,Z,A),ed,[scale],[rt8])
  lo,hi=float(grid.min()),float(grid.max())
  if hi==lo:return np.full(len(grid),at(lo))
  nodes=np.unique(np.r_[lo,hi,energies[(energies>lo)&(energies<hi)],_geometric(lo,hi,step=2.),cutoff,threshold]);nodes=nodes[(nodes>=lo)&(nodes<=hi)]
@@ -1333,12 +1521,15 @@ def _twoBodyDamageJoint(form,grid,A,Q,Z,ed,elastic,models):
    else:raise ValueError('two-body damage angular quadrature did not converge')
    value=value+weight*integral
   return value
+ at=_twoBodyBatch(at,data if not isotropic else [(np.array([-1.,1.]),np.array([.5,.5]),False,1.)],energies,flat,A,
+                  cutoff,threshold,edLow,np.r_[max(edLow,1e-12)*10.**np.arange(13),thresholds,kinks],partition,ed,
+                  scales,rel8,models)
  lo,hi=float(grid.min()),float(grid.max())
  if hi==lo:return np.tile(at(lo),(len(grid),1))
  nodes=np.unique(np.r_[lo,hi,energies[(energies>lo)&(energies<hi)],_geometric(lo,hi,step=2.),cutoff,threshold]);nodes=nodes[(nodes>=lo)&(nodes<=hi)]
  for edge in (cutoff,threshold):
   if lo<edge<=hi:nodes=np.unique(np.r_[nodes,np.nextafter(edge,-np.inf)])
- values=np.array([at(float(e)) for e in nodes]) if _energyThreads.get()<=1 else np.array(_evaluateAllRows(at,nodes))
+ values=np.array(_evaluateAllRows(at,nodes))
  for _ in range(30):
   additions={}
   _evaluateAllRows(at,[float(a+(b-a)*fraction) for a,b in zip(nodes[:-1],nodes[1:]) for fraction in (.25,.5,.75)])
@@ -1486,6 +1677,8 @@ def _tabulatedEmissionDamage(spectrum,grid,A,Z,ed,*,particle=None):
             if previous is not None and abs(value-previous)<=.01*scale+rt5*abs(value):return value
             previous=value
         raise ValueError('tabulated recoil damage quadrature did not converge')
+    at=_emissionBatch(at,prepared,energies,flat,incidentFactor,denominator,[ed,*kink],(recoilZ,recoilA,Z,A),ed,
+                      [denominator*ed],lab,[scale],[rt5])
     lo=float(grid.min());hi=float(grid.max())
     if lo==hi:return np.full(len(grid),at(lo))
     nodes=np.unique(np.r_[lo,hi,energies[(energies>lo)&(energies<hi)],_geometric(lo,hi,step=4.)]);nodes=nodes[(nodes>=lo)&(nodes<=hi)]
@@ -1559,6 +1752,9 @@ def _tabulatedEmissionDamageJoint(spectrum,grid,A,Z,ed,particle,models):
             if previous is not None and np.all(np.abs(value-previous)<=.01*scales+rel5*np.abs(value)):return value
             previous=value
         raise ValueError('tabulated recoil damage quadrature did not converge')
+    padded=(list(thresholds)+[thresholds[-1]]*3)[:3]
+    at=_emissionBatch(at,prepared,energies,flat,incidentFactor,denominator,[*thresholds,*kinks],partition,ed,
+                      [denominator*r for r in padded],lab,scales,rel5,models)
     lo=float(grid.min());hi=float(grid.max())
     if lo==hi:return np.tile(at(lo),(len(grid),1))
     nodes=np.unique(np.r_[lo,hi,energies[(energies>lo)&(energies<hi)],_geometric(lo,hi,step=4.)]);nodes=nodes[(nodes>=lo)&(nodes<=hi)]

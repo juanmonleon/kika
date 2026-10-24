@@ -143,13 +143,27 @@ _DOPPLER_GROUPS = {
 }
 
 
+#: What a file written under ``heating=False`` leaves out (its write stage's ``omitted``).
+NO_HEATING_ACE = ("KERMA and damage (the plan asked for no heating): ESZ's heating numbers are 0 and "
+                  "there is no MT444, so a heating tally reads zero")
+NO_HEATING_HDF5 = ("KERMA and damage (the plan asked for no heating): no MT301, MT444 or MT901, "
+                   "so a heating tally has nothing to read")
+
+
 @dataclass(frozen=True)
 class ProcessingPlan:
     """What :func:`process_endf` does. The defaults are what a user who touches
     nothing should get: the reconstruction as ``reconstruct_endf`` runs it, room
     temperature, broadening to where NJOY BROADR stops, URR tables, no heating
-    (``heating=True`` adds HEATR's MT301 and MT444 at every temperature, 0 K
-    included; it tabulates the product distributions, which is slow).
+    stage, and the KERMA and damage the ACE and HDF5 files carry.
+
+    ``heating`` says where the KERMA (MT301) and damage (MT444) go. ``None``
+    (the default): only into the ACE and HDF5 files, computed when they are
+    written, as a library made with HEATR carries them. ``True``: the heating
+    stage too, HEATR's MT301 and MT444 at every temperature, 0 K included, in
+    the PENDF. ``False``: nowhere; an ACE table's heating numbers are then 0
+    (as ACER writes them without HEATR) and the HDF5 file has no MT301, MT444 or
+    MT901, which a heating tally needs. Each file's ``omitted`` says so.
 
     ``temperatures`` are kelvin, > 0; 0 K is the reconstruction and is always
     there, so ``()`` stops after it. They are the temperatures of both the
@@ -178,7 +192,7 @@ class ProcessingPlan:
     urr: bool = True
     urr_bins: int = 20
     urr_ladders: int = 4096
-    heating: bool = False
+    heating: bool | None = None
     workers: int | None = None
 
     def __post_init__(self):
@@ -669,6 +683,9 @@ class EndfProcessing:
         work = self._full_suite(progress, category=category)
         resonances = work.resonances
         omit = ("urr",) if resonances is not None and resonances.unresolved is not None and not self._urr else ()
+        if self.plan.heating is False:
+            # Asked for no heating: the files go without it (the slowest part of writing them).
+            omit += ("kerma", "damage")
         report = ConversionReport()
         try:
             suite = processSuite(
@@ -777,6 +794,8 @@ class EndfProcessing:
             processed, _, omit = self._processed_suite(progress, category="hdf5-failed")
             if "urr" in omit:
                 omitted.append("URR probability tables (the URR stage did not produce them)")
+            if "kerma" in omit:
+                omitted.append(NO_HEATING_HDF5)
             try:
                 writeSuite(_neutrons_and_photons(processed), path.parent, temperatures=temps,
                            fileName=path.name, index=index)
@@ -851,6 +870,8 @@ class EndfProcessing:
             processed, processing_report, omit = self._processed_suite(progress, category="ace-failed")
             if "urr" in omit:
                 omitted.append("URR probability tables (the URR stage did not produce them)")
+            if "kerma" in omit:
+                omitted.append(NO_HEATING_ACE)
             report = ConversionReport()
             directory.mkdir(parents=True, exist_ok=True)
             for i, T in enumerate(temps):

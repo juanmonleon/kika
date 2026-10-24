@@ -114,9 +114,13 @@ What the plan controls:
   least 64 ladders per energy and more, up to `urr_ladders` = 4096, until the table's
   statistical error is $5\cdot10^{-3}$), computed at the same temperatures.
 - `broaden=False`: no broadening; the temperatures then serve the URR tables only.
-- `heating=True`: MT 301 (KERMA) and MT 444 (damage) at every temperature, 0 K included,
-  and the displacement cross-sections. It tabulates the secondary distributions of the
-  whole tape, and is the slow stage.
+- `heating`: where KERMA (MT 301) and damage (MT 444) go. Not given, the ACE and HDF5
+  files carry them, computed as they are written. `True` adds the heating stage: MT 301
+  and MT 444 at every temperature, 0 K included, in the PENDF, and the displacement
+  cross-sections; it tabulates the secondary distributions of the whole tape, and is the
+  slow stage. `False` leaves them out everywhere: the ACE and HDF5 files are then much
+  faster to write, an ACE table's heating numbers are 0 and a heating tally reads zero;
+  the write stage's `omitted` says so.
 - `reconstruction`: the {py:class}`~kika.processing.resonances.ReconstructionOptions` of the 0 K
   stage.
 

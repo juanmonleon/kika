@@ -297,8 +297,8 @@ def build_generic(proc) -> dict:
 
 #: Data checks already run, by (path, size, mtime): a report is often built twice.
 _EVALUATION_CHECKS = {}
-#: Findings listed under the check; the rest are counted.
-_EVALUATION_ITEMS = 12
+#: Findings listed under the check (defects, then warnings, then notes); the rest are counted.
+_EVALUATION_ITEMS = 60
 
 
 def _evaluation_check(path):
@@ -325,13 +325,15 @@ def _evaluation_check(path):
         tally = ", ".join(p for p in parts if p)
         result = (f"The data checks found {tally} in the evaluation." if tally
                   else "The data checks found nothing in the evaluation.")
-        worst = [f for f in report if f.level in (DEFECT, C_WARN)]
-        worst.sort(key=lambda f: (f.level != DEFECT, f.location.mf or 0, f.location.mt or 0))
+        # Every finding the tally counts is listed, so a reader can see what each one is.
+        order = {DEFECT: 0, C_WARN: 1, C_NOTE: 2}
+        worst = [f for f in report if f.level in order]
+        worst.sort(key=lambda f: (order[f.level], f.location.mf or 0, f.location.mt or 0))
+        word = {DEFECT: "Defect", C_WARN: "Warning", C_NOTE: "Note"}
         items = []
         for f in worst[:_EVALUATION_ITEMS]:
             d = described(f.check)
-            items.append(f"{'Defect' if f.level == DEFECT else 'Warning'}, {d.title if d else f.check} "
-                         f"({f.location}): {f.summary}")
+            items.append(f"{word[f.level]}, {d.title if d else f.check} ({f.location}): {f.summary}")
         if len(worst) > _EVALUATION_ITEMS:
             items.append(f"... and {len(worst) - _EVALUATION_ITEMS} more; kika.check gives them all.")
         _EVALUATION_CHECKS[key] = (status, result, items)
@@ -856,15 +858,25 @@ def _legend(d):
 
 # --------------------------------------------------------------------------- text
 
+def _glance(d):
+    """``(rows, total)``: each stage with what it did and how long it took, and the run's total."""
+    rows = [(st["title"], _stage_status(st), st.get("summary") or "", st.get("seconds")) for st in d["stages"]]
+    total = sum(s for *_, s in rows if s)
+    return rows, total
+
+
+def _seconds(s):
+    if not s:
+        return "-"
+    return f"{s:.1f} s" if s < 60 else f"{int(s // 60)} min {s % 60:.0f} s"
+
+
 def _render_text(d, width=100):
     out, s, rd = [], d["summary"], d["reconstruction"]
     bar = "=" * width
     out += [bar, f" kika processing report  -  {_title(d)}", bar, "",
             f" {_TEXT_MARK[s['status']] if not s['incomplete'] else _TEXT_MARK[FAIL]} {s['headline'].upper()}"]
     out += _wrap(s["detail"], width, "   ")
-    out.append("")
-    out += _wrap("   ".join(f"{_TEXT_MARK[_stage_status(st)]} {_stage_short(st)}" for st in d["stages"]),
-                 width, "   ")
 
     def section(title):
         out.extend(["", f" {title.upper()}", " " + "-" * len(title)])
@@ -877,6 +889,12 @@ def _render_text(d, width=100):
         widths = [max(len(r[i]) for r in cells) for i in range(len(head))]
         fmt = lambda r: "   " + "  ".join(c.ljust(w) for c, w in zip(r, widths)).rstrip()
         out.extend([fmt(cells[0]), "   " + "  ".join("-" * w for w in widths)] + [fmt(r) for r in cells[1:]])
+
+    section("At a glance")
+    glance, total = _glance(d)
+    table(("", "Stage", "Time", "What was done"),
+          [(_TEXT_MARK[status], title, _seconds(sec), summary) for title, status, summary, sec in glance]
+          + [("", "Total", _seconds(total), "")])
 
     section("Checks")
     for st in d["stages"]:
@@ -966,6 +984,8 @@ text-transform:uppercase;letter-spacing:.04em}
 .kika-report table.checks tr.grp td span{font-weight:400;text-transform:none;letter-spacing:0;margin-left:8px}
 .kika-report .choices dt{font-weight:700;margin-top:10px}.kika-report .choices dd{margin:2px 0 0}
 .kika-report .choices dd.why{color:var(--muted);font-size:14px}
+.kika-report table.glance{margin:10px 0 4px}.kika-report table.glance td.nw{white-space:nowrap}
+.kika-report table.glance tr.total td{font-weight:700;border-top:2px solid var(--line)}
 """
 
 
@@ -983,10 +1003,14 @@ def _render_html(d, fragment=False):
            f'kika {_e(d["software"]["kika_version"])} · '
            f'{_e(d["generated_utc"].replace("T", " ").replace("+00:00", " UTC"))}</p>',
            f'<div class="verdict {css_class}"><span class="mark">{_MARK[status]}</span>'
-           f'<div><p class="big">{_e(s["headline"])}</p><p>{_e(s["detail"])}</p></div></div>',
-           '<div class="strip">' + "".join(
-               f'<span class="badge {_CLASS[_stage_status(st)]}"><span class="mark">{_MARK[_stage_status(st)]}'
-               f'</span>{_e(_stage_short(st))}</span>' for st in d["stages"]) + "</div>"]
+           f'<div><p class="big">{_e(s["headline"])}</p><p>{_e(s["detail"])}</p></div></div>']
+    glance, total = _glance(d)
+    out.append('<div class="wrap"><table class="glance"><thead><tr><th>Stage</th><th>What was done</th>'
+               '<th class="num">Time</th></tr></thead><tbody>'
+               + "".join(f'<tr><td class="nw">{_badge(status)} {_e(title)}</td><td>{_e(summary)}</td>'
+                         f'<td class="num nw">{_e(_seconds(sec))}</td></tr>' for title, status, summary, sec in glance)
+               + f'<tr class="total"><td colspan="2">Total</td><td class="num nw">{_e(_seconds(total))}</td></tr>'
+               + "</tbody></table></div>")
     flagged = [c for c in d["checks"] if c["items"]]
     toc = [("checks", "Checks")] + ([("findings", "Findings")] if flagged else []) + [
         ("files", "Files"), ("choices", "Choices made for you"), ("done", "What was done"),
@@ -1004,8 +1028,11 @@ def _render_html(d, fragment=False):
             rows.append(f'<tr><td>{_badge(SKIP if st["status"] != "done" else PASS)}</td>'
                         f'<td colspan="2" class="muted">{_e(st["summary"])}</td></tr>')
         for c in st["checks"]:
+            # A check with cases links to them: the count alone says nothing about which.
+            cases = (f' <a href="#kp-find-{c["id"]}">{len(c["items"])} case{"s" if len(c["items"]) != 1 else ""} '
+                     f'&rarr;</a>' if c["items"] else "")
             rows.append(f'<tr><td>{_badge(c["status"])}</td><td><a class="ttl" href="#kp-check-{c["id"]}">'
-                        f'{_e(c["title"])}</a></td><td>{_e(c["result"])}</td></tr>')
+                        f'{_e(c["title"])}</a></td><td>{_e(c["result"])}{cases}</td></tr>')
     out.append('<div class="wrap"><table class="checks"><thead><tr><th>Status</th><th>Check</th><th>Result</th>'
                "</tr></thead><tbody>" + "".join(rows) + "</tbody></table></div>")
 
@@ -1013,7 +1040,7 @@ def _render_html(d, fragment=False):
         out.append('<h2 id="kp-findings">Findings</h2>')
         out.append('<p class="lead">The cases behind each note, warning or failure, and what they mean.</p>')
         for c in flagged:
-            out.append(f'<div class="group"><div class="ghead">{_badge(c["status"])}<span class="ttl">'
+            out.append(f'<div class="group" id="kp-find-{c["id"]}"><div class="ghead">{_badge(c["status"])}<span class="ttl">'
                        f'{_e(c["title"])}</span><span class="muted">{len(c["items"])} case(s)</span></div>')
             meaning = (_CHECK.get(c["id"]) or _RECON_CHECK[c["id"]]).levels.get(c["status"])
             if meaning:

@@ -106,3 +106,33 @@ def test_the_command_processes_and_reports(tmp_path, capsys):
     (folder / "notes.txt").write_text("nothing to process here\n")
     assert main(["process", str(folder), "-o", str(tmp_path / "out")]) == 0
     assert "skip" in capsys.readouterr().out
+
+
+def test_thermal_ace_tables_get_their_xsdir_lines(tmp_path, monkeypatch):
+    """Each thermal table written by the front door is named in the folder's
+    xsdir (as ACER's tables are), and a second write refuses to shadow it."""
+    from kika._process import ThermalProcessing
+    from kika.endf.process import ProcessingOutputError
+    from kika.tsl import ace_writer
+    from kika.tsl.ace import read_ace_thermal_header
+    from kika.tsl.tests.test_ace_thermal_writer import _block
+
+    def fake_write(suite, path, temperature, *, extension):
+        suffix = extension if extension.startswith(".") else "." + extension
+        return ace_writer.write_ace_thermal(_block(None), path, zaid=f"hh2o{suffix}", awr=0.999167,
+                                            izaw=[1001], kt=temperature * 8.617333262e-11, nieb=64)
+
+    monkeypatch.setattr(ace_writer, "write_thermal_suite", fake_write)
+    run = ThermalProcessing(tmp_path / "tsl-HinH2O.endf", "c_H_in_H2O")
+    run.suite, run.temperatures = object(), (293.6, 600.0)
+    paths = run.write(tmp_path / "out", "ace")
+    lines = (tmp_path / "out" / "xsdir").read_text().splitlines()
+    assert [line.split()[0] for line in lines] == ["hh2o.02t", "hh2o.06t"]
+    for line, path in zip(lines, paths):
+        fields = line.split()
+        assert fields[2] == path.name and int(fields[6]) == read_ace_thermal_header(path).nxs[1]
+    with pytest.raises(ProcessingOutputError) as refused:
+        run.write(tmp_path / "out", "ace")
+    assert refused.value.category == "ace-table-exists"
+    run.write(tmp_path / "out", "ace", replace=True)
+    assert len((tmp_path / "out" / "xsdir").read_text().splitlines()) == 2
