@@ -180,6 +180,24 @@ def test_library_walk_and_pages(tmp_path):
     assert all(t.has_covariances for t in lib.tapes)    # every tape had data to check
 
 
+@pytest.mark.parametrize("name", ["micro_be9_mf6", "micro_t_li7_mf6", "micro_ti50_mf6",
+                                  "micro_n14_photons", "micro_pt190_photons"])
+def test_mf6_and_photon_spectra_integrate_on_any_numpy(name):
+    # These reach the integrals of MF6 continua and photon spectra; they called
+    # np.trapz, gone from NumPy 2.4, and the desktop app pins 2.5.
+    report = check_data(DATA.parent / f"{name}.endf")
+    assert isinstance(report, CheckReport)
+
+
+def test_library_mapping_checks_each_tape_for_its_own_files():
+    th, fe = DATA / "micro_th231_b81_nubar.endf", DATA.parent / "micro_fe56_jendl_covcheck.endf"
+    lib = check_library({th: [1], fe: None}, mf=[33], progress=False, workers=1)
+    assert [t.path for t in lib.tapes] == [th, fe] and lib.kind == "evaluation"
+    assert {f.location.mf for f in lib.tapes[0].report} == {1}
+    assert lib.tapes[0].report.by_check("nubar_sum")
+    assert {f.location.mf for f in lib.tapes[1].report} == {33}
+
+
 def test_kika_check_front_door(tmp_path):
     import kika
 

@@ -27,6 +27,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 import numpy as np
+from scipy.integrate import trapezoid
 
 from ..findings import DEFECT, NOTE, WARN
 from .context import Out, Table, Tape, fmt_e
@@ -292,11 +293,11 @@ def _mf15_mean(tape: Tape, e: float) -> Optional[float]:
             continue
         dist = min(spec.distributions, key=lambda d: abs(float(d.c2) - e))
         x, y = np.asarray(dist.x, float), np.asarray(dist.y, float)
-        norm = np.trapz(y, x)
+        norm = trapezoid(y, x)
         if norm <= 0:
             continue
         w = Table.of(spec.weight.x, spec.weight.y, spec.weight.interp)
-        means.append(float(np.trapz(x * y, x) / norm))
+        means.append(float(trapezoid(x * y, x) / norm))
         weights.append(float(w(np.array([e]))[0]) if w.x.size else 1.0)
     if not means:
         return None

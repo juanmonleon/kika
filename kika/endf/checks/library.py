@@ -533,11 +533,11 @@ def _covariance_task(path: Path, *, per_tape, default) -> Dict[str, Any]:
                 check_seconds=time.perf_counter() - t1)
 
 
-def _evaluation_task(path: Path, *, what, mf, deep) -> Dict[str, Any]:
+def _evaluation_task(path: Path, *, what, mf, deep, per_tape=None) -> Dict[str, Any]:
     """The data and/or covariance checks of one tape, as the fields of its :class:`TapeCheck`."""
     from .evaluation import check_evaluation_file
 
-    result = check_evaluation_file(path, what=what, mf=mf, deep=deep)
+    result = check_evaluation_file(path, what=what, mf=(per_tape or {}).get(path, mf), deep=deep)
     return dict(report=result.report, error=result.error, has_covariances=result.has_anything,
                 read_seconds=result.read_seconds, check_seconds=result.check_seconds, mf=result.mf)
 
@@ -649,7 +649,7 @@ def _walk(source, patterns, recursive, task, kind, progress, on_tape, should_sto
 
 
 def check_library(
-    source: Union[str, Path, Iterable[Union[str, Path]]],
+    source: Union[str, Path, Iterable[Union[str, Path]], Mapping[Union[str, Path], Optional[Sequence[int]]]],
     *,
     what: Sequence[str] = ("data", "covariances"),
     mf: Optional[Sequence[int]] = None,
@@ -668,7 +668,9 @@ def check_library(
     *what* and *mf* are those of :func:`~kika.endf.checks.evaluation.check_evaluation`:
     ``("data",)`` for the data checks only, ``("covariances",)`` for the
     covariance checks only, both by default; *mf* narrows either to some files
-    (``mf=[3]`` checks MF3 and only what MF3 is checked against). The other
+    (``mf=[3]`` checks MF3 and only what MF3 is checked against). *source* may
+    also be ``{tape: mf}``, each tape checked for its own files (a ``None``
+    value takes *mf*), as :func:`check_covariance_library` takes it. The other
     parameters are those of :func:`check_covariance_library`. The report's
     ``kind`` is ``"data"``, ``"covariance"`` or ``"evaluation"`` after *what*.
     """
@@ -677,13 +679,18 @@ def check_library(
     what = normalise_what(what)
     kind = kind_of(what)
     given_root = None
-    if not isinstance(source, Mapping):
+    per_tape: Dict[Path, Tuple[int, ...]] = {}
+    if isinstance(source, Mapping):
+        for p, asked in source.items():
+            if asked is not None:
+                per_tape[Path(p)] = tuple(sorted({int(m) for m in asked}))
+    else:
         # A library folder also holds what is not a tape (LEAPR inputs beside
         # the TSL files, READMEs named .txt): left out, not counted as failures.
         given_root, found = _tapes(source, patterns, recursive)
         source = [p for p in found if _looks_like_endf(p)]
 
-    task = functools.partial(_evaluation_task, what=what, mf=mf, deep=deep)
+    task = functools.partial(_evaluation_task, what=what, mf=mf, deep=deep, per_tape=per_tape)
     tapes, root, stopped, planned = _walk(source, patterns, recursive, task, kind,
                                           progress, on_tape, should_stop, on_result, workers)
     return LibraryReport(tapes, directory=given_root or root, library=library, stopped=stopped,

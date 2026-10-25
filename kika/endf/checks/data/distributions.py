@@ -35,6 +35,7 @@ from collections import OrderedDict
 from typing import List, Optional, Tuple
 
 import numpy as np
+from scipy.integrate import trapezoid
 
 from ..findings import DEFECT, NOTE, WARN, Finding
 from .context import Out, Table, Tape, fmt_e
@@ -215,7 +216,7 @@ def _integral(t: Table) -> float:
     try:
         return float(integral(t.x, t.y, laws))
     except ValueError:
-        return float(np.trapz(t.y, t.x))
+        return float(trapezoid(t.y, t.x))
 
 
 def _norm(nodes: Out, mf: int, mt: int, what: str, e: float, s: float, **where) -> None:
@@ -484,7 +485,7 @@ def _law(tape, out, mt, k, zap, body, q, lab, awr, awi) -> None:
                             mf=6, mt=mt, k=k, zap=zap, at=e, value=float(f0.min()))
             s_cont = 0.0
             if cx.size > 1:
-                s_cont = float(np.sum(cf[:-1] * np.diff(cx))) if body.lep == 1 else float(np.trapz(cf, cx))
+                s_cont = float(np.sum(cf[:-1] * np.diff(cx))) if body.lep == 1 else float(trapezoid(cf, cx))
             if x.size:
                 _norm(scratch, 6, mt, what, e, float(disc_f.sum()) + s_cont, k=k, zap=zap)
             if body.lang == 2 and block.shape[1] >= 3:
@@ -563,7 +564,7 @@ def _law(tape, out, mt, k, zap, body, q, lab, awr, awi) -> None:
                 dens.append(_integral(t) if t.x.size > 1 else 0.0)
                 top = max(top, _support_top(t.x, t.y))
             if dens and mus.size > 1:
-                _norm(scratch, 6, mt, what, e, float(np.trapz(dens, mus)), k=k, zap=zap)
+                _norm(scratch, 6, mt, what, e, float(trapezoid(dens, mus)), k=k, zap=zap)
             if q is not None and top[0]:
                 _kinematic(scratch, 6, mt, what, e, top, q, True, awr, awi, tape=tape, k=k, zap=zap)
         nodes.flush()
