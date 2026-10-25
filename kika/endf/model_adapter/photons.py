@@ -542,9 +542,9 @@ def _attach(suite, host: _Host, sections, mt, report) -> Optional[str]:
             # and distribution are MF12/14/15's, and MF6's subsection stays in
             # MF6's provenance, which is what writes it back.
             report.warn(
-                f"MT{mt}: MF6 already gave this reaction a photon ({existing.label!r}, "
-                f"LAW=0) and MF12 describes it; the multiplicity and the "
-                f"distribution are MF12's, MF14's and MF15's")
+                f"MT{mt}: both MF6 (LAW=0, no distribution) and MF12 state this "
+                f"reaction's photons; they are one photon, whose number is MF12's "
+                f"and whose distribution is MF14's and MF15's")
             product = existing
         else:
             label = _uniqueLabel("photon", taken)
@@ -880,6 +880,9 @@ def encodePhotonSections(suite, mat: Optional[int] = None,
 #: ENDF writes both from the same evaluated level scheme, so they normally agree
 #: to the last digit; this only absorbs the 6-7 significant figures of the format.
 _LEVEL_TOLERANCE = 1e-5
+#: What an 11-column ENDF float rounds a value by, relative (7 digits, with
+#: one to spare): the slack allowed between MF12's ES and MF3's QM - QI.
+_LEVEL_ROUNDING = 1e-6
 #: The second window, tried only when the first finds no level. Some
 #: evaluations round a transition's ES to fewer figures than the level's own
 #: ES_NS: ENDF/B-VIII.1 Fe-58 MT603 sends its photons to 71 770 and 125 690 eV,
@@ -1004,11 +1007,16 @@ def _attachCascade(suite, sections, sections12, mt, report) -> Optional[str]:
     levelEnergy = esNs
     if qm is not None and qi is not None:
         levelEnergy = float(qm) - float(qi)
-        if levelEnergy != esNs:
+        # QM - QI is the difference of two 11-column numbers, so it differs
+        # from ES in the last digit on most tapes (1006270.1 against 1006270.0
+        # eV for Fe-56 MT802). That is the format's rounding, not two
+        # evaluations of the level, and is not worth a warning.
+        rounding = _LEVEL_ROUNDING * (abs(float(qm)) + abs(float(qi)) + abs(esNs))
+        if abs(levelEnergy - esNs) > max(rounding, 1e-3):
             report.warn(
-                f"MT{mt}: MF12 states the level at ES={esNs!r} eV and MF3's QM-QI "
-                f"gives {levelEnergy!r} eV; PoPs carries MF3's, the MF12 section "
-                f"keeps its own (FUDGE keeps whichever has more digits)")
+                f"MT{mt}: MF12 puts the level at {esNs:.7g} eV and MF3's QM-QI "
+                f"at {levelEnergy:.7g} eV; the level scheme uses MF3's value, and "
+                f"the MF12 section keeps its own when the tape is written back")
 
     lg = int(section.lg)
     modes = DecayModes()

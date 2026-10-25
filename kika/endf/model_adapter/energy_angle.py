@@ -350,6 +350,7 @@ def decodeMF6MT(mf6mt, report: Optional[ConversionReport] = None):
     records: List[dict] = []
     seen: Dict[str, int] = {}
     taken: set = set()
+    deferred: Dict[float, list] = {}
     ejectile: Optional[str] = None
     for index, product in enumerate(mf6mt.products):
         if isLineSpectrum(product):
@@ -370,9 +371,9 @@ def decodeMF6MT(mf6mt, report: Optional[ConversionReport] = None):
                 continue
         if product.law < 0:
             # A LAW<0 subsection points at MF5/MF15 for a distribution and
-            # carries no cross section: it cannot change MF3 or MF2.
-            report.unsupportedNode(_deferralMessage(mt, index, product),
-                                   unaffectedScopes=("cross-sections",))
+            # carries no cross section: it cannot change MF3 or MF2. Reported
+            # once per particle after the loop: U-235's MT18 has 54 of them.
+            deferred.setdefault(product.za, []).append(product)
             records.append(_productRecord(product, index, None, None, False,
                                           mat, mt, pad))
             continue
@@ -411,31 +412,51 @@ def decodeMF6MT(mf6mt, report: Optional[ConversionReport] = None):
         records.append(_productRecord(product, index, pid, label, modelled,
                                       mat, mt, pad))
 
+    jp = int(getattr(mf6mt, "_jp", 0) or 0)
+    for products in deferred.values():
+        report.unsupportedNode(_deferralMessage(mt, products, jp),
+                               unaffectedScopes=("cross-sections",))
+
     return entries, _headerProvenance(mf6mt, records), report
 
 
-def _deferralMessage(mt: int, index: int, product) -> str:
-    """Why a negative-LAW subsection produces no product, in its own terms.
+def _deferralMessage(mt: int, products: list, jp: int) -> str:
+    """Why a section's negative-LAW subsections produce no product, said once.
 
-    Every file a negative LAW can point at is read now (MF14 and
-    MF15 joined MF4 and MF5), so what this says is no longer "kika cannot follow
-    the pointer" but "there is no node for what the pointer stands for". For the
-    130 photon subsections of ENDF/B-VIII.1's U-235, U-238 and Pu-239 MT18
-    (JP=11, ``LIP=1..N``) that is, **on our reading of ENDF-102's JP, still to be
-    checked against the manual**, the multiplicity distribution P(nu): the yield
-    of subsection *i* being the probability of emitting *i* photons. FUDGE
-    declines it by the same name (``Multiplicity dependent fission data,
-    P(nu)``), and GNDS-2.1 has no node for it.
+    Every file a negative LAW can point at is read now (MF14 and MF15 joined
+    MF4 and MF5), so what this says is no longer "kika cannot follow the
+    pointer" but "there is no node for what the pointer stands for". The
+    subsections of one particle are reported together: ENDF/B-VIII.1's U-235
+    MT18 has 14 neutron and 40 photon ones, and one line per subsection buried
+    the photon panel under 40 copies of the same note.
+
+    On a fission section with JP > 0 they are the multiplicity distribution
+    P(nu) (JP = 10*JPP + JPN, each 1 here): ``LIP = nu``, and the yields are
+    normalised so that the sum of nu * y_nu is 1 at every incident energy, i.e.
+    y_nu = P(nu)/nu-bar. Checked on U-235 VIII.1, where that sum is 1.0000 for
+    both particles at 1e-5 eV, 1 MeV and 14 MeV. FUDGE declines it by the same name
+    (``Multiplicity dependent fission data, P(nu)``), and GNDS-2.1 has no node
+    for it. The mean multiplicities and the spectra (MF1/MF12, MF5/MF15) are
+    read as usual, so nothing an average-based view draws is lost.
     """
+    first = products[0]
     where = {4: "MF4", 5: "MF5", 14: "MF14", 15: "MF15"}.get(
-        abs(product.law), f"MF{abs(product.law)}")
+        abs(first.law), f"MF{abs(first.law)}")
+    particle = "photon" if first.za == 0 else "neutron" if first.za == 1 else f"ZAP={first.za:g}"
+    lips = sorted(int(p.lip) for p in products)
+    span = f"LIP={lips[0]}" if len(lips) == 1 else f"LIP={lips[0]}-{lips[-1]}"
+    count = f"{len(products)} {particle} subsection{'s' if len(products) > 1 else ''}"
+    if jp > 0:
+        return (
+            f"MF6/MT{mt}: {count} ({span}, LAW={first.law}) give P(nu), the "
+            f"probability that one fission emits nu {particle}s. The average "
+            f"number and the spectrum ({where}) are read as usual; P(nu) itself "
+            f"has no place in the model, so it is kept only to write the tape back"
+        )
     return (
-        f"MF6/MT{mt} product {index} (ZAP={product.za}, LIP={product.lip}) has "
-        f"LAW={product.law}: it states no distribution of its own and defers to "
-        f"{where}, which kika reads. It is not given a product of its own -- its "
-        f"LIP indexes a multiplicity (P(nu) on a JP>0 fission section) rather "
-        f"than an excited state, and GNDS has no node for that. The subsection "
-        f"is kept in the provenance, so the section still comes back"
+        f"MF6/MT{mt}: {count} ({span}, LAW={first.law}) state no distribution "
+        f"of their own and defer to {where}, which is read as usual. They are "
+        f"not made products of their own and are kept only to write the tape back"
     )
 
 

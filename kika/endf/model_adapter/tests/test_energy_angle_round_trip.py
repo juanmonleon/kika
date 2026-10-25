@@ -199,7 +199,12 @@ def test_a_negative_law_gets_no_product_and_is_declared():
     records = provenance.headerFields["mf6"]["products"]
     assert len(records) == 56
     assert sum(1 for r in records if r["label"] is None) == 54
-    assert sum(1 for m in report.unsupported if "defers to" in m) == 54
+    # Said once per particle, not once per subsection: 54 copies of one note
+    # buried the photon panel.
+    notes = [m for m in report.unsupported if "give P(nu)" in m]
+    assert len(notes) == 2
+    assert any("40 photon subsections (LIP=1-40, LAW=-15)" in m for m in notes)
+    assert any("14 neutron subsections (LIP=1-14, LAW=-5)" in m for m in notes)
 
 
 def test_a_recoil_points_at_the_two_body_product_above_it():

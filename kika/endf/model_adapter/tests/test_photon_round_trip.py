@@ -155,7 +155,7 @@ def test_mt18_has_one_photon_with_mf6_and_mf12_both_stating_it():
     fission = suite.reactionByENDF_MT(18)
     (photon,) = photons(fission.outputChannel)
     assert isinstance(form(photon).energy, XYs2d)
-    assert any("MF6 already gave" in w for w in report.warnings)
+    assert any("both MF6 (LAW=0, no distribution) and MF12" in w for w in report.warnings)
 
 
 def test_the_pfns_selector_still_finds_the_neutron_on_mt18():

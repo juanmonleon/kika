@@ -322,12 +322,15 @@ def decodeLineSpectrum(product, index: int, mt: int, frame, awr: Optional[float]
         "digest": _digest(meta, {n: m.form for n, m, _ in pieces},
                           {n: d for n, _, d in pieces}),
     }
+    # FUDGE splits it the same way; the note says what the reader sees.
+    lines = sum(1 for m in meta if m['kind'] != 'continuum')
     report.approximated(
-        f"MF6/MT{mt} product {index}: LAW=1 with {sum(1 for m in meta if m['kind'] != 'continuum')} "
-        f"discrete line(s) is {len(pieces)} photon products, FUDGE's split: "
-        f"{'a normalised continuum, ' if continuum else ''}each line a discreteGamma "
-        f"or primaryGamma with P·y as its multiplicity. The ENDF section comes back "
-        f"as read while the products are untouched",
+        f"MF6/MT{mt} product {index}: the photon spectrum (LAW=1) lists {lines} "
+        f"discrete line{'s' if lines != 1 else ''}"
+        f"{' on top of a continuum' if continuum else ''}; each line becomes a photon "
+        f"of its own, with the line's probability times the yield as its multiplicity"
+        f"{', and the rest a normalised continuum' if continuum else ''}. "
+        f"The section is written back as read",
         unaffectedScopes=("cross-sections",))
     return pieces, fields
 
