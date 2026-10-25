@@ -524,6 +524,53 @@ class MF2MT151(MT):
                         rows.append(row)
         return rows
 
+    def resonance_peaks(self) -> List[Dict]:
+        """Each resolved resonance's peak cross sections, in barns.
+
+        One dict per row of :meth:`resonance_table`, in the same order:
+        ``total``, ``elastic``, ``capture`` and ``fission`` at ``E = ER`` for
+        the resonance alone, as single-level Breit-Wigner writes it,
+
+            sigma_0 = 4 pi / k^2 * g_J * Gn / G,    sigma_x = sigma_0 * Gx / G,
+
+        with ``g_J = (2J + 1) / (2 (2I + 1))``. No potential scattering, no
+        interference with the neighbours and no Doppler broadening: it says how
+        strong a resonance is, not what the cross section is at ``ER`` (that is
+        the reconstruction's job). A bound level (``ER <= 0``) has no peak and
+        gives ``None`` for all four.
+
+        The total width is ``GT`` under SLBW/MLBW and ``GN + GG + |GFA| + |GFB|``
+        under Reich-Moore, whose fission widths carry a sign.
+        """
+        from kika.processing.resonances.context import NeutronContext
+        rows: List[Dict] = []
+        for iso in self._isotopes:
+            for er in iso.energy_ranges:
+                p = er.parameters
+                if not isinstance(p, ResolvedResonanceRange):
+                    continue
+                for lv in p.l_values:
+                    k2 = NeutronContext(atomic_weight_ratio=lv.awri, target_spin=p.spi).k_squared_per_ev
+                    for res in lv.resonances:
+                        if er.lrf == 3:
+                            gn, gg, gf = abs(res.c3), abs(res.c4), abs(res.c5) + abs(res.c6)
+                            gt = gn + gg + gf
+                        else:
+                            gt, gn, gg, gf = abs(res.c3), abs(res.c4), abs(res.c5), abs(res.c6)
+                        if res.energy <= 0 or gt <= 0:
+                            rows.append({"total": None, "elastic": None, "capture": None, "fission": None})
+                            continue
+                        g = (2 * abs(res.spin) + 1) / (2 * (2 * p.spi + 1))
+                        # 4 pi / k^2 is in fm^2; 1 b = 100 fm^2.
+                        sigma0 = 4 * np.pi / (k2 * res.energy) / 100 * g * gn / gt
+                        rows.append({
+                            "total": sigma0,
+                            "elastic": sigma0 * gn / gt,
+                            "capture": sigma0 * gg / gt,
+                            "fission": sigma0 * gf / gt,
+                        })
+        return rows
+
     def resonances_dataframe(self):
         """Return a ``pandas.DataFrame`` of the resonance table."""
         import pandas as pd
@@ -565,6 +612,48 @@ class MF2MT151(MT):
                                     "GG": ep.gg, "GF": ep.gf,
                                 })
         return rows
+
+    def unresolved_parameter_series(self) -> List[Dict]:
+        """The unresolved parameters as curves over energy, one per (range, l, J).
+
+        Each dict holds ``el``, ``eh``, ``lrf``, ``case`` (``"A"``, ``"B"`` or
+        ``"C"``), ``lssf``, ``l``, ``J`` and the arrays
+        ``energies``, ``D``, ``GN0``, ``GG``, ``GF``, ``GX``, all the same length.
+        Case A states its averages once for the whole range, so its curve is
+        the two ends of the range at that value; Case B repeats ``D``, ``GN0``
+        and ``GG`` on its fission grid. A width the case does not carry is 0.
+        ``lssf`` = 1 means MF3 already holds the dilute cross sections and the
+        parameters serve self-shielding only.
+        """
+        series: List[Dict] = []
+        for iso in self._isotopes:
+            for er in iso.energy_ranges:
+                p = er.parameters
+                if not isinstance(p, (UnresolvedCaseA, UnresolvedCaseB, UnresolvedCaseC)):
+                    continue
+                base = {"el": er.el, "eh": er.eh, "lrf": er.lrf, "lssf": p.lssf}
+                for lv in p.l_values:
+                    for js in lv.j_states:
+                        if isinstance(p, UnresolvedCaseC):
+                            pts = js.energy_points
+                            e = [pt.es for pt in pts]
+                            cols = {"D": [pt.d for pt in pts], "GN0": [pt.gn0 for pt in pts],
+                                    "GG": [pt.gg for pt in pts], "GF": [pt.gf for pt in pts],
+                                    "GX": [pt.gx for pt in pts]}
+                            case = "C"
+                        else:
+                            if isinstance(p, UnresolvedCaseB):
+                                e, gf, case = list(p.energies), list(js.gf), "B"
+                                gf = (gf + [0.0] * len(e))[:len(e)]
+                            else:
+                                e, case = [er.el, er.eh], "A"
+                                gf = [0.0] * 2
+                            n = len(e)
+                            cols = {"D": [js.d] * n, "GN0": [js.gn0] * n, "GG": [js.gg] * n,
+                                    "GF": gf, "GX": [0.0] * n}
+                        series.append({**base, "case": case, "l": lv.l, "J": js.aj,
+                                       "energies": e, **cols})
+        return series
 
     def unresolved_dataframe(self):
         """Return a ``pandas.DataFrame`` of unresolved parameters."""
