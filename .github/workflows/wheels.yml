@@ -33,7 +33,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-14]
+        # Each macOS architecture on its own runner: cross-building x86_64 on
+        # the arm64 runner gave a wheel of arm64 binaries tagged arm64 (poetry-core
+        # builds for the interpreter it runs in), so v0.5.0's first run failed.
+        os: [ubuntu-latest, windows-latest, macos-14, macos-15-intel]
     steps:
       - uses: actions/checkout@v4
 
@@ -41,9 +44,7 @@ jobs:
         env:
           CIBW_BUILD: "cp312-* cp313-* cp314-*"
           CIBW_SKIP: "*-musllinux_* *_i686 *-win32"
-          # macos-14 is arm64; the x86_64 wheel is cross-built and tested
-          # under Rosetta.
-          CIBW_ARCHS_MACOS: "x86_64 arm64"
+          CIBW_ARCHS_MACOS: "native"
           # Runs in a clean venv with only the wheel installed, outside the
           # source tree: a kernel missing from the wheel fails here, where the
           # editable install would have imported it from the checkout.
