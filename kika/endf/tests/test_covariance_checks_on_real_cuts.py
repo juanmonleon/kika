@@ -77,11 +77,22 @@ def test_fe57_mf33_sum_rules_that_name_reactions_with_no_section():
     """JEFF-4.0 Fe-57: MT2 and MT4 are derived (NC LTY=0) partly from MTs the
     file does not have, so what kika assembles is smaller than what is stated."""
     report = _check("fe57")
-    assert _faults(report) == {("defect", "unresolved_reference"): 5}
+    # MT2's first NC (100 eV - 14.248 keV) is sigma_el = sigma_t - sigma_c, and the
+    # tape writes the capture target as XMTI = 1.020000+0, not 1.020000+2: MT 1.02,
+    # which is no reaction. The NC value check added on 2026-10-22 (2c8ece8)
+    # reports it, and from then on that record takes no part in the other NC rules.
+    assert _faults(report) == {("defect", "unresolved_reference"): 5,
+                               ("defect", "nc_invalid_values"): 1}
+    invalid = _only(report, "nc_invalid_values").location
+    assert (invalid.mt, invalid.nc) == (2, 0)
     named = sorted((f.location.mt, f.location.nc, f.evidence["xmti"])
                    for f in report.by_check("unresolved_reference"))
     assert named == [(2, 1, 3), (4, 0, 3), (4, 0, 22), (4, 0, 28), (4, 0, 107)]
-    assert _only(report, "nc_only_first_resolved").location.mt == 2
+    # Before 2c8ece8 MT2's two NC records were two different sums, so the note that
+    # the legacy resolver uses only the first. With the first one invalid there is
+    # one valid sum left and no note: the defect above is what says that first
+    # record (the one the legacy resolver would take) cannot be used.
+    assert report.by_check("nc_only_first_resolved") == ()
 
 
 def test_si28_mf33_a_constituent_derived_over_the_same_range():
@@ -122,12 +133,19 @@ def test_hf176_mf33_a_repeated_point_and_an_implausible_sigma_rel():
 
 def test_fe56_jendl5_the_clean_case_has_only_notes():
     """JENDL-5 Fe-56 MF33 and MF34: no fault at all. Its 50 indefinite blocks are
-    rounding -- JENDL-5 writes rho rounded to 0.001 -- and must stay notes."""
+    rounding -- JENDL-5 writes rho rounded to 0.001 -- and must stay notes.
+
+    MT2 (from MT1) and MT4 (from MT51 on) are NC-derived. Assembling their matrix
+    numerically (2c8ece8, 2026-10-22) weights each constituent by its central
+    sigma, and this cut carries no MF3, so each says it was not evaluated -- a
+    note, like the two central_values_unavailable, never an unweighted guess."""
     report = _check("fe56_jendl")
     assert report.at_least("warn") == ()
     assert Counter(f.check for f in report) == {"inert_rows": 57,
                                                 "not_positive_semidefinite": 50,
-                                                "central_values_unavailable": 2}
+                                                "central_values_unavailable": 2,
+                                                "nc_matrix_not_evaluated": 2}
+    assert sorted(f.location.mt for f in report.by_check("nc_matrix_not_evaluated")) == [2, 4]
 
 
 def _only(report, check):

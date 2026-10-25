@@ -60,9 +60,15 @@ static PyObject *legendre_values(PyObject *self, PyObject *args)
             double nd = (double)(nc-j+2);
             for (Py_ssize_t i = 0; i < np; ++i) {
                 double previous = out[i], c1 = scratch[i];
-                /* Keep the NumPy Clenshaw operation order; no fused operations. */
-                out[i] = c[nc-j] - (c1 * (nd-1.)) / nd;
-                scratch[i] = previous + ((c1 * x[i]) * (2.*nd-1.)) / nd;
+                /* Keep the NumPy Clenshaw operation order; no fused operations.
+                   This is legval as of NumPy 2.3 (numpy a7e6113, "speedup
+                   evaluation of legval"), which forms the ratio first:
+                     c0 = c[-i] - c1*((nd-1)/nd)
+                     c1 = tmp + c1*x*((2*nd-1)/nd)
+                   NumPy <= 2.2 multiplied then divided, (c1*(nd-1))/nd, and
+                   differs from this in the last bit. */
+                out[i] = c[nc-j] - c1 * ((nd-1.) / nd);
+                scratch[i] = previous + (c1 * x[i]) * ((2.*nd-1.) / nd);
             }
         }
         for (Py_ssize_t i = 0; i < np; ++i) out[i] = out[i] + scratch[i] * x[i];

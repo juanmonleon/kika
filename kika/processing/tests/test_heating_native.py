@@ -1,10 +1,70 @@
-"""The native damage kernel is the NumPy reference, bit for bit."""
+"""The native damage kernel is the NumPy reference: bit for bit where it can be.
+
+The kernel replays the NumPy expressions operation for operation (order, np.interp's
+branches, np.sum's pairwise summation, no fused operations) and takes ``pow`` and
+``cbrt`` from the C runtime, because that is where NumPy takes them on Windows (the
+UCRT); ``tanh`` is the C runtime's on both sides (the reference calls math.tanh).
+There the two paths are bit-identical and these tests assert it.
+
+They cannot be everywhere. NumPy's x86-64 Linux wheels evaluate ``cbrt`` and
+``power`` with their own SIMD code (SVML) whenever the CPU has AVX-512, scalars
+included, and those are not glibc's: 1 to 3 ulp apart on about half of all
+arguments for ``cbrt`` (measured 2026-10-25 on NumPy 2.2.3 under WSL, which is also
+what made the GitHub runners red from 2026-10-10). That code is not reachable from C,
+so on such a machine the contract is "equal to a few ulp": :func:`_agree` is exact
+when :data:`EXACT` (np.cbrt and np.power are this C runtime's, probed below), else
+a relative bound of :data:`RTOL`. Comparisons with no transcendental in them
+(the binning and summation kernels, native against native) stay exact everywhere.
+
+Nothing downstream relies on native == NumPy to the bit: ``_Batched`` and the
+refinement compare the native batch with the native chunk (``test_heating_batches``),
+and a build without the extension uses the NumPy path for both.
+"""
+import ctypes
+import ctypes.util
+import sys
+
 import numpy as np
 import pytest
 
 from kika.processing import heating as H
 
 native = pytest.importorskip("kika.processing._heating_native")
+
+
+def _numpy_transcendentals_are_the_c_runtime() -> bool:
+    """Whether np.cbrt and np.power give the C runtime's bits on this machine."""
+    try:
+        if sys.platform == "win32":
+            crt = ctypes.CDLL("ucrtbase")
+        else:
+            crt = ctypes.CDLL(ctypes.util.find_library("m") or None)
+        crt.cbrt.restype = ctypes.c_double
+        crt.cbrt.argtypes = [ctypes.c_double]
+        crt.pow.restype = ctypes.c_double
+        crt.pow.argtypes = [ctypes.c_double, ctypes.c_double]
+    except (OSError, AttributeError):
+        return False
+    rng = np.random.default_rng(20261025)
+    x = 10.0 ** rng.uniform(-6, 8, 2048)
+    b = rng.uniform(-2, 2, 2048)
+    return (np.array_equal(np.cbrt(x), [crt.cbrt(v) for v in x])
+            and np.array_equal(np.power(x, b), [crt.pow(v, e) for v, e in zip(x, b)]))
+
+
+EXACT = _numpy_transcendentals_are_the_c_runtime()
+#: A few ulp at the result: SVML's cbrt is within 3 ulp of glibc's, and the quadratures
+#: sum positive terms, so the per-term relative error is also the sum's.
+RTOL = 16 * np.finfo(float).eps
+
+
+def _agree(actual, expected):
+    """Native against NumPy: to the bit if :data:`EXACT`, else within :data:`RTOL`."""
+    actual, expected = np.asarray(actual, dtype=float), np.asarray(expected, dtype=float)
+    if EXACT:
+        np.testing.assert_array_equal(actual, expected)
+    else:
+        np.testing.assert_allclose(actual, expected, rtol=RTOL, atol=0, equal_nan=True)
 
 
 def _case(rng, hist, lab, Zr):
@@ -36,15 +96,13 @@ def _case(rng, hist, lab, Zr):
 @pytest.mark.parametrize("hist", [False, True])
 @pytest.mark.parametrize("lab", [False, True])
 @pytest.mark.parametrize("Zr", [0, 2, 26])
-def test_native_emission_chunk_equals_numpy_bit_for_bit(hist, lab, Zr):
+def test_native_emission_chunk_equals_numpy(hist, lab, Zr):
     rng = np.random.default_rng(1000 * hist + 100 * lab + Zr)
     for _ in range(60):
         args = _case(rng, hist, lab, Zr)
         if len(args[0]) < 2:
             continue
-        expected = H._emissionChunkNumpy(*args)
-        actual = H._emissionChunk(*args)
-        assert actual == expected or (np.isnan(actual) and np.isnan(expected)), (actual, expected)
+        _agree(H._emissionChunk(*args), H._emissionChunkNumpy(*args))
 
 
 def test_native_kernel_rejects_inconsistent_buffers():
@@ -58,7 +116,7 @@ def test_native_kernel_rejects_inconsistent_buffers():
 
 
 @pytest.mark.parametrize("hist", [False, True])
-def test_native_two_body_chunk_equals_numpy_bit_for_bit(hist):
+def test_native_two_body_chunk_equals_numpy(hist):
     rng = np.random.default_rng(77 + hist)
     for _ in range(300):
         nx = int(rng.integers(2, 60))
@@ -78,7 +136,7 @@ def test_native_two_body_chunk_equals_numpy_bit_for_bit(hist):
         cuts = np.unique(np.r_[-1.0, x[(x > -1) & (x < last)], mcuts[(mcuts > -1) & (mcuts < last)], last])
         u, w = np.polynomial.legendre.leggauss(int(rng.choice([8, 16, 32, 64])))
         args = (cuts, u, w, x, p, offset, slope, (Z, A, Z, A), ed, hist)
-        assert H._twoBodyChunk(*args) == H._twoBodyChunkNumpy(*args)
+        _agree(H._twoBodyChunk(*args), H._twoBodyChunkNumpy(*args))
 
 
 def test_a_strided_table_reaches_the_kernel():
@@ -91,12 +149,12 @@ def test_a_strided_table_reaches_the_kernel():
     wide[::2] = x
     args[5] = wide[::2]
     assert not args[5].flags.c_contiguous
-    assert H._emissionChunk(*args) == H._emissionChunkNumpy(*args)
+    _agree(H._emissionChunk(*args), H._emissionChunkNumpy(*args))
 
 
 
 @pytest.mark.parametrize("name", ["nrt", "arc-dpa"])
-def test_native_kernels_count_displacements_as_numpy_bit_for_bit(name):
+def test_native_kernels_count_displacements_as_numpy(name):
     # Under a displacement model both kernels return N_d(T_d) of each recoil;
     # still the NumPy reference to the bit (Fe: NRT with HEATR's 40 eV, arc-dpa with
     # Nordlund's constants).
@@ -109,13 +167,13 @@ def test_native_kernels_count_displacements_as_numpy_bit_for_bit(name):
                 args = _case(rng, False, lab, 26)
                 if len(args[0]) < 2:
                     continue
-                assert H._emissionChunk(*args) == H._emissionChunkNumpy(*args)
+                _agree(H._emissionChunk(*args), H._emissionChunkNumpy(*args))
         u, w = np.polynomial.legendre.leggauss(16)
         x = np.linspace(-1, 1, 9); p = np.ones(9) / 2
         for E in (1e3, 1e5, 1e7):
             c = E * 55.4 / 56.4 ** 2
             args = (np.linspace(-1, 1, 7), u, w, x, p, 2 * c, 2 * c * 0.9, (26, 55.4, 26, 55.4), 40.0, False)
-            assert H._twoBodyChunk(*args) == H._twoBodyChunkNumpy(*args)
+            _agree(H._twoBodyChunk(*args), H._twoBodyChunkNumpy(*args))
     finally:
         H._DISPLACEMENTS.reset(token)
 
@@ -131,7 +189,7 @@ def test_joint_two_body_chunk_is_each_component_bit_for_bit():
         E = 10.0 ** rng.uniform(3, 7); c = E * 55.4 / 56.4 ** 2; r = rng.uniform(0.3, 1.0)
         args = (np.linspace(-1, 1, 6), u, w, x, p, c * (1 + r * r), 2 * c * r, (26, 55.4, 26, 55.4), 40.0, False)
         joint = H._twoBodyChunkJoint(*args, models)
-        assert np.array_equal(joint, H._twoBodyChunkJointNumpy(*args, models))
+        _agree(joint, H._twoBodyChunkJointNumpy(*args, models))
         assert joint[0] == H._twoBodyChunk(*args)
         for k, model in enumerate(models):
             token = H._DISPLACEMENTS.set(model)
@@ -143,7 +201,7 @@ def test_joint_two_body_chunk_is_each_component_bit_for_bit():
 
 @pytest.mark.parametrize("lab", [False, True])
 @pytest.mark.parametrize("Zr", [0, 2, 26])
-def test_joint_emission_chunk_is_numpy_bit_for_bit(lab, Zr):
+def test_joint_emission_chunk_is_numpy(lab, Zr):
     # The joint kernel splits the recoil angle at every component's threshold; the
     # native kernel and the NumPy reference agree to the bit, component by component.
     models = tuple(H.displacementModels(74, 90.0).values())   # W: three distinct thresholds
@@ -156,8 +214,8 @@ def test_joint_emission_chunk_is_numpy_bit_for_bit(lab, Zr):
         ed = args[12]
         thresholds = [ed] + ([H._thresholdOf(float(m.ed), *map(float, partition)) for m in models] if Zr else [])
         joint = (args[:12] + [thresholds, ed, partition, args[14], args[15], models])
-        assert np.array_equal(H._emissionChunkJoint(*joint), H._emissionChunkJointNumpy(*joint[:12],
-                              (thresholds + [thresholds[-1]] * 3)[:3], *joint[13:]))
+        _agree(H._emissionChunkJoint(*joint), H._emissionChunkJointNumpy(*joint[:12],
+               (thresholds + [thresholds[-1]] * 3)[:3], *joint[13:]))
 
 
 def _numpy(monkeypatch_target, function, *args):
@@ -172,7 +230,7 @@ def _numpy(monkeypatch_target, function, *args):
 
 @pytest.mark.parametrize("model", [None, "nrt", "arc-dpa"])
 @pytest.mark.parametrize("cm", [False, True])
-def test_native_recoil_rows_equal_numpy_bit_for_bit(cm, model):
+def test_native_recoil_rows_equal_numpy(cm, model):
     # _recoilDamage's rows: shared rule and one row per outgoing energy (Kalbach-Mann).
     token = H._DISPLACEMENTS.set(None if model is None else H.displacementModels(26, 40.0)[model])
     try:
@@ -186,7 +244,7 @@ def test_native_recoil_rows_equal_numpy_bit_for_bit(cm, model):
                 args = (E, e, mus, weights, cm, 54.4, float(rng.choice([1.0, 0.9986, 3.97])), 55.4, 26, 26, 40.0)
                 got = H._recoilRows(*args)
                 want = _numpy(None, H._recoilRows, *args)
-                np.testing.assert_array_equal(got, want)
+                _agree(got, want)
     finally:
         H._DISPLACEMENTS.reset(token)
 
@@ -199,7 +257,7 @@ def _momenta(rng, n):
 
 
 @pytest.mark.parametrize("model", [None, "nrt"])
-def test_native_momenta_damage_equals_numpy_bit_for_bit(model):
+def test_native_momenta_damage_equals_numpy(model):
     # _independentRecoilDamage's last addition: every pair of bins times the azimuths.
     token = H._DISPLACEMENTS.set(None if model is None else H.displacementModels(26, 40.0)[model])
     try:
@@ -213,7 +271,7 @@ def test_native_momenta_damage_equals_numpy_bit_for_bit(model):
                 return float(np.sum(w * H.lindhard(er, zr, ar, Z, A, ed)))
 
             got = H._momentaDamage(a, b, P, ar, zr, Z, A, ed, damage)
-            assert got == H._addMomenta(a, b, last=damage)
+            _agree(got, H._addMomenta(a, b, last=damage))
     finally:
         H._DISPLACEMENTS.reset(token)
 
@@ -242,7 +300,7 @@ def test_native_points_bins_equal_numpy_bit_for_bit():
 
 @pytest.mark.parametrize("flat", [False, True])
 @pytest.mark.parametrize("kalbach", [False, True])
-def test_native_unit_base_integral_equals_numpy_bit_for_bit(flat, kalbach):
+def test_native_unit_base_integral_equals_numpy(flat, kalbach):
     # _unitBaseCMMean's cross moment, one quadrature: correlated (mu) and Kalbach-Mann
     # (r and a, the Langevin function on both sides of |a| = 0.01).
     rng = np.random.default_rng(19 + 2 * flat + kalbach)
@@ -259,7 +317,7 @@ def test_native_unit_base_integral_equals_numpy_bit_for_bit(flat, kalbach):
         else:
             angular = rng.uniform(-1.0, 1.0, n)
         args = (x, p, angular, nodes, ww, a, width, qa, qw, flat, kalbach)
-        assert H._unitBaseIntegral(*args) == H._unitBaseIntegralNumpy(*args)
+        _agree(H._unitBaseIntegral(*args), H._unitBaseIntegralNumpy(*args))
 
 
 def test_the_kernels_sum_a_whole_array_as_this_numpy_does():

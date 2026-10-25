@@ -9,6 +9,12 @@ that is allowed to show in the output, so the gate is the strongest available:
 the file-based chain (still there, for a tape that is not plain ASCII) is run
 on the same realisation and the bytes are compared, for a CRLF tape and for the
 same tape with LF endings.
+
+The micro-tape has a resonance region, and perturbing MF33 there reconstructs
+σ(E) through NJOY RECONR, so every test here spawns NJOY: each requests the
+root ``njoy_exe`` fixture (which marks it ``njoy`` and skips it where no binary
+is found, as on CI) and points ``$NJOY_EXECUTABLE`` at that same binary, so the
+library runs the one the fixture resolved rather than whatever is on PATH.
 """
 from __future__ import annotations
 
@@ -22,6 +28,11 @@ from kika.sampling.model_perturbation import perturbFromModel
 DATA = Path(__file__).resolve().parents[2] / "endf" / "tests" / "data"
 TAPE = DATA / "micro_fe56_xs_and_angular.endf"
 REQUEST = {33: None, 34: {"mt": [2], "index": [1, 2, 3]}}
+
+
+@pytest.fixture(autouse=True)
+def _njoy(njoy_exe, monkeypatch):
+    monkeypatch.setenv("NJOY_EXECUTABLE", str(njoy_exe))
 
 
 def _tape(tmp_path: Path, newline: bytes) -> Path:
