@@ -216,7 +216,7 @@ deviation.)
   drawn from $\ln(1+\Sigma)$ ({eq}`eq-perturbation-pipeline-logcov`), the transformation the
   file-level samplers of PENDF, $\bar\nu$ and ACE files (through
   `kika.sampling.multigroup_draw`) also apply (see
-  {doc}`../../user_guide/legacy-samplers`).
+  {doc}`/user_guide/legacy-samplers`).
 - **The pre-flight conditions the matrix that is sampled.** In log space that is
   $\ln(1+\Sigma)$, so a definiteness repair, a threshold or an edited plan acts on it, and
   the covariance of the factors is $e^{M} - 1$ of the repaired $M$.

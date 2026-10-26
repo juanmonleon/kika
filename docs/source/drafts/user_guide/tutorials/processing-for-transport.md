@@ -5,7 +5,7 @@ MCNP and Serpent, HDF5 for OpenMC), and how to read the report kika writes about
 The example processes the ENDF/B-VIII.1 evaluation of Fe-56; the outputs shown are what it
 printed. How each stage computes what it does is in
 {doc}`../../methods/processing/processing-chain`, and every option of the processing is in
-{doc}`../processing-an-evaluation`.
+{doc}`/user_guide/processing-an-evaluation`.
 
 ## Get the evaluation
 
@@ -116,7 +116,7 @@ The warning comes from the data checks run on the evaluation as it is read, and 
 These are properties of the evaluation, not of the processing: the elastic angular
 distribution of ENDF/B-VIII.1 Fe-56 goes slightly negative near 1.56 MeV, and the files
 carry it as stated. Whether it matters is a judgement about the application.
-{doc}`../checking-evaluations` explains every check.
+{doc}`/user_guide/checking-evaluations` explains every check.
 
 ## The choices kika made
 

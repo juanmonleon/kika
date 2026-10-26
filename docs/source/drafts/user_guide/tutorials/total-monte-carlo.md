@@ -7,7 +7,7 @@ perturbs the elastic cross-section of ENDF/B-VIII.1 Fe-56. The spread is checked
 response that can be computed without a transport code, the elastic cross-section averaged
 over two energy groups, where the sandwich rule gives the same quantity from the
 covariance directly. The outputs shown are what the run printed. How the run draws and
-applies the factors is in {doc}`../running-a-perturbation`.
+applies the factors is in {doc}`/user_guide/running-a-perturbation`.
 
 ## 1. Draw the evaluations
 

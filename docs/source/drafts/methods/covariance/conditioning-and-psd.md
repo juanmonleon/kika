@@ -466,7 +466,7 @@ Limits of the methods:
   of the bins its eigenvector spans, which is conservative. The pre-flight is the place to
   choose a repair that keeps the diagonal exactly (`clip_rescale`, `higham`). The
   file-level samplers `perturb_ENDF_files` and `draw_relative_factors` (see
-  {doc}`../../user_guide/legacy-samplers`) keep the SVD's $\lvert\lambda_i\rvert$
+  {doc}`/user_guide/legacy-samplers`) keep the SVD's $\lvert\lambda_i\rvert$
   (`negative_directions="fold"`), so that they reproduce their published draws.
   `min_over_max_eigenvalue` in the draw's diagnostics shows whether a block was indefinite.
 - **Inert rows: two floors.** The `inert_rows` check, `mask_inert` and the multigroup draw

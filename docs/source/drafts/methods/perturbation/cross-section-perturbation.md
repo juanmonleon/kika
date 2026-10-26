@@ -428,7 +428,7 @@ blocks, the negative sums). `run_metadata.json` records `crossSectionSums`, `sum
 `mode` and the `discarded`, `undecomposed`, `dropped`, `anchored`, `lumped` and
 `remainders` it found) and `resonanceRegion` (`mode`, `reconstructed`, `ranges`, and the
 `pendf`, `base` and `tolerance` of a reconstruction). How to read a run is in
-{doc}`../../user_guide/running-a-perturbation`.
+{doc}`/user_guide/running-a-perturbation`.
 
 ## Implementation
 

@@ -40,8 +40,13 @@ Quick Links
    :hidden:
 
    user_guide/quickstart
+   user_guide/the-model
    user_guide/reading_files
-   user_guide/sampling_pipelines
+   user_guide/working-with-endf
+   user_guide/checking-evaluations
+   user_guide/processing-an-evaluation
+   user_guide/running-a-perturbation
+   user_guide/legacy-samplers
    user_guide/tutorials/index
 
 .. toctree::

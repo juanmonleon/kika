@@ -110,7 +110,7 @@ if __name__ == "__main__":
 
 The `if __name__ == "__main__":` guard is needed on Windows and macOS, where the
 processing starts worker processes that import the script again (see
-{doc}`../processing-an-evaluation`).
+{doc}`/user_guide/processing-an-evaluation`).
 
 Attach the reconstruction to the tape with
 {py:func}`kika.processing.njoy_pendf_cache.read_pendf_mf3_sections`, and every
