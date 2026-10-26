@@ -2,8 +2,7 @@
 
 What you can do with an ENDF-6 tape in kika, and the call for each task: identify it,
 read all of it or only what you need, decode it into the model, edit it, check its
-covariances, process it for transport, download it, and index a whole library. How kika reads and writes the
-format (what it assumes, what it refuses) is in {doc}`../methods/formats/endf`.
+covariances, process it for transport, download it, and index a whole library.
 
 The examples use a tape called `Fe56.endf`; any ENDF-6 tape works.
 
@@ -66,8 +65,7 @@ E, xs = ev.cross_section(102)  # two numpy arrays
 ev.covarianceSuite             # MF 31-35, decoded
 ```
 
-The model is the same whatever the format; see {doc}`../architecture/canonical-model`
-and {doc}`/user_guide/reading_files`.
+The model is the same whatever the format; see {doc}`/user_guide/reading_files`.
 
 ## Process it for transport
 
@@ -130,8 +128,6 @@ library = check_covariance_library("evaluations/")         # a directory of tape
 `check_covariances` needs the cross-sections, angular distributions and spectra beside the
 covariances (MF 3 for MF 33, MF 2 for MF 32, MF 4 for MF 34, MF 5 for MF 35); read the
 whole tape, or the checks that need central values say they could not run.
-
-What is checked, with which thresholds, is in {doc}`../methods/covariance/covariance-checks`.
 
 ## Download an evaluation
 

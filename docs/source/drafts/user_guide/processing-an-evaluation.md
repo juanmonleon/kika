@@ -56,8 +56,7 @@ status is 1 when any evaluation was incomplete. `python -m kika process ...` is 
 processing chain (reconstruction, Doppler broadening, unresolved-resonance probability
 tables, optionally heating) and returns a result from which a PENDF, an OpenMC HDF5 file,
 ACE tables or a GNDS file with heated styles are written. {py:func}`kika.gnds.process_gnds` does the
-same from a GNDS file. No NJOY is involved. What each stage computes, and how it differs
-from NJOY, is in {doc}`../methods/processing/processing-chain`.
+same from a GNDS file. No NJOY is involved.
 
 ## Look before processing
 
@@ -217,8 +216,6 @@ from kika.endf import dosimetry_ace
 dosimetry_ace("IRDFF-II/Nb093.endf", "ace/", extension=".00y")
 ```
 
-What goes in, and why: {doc}`../methods/processing/dosimetry-tables`.
-
 ## Photo-atomic tables
 
 An element's photo-atomic table (`.p`, the EPRDATA layout MCNP and OpenMC read) needs its
@@ -233,7 +230,7 @@ run.notes                                         # Compton shells joined or dro
 ```
 
 `write_ace` takes `extension=".25p"` for another suffix and `replace=True` to overwrite a
-table the `xsdir` already names. The method: {doc}`../methods/processing/photoatomic-tables`.
+table the `xsdir` already names.
 
 ## Photonuclear tables
 
@@ -248,5 +245,4 @@ photonuclear_ace("g-026_Fe_056.endf", "photonuclear/")   # photonuclear/26056.01
 
 `extension=".24u"` gives another suffix and `replace=True` overwrites a table the `xsdir`
 already names. What the table leaves out or approximates is the report of
-`kika.ace.processing.photonuclear.photonuclearTable`. The method:
-{doc}`../methods/processing/photonuclear-tables`.
+`kika.ace.processing.photonuclear.photonuclearTable`.

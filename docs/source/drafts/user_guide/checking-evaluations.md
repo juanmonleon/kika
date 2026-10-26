@@ -24,8 +24,7 @@ Evaluation check of n-094_Pu_243.endf (MAT 9449): 2 defects, ... notes
 Each finding has a level: **defect** (the data are not what the format or physics allows,
 and using them gives a wrong result), **warning** (it can change a result and needs
 judgement) or **note** (true and worth knowing, not a fault). What each check tests and
-when it gives each level is in the report's legend, and in
-{doc}`../methods/checks/data-checks` and {doc}`../methods/covariance/covariance-checks`.
+when it gives each level is in the report's legend.
 
 ## Choosing what to check
 

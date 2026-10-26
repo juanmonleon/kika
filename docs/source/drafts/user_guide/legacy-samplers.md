@@ -22,8 +22,7 @@ given). Their arguments are snake_case (`num_samples`, `output_dir`, `dry_run`,
 The log-space draw is the same on both paths: the relative covariance is transformed
 element by element, $\Sigma^{\log}_{kl} = \ln(1 + \Sigma_{kl})$, and
 $f_k = \exp(y_k - \tfrac12\Sigma^{\log}_{kk})$ is drawn with $y$ of covariance
-$\Sigma^{\log}$, so the factors reproduce $\Sigma$ exactly (see
-{doc}`../methods/sampling/perturbation-pipeline`; on the file-level samplers,
+$\Sigma^{\log}$, so the factors reproduce $\Sigma$ exactly (on the file-level samplers,
 `kika.sampling.multigroup_draw.draw_relative_factors`). Four differences move numbers, so
 an ensemble drawn one way is not reproduced the other way:
 
@@ -34,8 +33,7 @@ an ensemble drawn one way is not reproduced the other way:
   (`max_relative_std=3.0`, that is 300 %), then the positive semi-definite repair of
   `psd_method="auto"`. Rows with no stated variance are dropped from the decomposition
   and their factors set to 1, and the factors are cast to `float32`. `perturbFromModel`
-  repairs definiteness only, before the draw, and writes the plan
-  ({doc}`../methods/covariance/conditioning-and-psd`).
+  repairs definiteness only, before the draw, and writes the plan.
 - **Stated sums.** `perturb_PENDF_files` scales each requested MT by its own block and
   does not rebuild the sums from their partials. `perturbFromModel` reproduces that only
   with `crossSectionSums=False`.
@@ -73,10 +71,9 @@ draws factors for the requested Legendre orders and multiplies the MF 4 Legendre
 coefficients, writing one ENDF tape per sample; `generate_ace=True` runs NJOY on each.
 It draws in linear space only: `space="log"` raises `NotImplementedError`, and so does
 any decomposition other than `"svd"` or `"eigen"`. A covariance stated in the other
-frame from MF 4 is converted, as in {doc}`../methods/perturbation/legendre-angular-perturbation`.
+frame from MF 4 is converted.
 Where an order's bins end inside the distribution, the change runs lin-lin from the last
-perturbed energy to the first unperturbed one (the `"ramp"` of
-{doc}`../methods/perturbation/tabulated-angular-perturbation`), where `perturbFromModel`
+perturbed energy to the first unperturbed one (a ramp), where `perturbFromModel`
 steps. A tabulated MF 4 (LTT=2) is refused, not skipped: this sampler only scales
 Legendre coefficients. An order-0 factor never scales a Legendre coefficient.
 
@@ -87,14 +84,13 @@ reads MF 31, draws relative factors (log space by default) and rewrites the MF 1
 $\bar\nu$ tables (MT 452, 455, 456) of each tape, keeping
 $\bar\nu_\text{total} = \bar\nu_p + \bar\nu_d$: one member of the family (MT 452 unless
 `derived_mt` says otherwise) is recomputed from the others. `generate_ace=True` (the
-default) runs NJOY on each tape. See {doc}`../methods/perturbation/multiplicity-perturbation`.
+default) runs NJOY on each tape.
 
 ### `perturb_pfns_files`: the prompt fission neutron spectrum
 
 `kika.sampling.pfns_perturbation.perturb_pfns_files(endf_files, num_samples, ...)` reads
 the MF 35 covariance of MT 18, draws absolute deltas of the group probabilities
-linearly, applies them to the MF 5/MT 18 tables (with the projection and renormalisation
-of {doc}`../methods/perturbation/fission-spectrum-perturbation`) and writes one tape per
+linearly, applies them to the MF 5/MT 18 tables (with a projection and renormalisation) and writes one tape per
 sample; `generate_ace=True` (the default) runs NJOY. MF 5/MT 455 (delayed) is written
 back unchanged, since no evaluation states an MF 35 for it. The output tape keeps the
 original MF 35 beside the moved spectrum, and the run summary and the parquet metadata

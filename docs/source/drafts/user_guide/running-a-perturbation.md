@@ -3,10 +3,7 @@
 How to draw an ensemble of perturbed evaluations from the covariances an ENDF
 (Evaluated Nuclear Data File) tape states, with
 {py:func}`kika.sampling.model_perturbation.perturbFromModel`: how to write the request,
-pick the output formats, rehearse a run, read what it did, and get its factors back. What
-the run computes (the blocks, the draw, how each quantity is perturbed) is in
-{doc}`../methods/sampling/perturbation-pipeline` and the pages of the perturbation
-chapter it links.
+pick the output formats, rehearse a run, read what it did, and get its factors back.
 
 The examples run on `micro_fe56_xs_and_angular.endf`, a small Fe-56 tape committed under
 `kika/endf/tests/data/` (MF 3, MF 4 and the MF 33 and MF 34 of elastic scattering),
@@ -43,8 +40,7 @@ it as an ENDF tape (the default format). It returns a
 
 **About `resonanceRegion`.** By default (`"reconstructed"`) a tape whose resonance region
 is stated as parameters is first reconstructed by NJOY RECONR, so that the factors act on
-the resonance cross-section and not on the MF 3 background (see
-{doc}`../methods/perturbation/cross-section-perturbation`). That needs NJOY and a full
+the resonance cross-section and not on the MF 3 background. That needs NJOY and a full
 tape. The committed micro-tapes are cut section by section and NJOY cannot read them, so
 the examples on this page pass `resonanceRegion="evaluated"`, which perturbs MF 3 as
 stated and says so in a warning. On a real evaluation, leave the default.
@@ -87,7 +83,7 @@ MF 34. A key that is neither an MF number nor one of the four quantities, or MF 
 twice, is refused.
 
 A request for a sum the file decomposes (MT 4 when MT 51-91 are present) is a request for
-the sections that decompose it; see {doc}`../methods/perturbation/cross-section-perturbation`.
+the sections that decompose it.
 
 ### When the evaluation does not state what you ask for
 
@@ -137,8 +133,7 @@ the cross-section it divides by is reconstructed by NJOY RECONR, so NJOY is need
 section with no central value to divide by (a GNDS source, or a reaction the evaluation
 states neither in MF 3 nor as a sum of its partials) follows `onMissing`: a `ValueError`,
 or left out with a line in `run.notes`. An absolute MF 34 section is not drawn, and the run
-names it. How the conversion is done is in
-{doc}`../methods/sampling/perturbation-pipeline`.
+names it.
 
 ## Choosing the output formats
 
@@ -173,7 +168,7 @@ An unknown emitter is refused before anything is read. From a GNDS source, a run
 writes files refuses `endf-delta` (there is no tape to patch). `gnds` works, and so do
 `endf-tape` and `ace`: the tape is written from the model, with its MAT from ENDF-6's table
 for the target (or `mat=`) and the rest of its bookkeeping derived from what the GNDS file
-states (see {doc}`../methods/formats/endf`). They are refused when the suite has resolved or
+states. They are refused when the suite has resolved or
 unresolved resonance parameters, which are not written to MF 2: without MF 2 the tape's
 MF 3 in the resonance region would be only the background.
 
@@ -215,8 +210,7 @@ NJOY needs it.
 With `engine="kika"`, no tape is written and NJOY is not run. Each realisation is
 processed by kika from its 0 K forms (the perturbed cross-sections at 0 K, then
 Doppler-broadened to each temperature, with the sample's own heating and damage) and
-written as ACE by the same processing `process_endf(...).write_ace` uses (see
-{doc}`../methods/processing/processing-chain`). The unresolved-resonance probability
+written as ACE by the same processing `process_endf(...).write_ace` uses. The unresolved-resonance probability
 tables are computed once, on the unperturbed evaluation, and shared by every sample:
 their shapes are not perturbed, while the sample's MF 33 factors reach the cross-sections
 they are built on.
@@ -244,7 +238,7 @@ sample took about 150 s for its two temperatures (measured 2026-10-26).
 
 ### OpenMC HDF5 files
 
-`hdf5` writes each sample in OpenMC's HDF5 format (see {doc}`../methods/formats/hdf5`),
+`hdf5` writes each sample in OpenMC's HDF5 format,
 processed by kika in the same way as the `engine="kika"` ACE files, from the sample's
 0 K forms, with the probability tables of the unperturbed evaluation. It needs a
 {py:class}`~kika.sampling.model_perturbation.HDF5Options`:
@@ -458,7 +452,7 @@ the whole set to a suite as a run does.
 ## Handing in a conditioning plan
 
 By default the run inspects its blocks and applies the recommended plan, which repairs
-definiteness and nothing else (see {doc}`../methods/covariance/conditioning-and-psd`).
+definiteness and nothing else.
 To change a repair, edit the plan the run wrote and hand it back; to draw every block
 exactly as stated, pass `False`:
 
@@ -490,8 +484,7 @@ run = perturbFromModel("Fe56.endf", REQUEST, 2, dryRun=True,
 # {'MF33': 'log', 'MF34': 'linear'}
 ```
 
-Use linear for Legendre coefficients whose uncertainty straddles zero; see
-{doc}`../methods/sampling/perturbation-pipeline` for why. MF 35 is always drawn linearly,
+Use linear for Legendre coefficients whose uncertainty straddles zero. MF 35 is always drawn linearly,
 as absolute deltas, whatever `space` says. A misspelt space is refused before the tape is
 read.
 
@@ -553,20 +546,17 @@ on Windows needs the usual `if __name__ == "__main__":` guard.
   them; `"stated"` splits further, into the blocks the file states.
 - `samplingMethod` (`"sobol"`, `"lhs"`, `"random"`), `decompositionMethod` (`"svd"`,
   `"eigen"`), `nullTol`, `seed`: passed to the draw.
-- `crossSectionSums`, `sumBlocks`: how stated sums are kept consistent; see
-  {doc}`../methods/perturbation/cross-section-perturbation`.
+- `crossSectionSums`, `sumBlocks`: how stated sums are kept consistent.
 - `angularPositivity`: `"report"` (default) or `"repair"` for negative angular
-  distributions; see {doc}`../methods/perturbation/legendre-angular-perturbation` and
-  {doc}`../methods/perturbation/tabulated-angular-perturbation`.
-- `maxOutgoingPoints`: a cap on the size of a perturbed fission-spectrum table; see
-  {doc}`../methods/perturbation/fission-spectrum-perturbation`.
+  distributions.
+- `maxOutgoingPoints`: a cap on the size of a perturbed fission-spectrum table.
 - `labelPrefix`: the label of each realisation (`realization-0000`, ...).
 - `mat`: the MAT number of a tape written from a GNDS source.
 
 ## Perturbing a multiplicity
 
 The same call perturbs $\bar\nu$. The total is rebuilt from its components on every
-sample (see {doc}`../methods/perturbation/multiplicity-perturbation`):
+sample:
 
 ```python
 run = perturbFromModel("U235_nubar.endf", {"multiplicity": [455, 456]}, 2,
