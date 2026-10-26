@@ -32,6 +32,24 @@ def test_a_negative_response_has_a_positive_relative_uncertainty():
     assert result["percent_unc_observed"] == pytest.approx(positive["percent_unc_observed"])
 
 
+def test_without_sigmas_nothing_is_called_nuclear_data():
+    """No per-sample sigma, no decomposition: NaN, not a zero that reads as "none"."""
+    y, _ = _samples(1.0)
+    result = fastTMC(y_val=y, n_bootstrap=50, random_seed=1, verbose=False)
+    assert result["percent_unc_observed"] > 0
+    assert np.isnan(result["percent_unc_nuclear_data"])
+    assert np.isnan(result["percent_unc_statistical"])
+    assert all(np.isnan(result["ci"]["percent_unc_nuclear_data"]))
+
+
+def test_zero_sigmas_give_the_whole_spread_to_nuclear_data():
+    y, _ = _samples(1.0)
+    result = fastTMC(y_val=y, y_sigma=np.zeros_like(y), n_bootstrap=50, random_seed=1,
+                     verbose=False)
+    assert result["percent_unc_statistical"] == 0.0
+    assert result["percent_unc_nuclear_data"] == pytest.approx(result["percent_unc_observed"])
+
+
 def test_the_summary_table_skips_a_zero_mean_without_failing():
     good = fastTMC(*_samples(1.0), n_bootstrap=20, random_seed=1, verbose=False)
     zero = dict(good, mean_tally=0.0)

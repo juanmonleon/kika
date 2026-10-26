@@ -571,6 +571,13 @@ def _stage_line(sid, record, run, rd):
     d = record.get("details") or {}
     status = record.get("status")
     if status in (None, "skipped") and not record.get("category"):
+        if sid == "heating":
+            # heating=None has no stage of its own and still puts KERMA and
+            # damage in every ACE and HDF5 file; only heating=False leaves them out.
+            if getattr(getattr(run, "plan", None), "heating", None) is None:
+                return ("No stage of its own: the ACE and HDF5 files carry KERMA (MT301) "
+                        "and damage (MT444), computed when they are written.")
+            return "Not requested: the files carry no KERMA or damage."
         return "Not requested."
     if status in ("skipped", "rejected"):
         from .process import PROCESSING_REJECTION_CATEGORIES

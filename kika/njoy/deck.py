@@ -14,6 +14,13 @@ from .viewr_defs import ViewrPlot
 from .plotr_defs import PlotrJob
 
 
+#: The parameters that name a tape unit, whichever module carries them.
+_TAPE_KEYS = frozenset({
+    "nin", "nout", "nendf", "npend", "ngout", "ngout1", "ngout2", "ngend", "ngendf",
+    "nace", "ndir", "nplot", "nmatx",
+})
+
+
 class InputDeck:
     """Builder for NJOY input decks — add modules, then render or save.
 
@@ -38,6 +45,10 @@ class InputDeck:
         self._leapr_tape: int | None = None
         self._plotr_tape: int | None = None
         self._next_tape: int = -20
+        # Every unit a module has named, so that an automatic tape never lands
+        # on one the caller chose: moder(nout=-21) and then reconr() would
+        # otherwise both get -21, and RECONR would read and write one tape.
+        self._used_units: set[int] = set()
 
     # ------------------------------------------------------------------
     # Auto-chaining helpers
@@ -46,6 +57,9 @@ class InputDeck:
     def _alloc_tape(self) -> int:
         """Allocate the next available tape number (negative = binary)."""
         self._next_tape -= 1
+        while abs(self._next_tape) in self._used_units:
+            self._next_tape -= 1
+        self._used_units.add(abs(self._next_tape))
         return self._next_tape
 
     def _resolve_input(self, explicit: int | None, attr: str, label: str) -> int:
@@ -1131,6 +1145,9 @@ class InputDeck:
     # ------------------------------------------------------------------
 
     def _append(self, name: str, params: dict[str, Any]) -> None:
+        for key, value in params.items():
+            if key in _TAPE_KEYS and isinstance(value, int) and value != 0:
+                self._used_units.add(abs(value))
         self._lines.extend(generate_module(name, params))
         self._modules.append(name)
 

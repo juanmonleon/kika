@@ -66,8 +66,11 @@ def fastTMC(
 
         - 'mean_tally': Mean value across samples
         - 'percent_unc_observed': Total observed uncertainty (%)
-        - 'percent_unc_statistical': Statistical uncertainty component (%)
-        - 'percent_unc_nuclear_data': Nuclear data uncertainty component (%)
+        - 'percent_unc_statistical': Statistical uncertainty component (%);
+          NaN without ``y_sigma``
+        - 'percent_unc_nuclear_data': Nuclear data uncertainty component (%);
+          NaN without ``y_sigma``, which gives nothing to separate it from
+          the statistical part
         - 'is_reliable': Boolean flag indicating if decomposition is reliable
         - 'bootstrap': Bootstrap resampling results
         - 'ci': Confidence intervals for key quantities
@@ -265,7 +268,10 @@ def _values_only_analysis(
     """Analysis for values-only data (no per-sample uncertainties).
 
     Computes total observed uncertainty with bootstrap CIs but cannot
-    decompose into statistical vs nuclear-data components.
+    decompose into statistical vs nuclear-data components, so those two are
+    NaN: zero would read as "no nuclear-data uncertainty". A response with no
+    statistical noise (a deterministic calculation) passes ``y_sigma`` as
+    zeros, and the decomposition then gives the whole spread to nuclear data.
     """
     y = np.asarray(y_val, dtype=float)
     N = y.size
@@ -296,7 +302,7 @@ def _values_only_analysis(
     ci = {
         'mean_tally': tuple(np.percentile(bs_mean, [lo, hi])),
         'percent_unc_observed': tuple(np.percentile(bs_obs, [lo, hi])),
-        'percent_unc_nuclear_data': (0.0, 0.0),
+        'percent_unc_nuclear_data': (np.nan, np.nan),
     }
 
     if verbose:
@@ -311,13 +317,13 @@ def _values_only_analysis(
     return {
         'mean_tally': mean_tally,
         'percent_unc_observed': pct_obs,
-        'percent_unc_statistical': 0.0,
-        'percent_unc_nuclear_data': 0.0,
+        'percent_unc_statistical': np.nan,
+        'percent_unc_nuclear_data': np.nan,
         'is_reliable': True,  # Not applicable — no decomposition to judge
-        'stat_to_obs_ratio': 0.0,
+        'stat_to_obs_ratio': np.nan,
         'bootstrap': {
             'mean_tally': bs_mean,
-            'percent_unc_nuclear_data': np.zeros(n_bootstrap),
+            'percent_unc_nuclear_data': np.full(n_bootstrap, np.nan),
             'percent_unc_observed': bs_obs,
         },
         'ci': ci,
