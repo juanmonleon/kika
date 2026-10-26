@@ -111,7 +111,8 @@ __all__ = ["perturbFromModel", "RunResult", "EMITTERS", "TAPE_EMITTERS", "AceOpt
 EMITTERS = ("endf-delta", "endf-tape", "gnds", "ace", "hdf5")
 
 #: The emitters that need nothing beyond the run itself -- every one but
-#: ``"ace"``, which needs NJOY and an :class:`AceOptions`.
+#: ``"ace"``, which needs an :class:`AceOptions` (and NJOY unless its engine is
+#: ``"kika"``), and ``"hdf5"``, which needs an :class:`HDF5Options`.
 TAPE_EMITTERS = ("endf-delta", "endf-tape", "gnds")
 
 
@@ -314,13 +315,17 @@ class RunResult:
     def paths(self, emitter: str) -> List[Path]:
         """Every file one emitter wrote, in sample order.
 
-        For ``"ace"`` that is every ACE of every sample, temperatures in order.
+        For ``"ace"`` that is every ACE of every sample, temperatures in order;
+        for ``"hdf5"``, each sample's ``.h5`` (its overlay ``cross_sections.xml``
+        and report summary stay on ``samples[i]["files"]["hdf5"]``).
         """
         out: List[Path] = []
         for sample in self.samples:
             value = sample["files"].get(emitter)
             if value is None:
                 continue
+            if isinstance(value, dict):
+                value = value["h5"]
             out.extend(value if isinstance(value, list) else [value])
         return out
 

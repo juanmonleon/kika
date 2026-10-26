@@ -149,7 +149,8 @@ names it. How the conversion is done is in
 | `endf-delta` (default) | `NNNN/<stem>_NNNN.endf`: the source tape with only the perturbed sections re-encoded | an ENDF source, given as a path |
 | `endf-tape` | `NNNN/<stem>_NNNN.tape.endf`: the whole tape written from the model | |
 | `gnds` | `NNNN/<stem>_NNNN.gnds.xml`: the evaluated form and the realisation, each under its label | |
-| `ace` | `NNNN/ace/`, one ACE file per temperature, with NJOY's files under `NNNN/njoy/` | `ace=AceOptions(...)` and NJOY |
+| `ace` | `NNNN/ace/`, one ACE file per temperature, with its xsdir line; through NJOY, NJOY's files under `NNNN/njoy/` | `ace=AceOptions(...)`, and NJOY unless `engine="kika"` |
+| `hdf5` | `NNNN/hdf5/<nuclide>.h5`, every temperature in one file, with its `cross_sections.xml` | `hdf5=HDF5Options(...)` |
 
 ```python
 run = perturbFromModel("Fe56.endf", {33: None}, 2, seed=1, outputDir="run3",
@@ -178,8 +179,11 @@ MF 3 in the resonance region would be only the background.
 
 ### ACE files
 
-`ace` runs NJOY on each sample's ENDF tape. It needs a
-{py:class}`~kika.sampling.model_perturbation.AceOptions`:
+`ace` writes one ACE file per temperature for each sample. It needs a
+{py:class}`~kika.sampling.model_perturbation.AceOptions`, whose `engine` says who makes
+the tables: NJOY (`"njoy"`, the default) or kika itself (`"kika"`).
+
+With `engine="njoy"`, NJOY runs on each sample's ENDF tape:
 
 ```python
 import os
@@ -204,8 +208,73 @@ the same lookup the resonance reconstruction uses. With extensions, each ACE fil
 NJOY's input, output and listing. After a run, `run.aceFailures()` lists every
 `(sample, temperature, return code)` whose NJOY run failed.
 
-When `ace` is asked for without an ENDF emitter, the sample's tape is written anyway
-(`endf-delta` from a tape source) because NJOY needs it.
+When `ace` is asked for through NJOY without an ENDF emitter, the sample's tape is
+written anyway (`endf-delta` from a tape source, `endf-tape` from a GNDS source) because
+NJOY needs it.
+
+With `engine="kika"`, no tape is written and NJOY is not run. Each realisation is
+processed by kika from its 0 K forms (the perturbed cross-sections at 0 K, then
+Doppler-broadened to each temperature, with the sample's own heating and damage) and
+written as ACE by the same processing `process_endf(...).write_ace` uses (see
+{doc}`../methods/processing/processing-chain`). The unresolved-resonance probability
+tables are computed once, on the unperturbed evaluation, and shared by every sample:
+their shapes are not perturbed, while the sample's MF 33 factors reach the cross-sections
+they are built on.
+
+```python
+ace = AceOptions(engine="kika", temperatures=(293.6, 600.0))
+run = perturbFromModel("Fe56.endf", {33: None}, 2, seed=1, outputDir="kikaace",
+                       formats=("ace",), ace=ace, resonanceRegion="evaluated")
+sorted(p.name for p in (run.outputDir / "0001" / "ace").iterdir())
+```
+
+```text
+['26056.02c', '26056.02c.xsdir', '26056.06c', '26056.06c.xsdir']
+```
+
+Without `extensions`, each table is named `<ZAID>.<suffix>` from the standard suffix of its
+temperature (`02c` for 293.6 K, `06c` for 600 K); a temperature with no standard suffix
+needs `extensions`, and `validate` says so before anything is drawn. `njoyExe`,
+`libraryName`, `njoyVersion`, `keepNjoyFiles` and `fullAceListing` do not apply.
+`omit` (any of `"urr"`, `"kerma"`, `"damage"`), `thnmax` and `thinning` set the
+processing as they do for {py:class}`~kika.sampling.model_perturbation.HDF5Options`. A
+sample that fails is recorded with return code 1 and the error, and
+`run.aceFailures()` lists it as it lists a failed NJOY run. On the micro-tape each
+sample took about 150 s for its two temperatures (measured 2026-10-26).
+
+### OpenMC HDF5 files
+
+`hdf5` writes each sample in OpenMC's HDF5 format (see {doc}`../methods/formats/hdf5`),
+processed by kika in the same way as the `engine="kika"` ACE files, from the sample's
+0 K forms, with the probability tables of the unperturbed evaluation. It needs a
+{py:class}`~kika.sampling.model_perturbation.HDF5Options`:
+
+```python
+from kika.sampling.model_perturbation import HDF5Options
+
+run = perturbFromModel("Fe56.endf", {33: None}, 2, seed=1, outputDir="h5",
+                       formats=("hdf5",), hdf5=HDF5Options(temperatures=(293.6, 600.0)),
+                       resonanceRegion="evaluated")
+sorted(p.relative_to(run.outputDir).as_posix() for p in run.outputDir.rglob("*.*"))
+```
+
+```text
+['0000/hdf5/Fe56.h5', '0000/hdf5/cross_sections.xml', '0001/hdf5/Fe56.h5',
+ '0001/hdf5/cross_sections.xml', 'conditioning_plan.json', 'factors.parquet', 'run.log',
+ 'run.log.jsonl', 'run_metadata.json']
+```
+
+All the temperatures go into one `.h5` per sample. `formats=("hdf5",)` without `hdf5=`
+raises `ValueError` before the tape is read, and so does an `HDF5Options` with no
+temperature, an `omit` naming anything but `urr`, `kerma` and `damage`, or a
+`baseLibrary` that does not exist. `baseLibrary` names an existing OpenMC library (its
+`cross_sections.xml` or the directory holding it): each sample then also gets
+`NNNN/cross_sections.xml`, an overlay that sends this nuclide to the sample's file and
+every other material to the base library, so a transport run points at one file per
+sample. `run.paths("hdf5")` lists each sample's `.h5`; the overlay and the summary of
+the conversion report are in `run.samples[i]["files"]["hdf5"]` (keys `h5`,
+`cross_sections` when there is a base library, and `report`). On the micro-tape each
+sample took about 150 s for its two temperatures (measured 2026-10-26).
 
 ## Rehearsing a run: `dryRun`
 
@@ -472,7 +541,8 @@ re-reads Fe56.endf once and writes whole samples
 `par/0003/Fe56_0003.endf` is byte-identical to `run1/0003/Fe56_0003.endf`. Each worker
 re-reads the source, so the source must be a path. A dry run, or a run of one sample,
 ignores `nWorkers` and says so in a note. On a cluster node, pass the CPUs the job was
-given; with `ace` among the formats, one NJOY run per worker is what fills them. Because
+given; with `ace` or `hdf5` among the formats, one NJOY run or one kika processing per
+worker is what fills them. Because
 the pool starts new processes, a script that calls `perturbFromModel` with `nWorkers > 1`
 on Windows needs the usual `if __name__ == "__main__":` guard.
 
@@ -529,6 +599,13 @@ All passed on 2026-10-11 unless marked:
   full tape, `::test_a_real_ace_comes_out_of_a_real_perturbed_tape`, runs only with
   `NJOY_EXECUTABLE` and `KIKA_FULL_TAPE` set; passed 2026-10-21 on JEFF-4.0 U-235, and on
   Fe-56 the pre-flight refuses its every-block request before NJOY runs);
+- ACE without NJOY: `kika/sampling/tests/test_ace_kika_engine.py` (an unperturbed sample
+  is, word for word, the table `process_endf(...).write_ace` writes; two samples are two
+  tables of one layout);
+- the HDF5 emitter: `kika/sampling/tests/test_hdf5_is_an_emitter.py` (two samples are
+  two different files of one nuclide, `run.paths("hdf5")` lists them, the overlay sends
+  the nuclide to the sample and the rest to the base library, the options are checked
+  before anything is drawn; passed 2026-10-26);
 - the emitters end to end, $\bar\nu$ included:
   `kika/sampling/tests/test_perturbing_from_the_model_end_to_end.py`.
 

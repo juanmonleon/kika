@@ -18,6 +18,9 @@ Perturbing from the model
 .. autoclass:: kika.sampling.model_perturbation.AceOptions
    :members:
 
+.. autoclass:: kika.sampling.model_perturbation.HDF5Options
+   :members:
+
 Applying factors to model nodes
 -------------------------------
 

@@ -1,13 +1,19 @@
-# Cross-section perturbation pipelines
+# The file-level perturbation pipelines (legacy)
 
-```{note}
-These are kika's file-level samplers. For new work use
-{py:func}`kika.sampling.model_perturbation.perturbFromModel`, which draws all the blocks
-of a request together, including the covariance between $\sigma$ and the Legendre
-coefficients that MF 34 states when MF 33 and MF 34 of one reaction are requested.
+```{admonition} Legacy
+:class: warning
+These are kika's file-level samplers. They are kept so that ensembles drawn with them
+can be reproduced and extended. For new work use
+{py:func}`kika.sampling.model_perturbation.perturbFromModel`. It perturbs cross-sections,
+angular distributions (Legendre and tabulated), multiplicities and fission spectra in one
+run, and draws all the blocks of a request together, including the covariance between
+$\sigma$ and the Legendre coefficients that MF 34 states when MF 33 and MF 34 of one
+reaction are requested. It keeps stated sums consistent with their partials, records
+every covariance repair in a conditioning plan, writes a run log, and writes ENDF, GNDS,
+ACE (through NJOY or kika's own ACE writer) and OpenMC HDF5.
 ```
 
-Three pipelines live in `kika/sampling/` for sampling perturbed nuclear data:
+Four pipelines live in `kika/sampling/` for sampling perturbed nuclear data:
 
 | Pipeline                       | Perturbs                  | Driven by   | Output                |
 |--------------------------------|---------------------------|-------------|-----------------------|
@@ -16,15 +22,15 @@ Three pipelines live in `kika/sampling/` for sampling perturbed nuclear data:
 | `endf_perturbation.py`         | MF4 Legendre coefficients | MF34 cov    | ENDF (+ optional ACE) |
 | `combined_perturbation.py`     | both σ(E) **and** MF4     | MF33 + MF34 | ENDF + PENDF + ACE    |
 
-This guide focuses on `pendf_perturbation` and `combined_perturbation` — the
-two newer pipelines built on the MF33 native grid. `ace_perturbation` is the
-older multigroup path; prefer the others.
+This guide covers `pendf_perturbation` and `combined_perturbation`, the two
+pipelines that work on the MF33 native grid. `ace_perturbation` perturbs on a
+multigroup grid instead.
 
 ---
 
-## How the new pipelines are wired
+## How the pipelines are wired
 
-Both new pipelines split into two stages so the combined orchestrator can
+Both pipelines split into two stages so the combined orchestrator can
 reuse the single-physics building blocks without re-running NJOY:
 
 - **Stage A** — sample on the covariance native grid, write a perturbed tape
@@ -54,17 +60,15 @@ kika/sampling/
 │   ├── load_mf33_covariance()
 │   ├── apply_factors_to_pendf_mf3()
 │   └── perturb_pointwise_xs()
-├── endf_perturbation.py         # MF34 → MF4 ENDF (pre-existing)
+├── endf_perturbation.py         # MF34 → MF4 ENDF
 │   └── perturb_ENDF_files()
 ├── combined_perturbation.py     # MF33 + MF34 paired
 │   └── perturb_ENDF_PENDF_combined()
-├── run_pendf_perturbation.py    # CLI wrapper
-├── run_combined_perturbation.py # CLI wrapper
 └── generators.py, utils.py, diagnostics.py   (shared sampling math + parquet)
 
 kika/processing/njoy_pendf_cache.py
     # SHA256-keyed PENDF cache — runs NJOY RECONR on first call,
-    # returns cached tape on subsequent calls. Used by both new pipelines.
+    # returns cached tape on subsequent calls. Used by both pipelines.
 
 kika/njoy/
 ├── run_njoy.py                  # full chain (RECONR → ACER)
@@ -74,7 +78,7 @@ kika/njoy/
     ├── NJOY_INPUT_TEMPLATE              # standard chain
     └── NJOY_INPUT_TEMPLATE_WITH_PENDF   # RECONR replaced by `moder 26 -21`
 
-tests/
+kika/sampling/tests/
 ├── test_mf33_sampling.py        # unit tests (no NJOY)
 ├── test_pendf_perturbation.py   # integration (skips without NJOY+ENDF)
 └── test_combined_perturbation.py
@@ -118,10 +122,10 @@ summary = perturb_PENDF_files(
     mt_list=[2, 102],          # MTs to perturb
     num_samples=100,
     output_formats=("pendf", "ace"),
-    njoy_exe="/home/MONLEON-JUAN/NJOY2016/build/njoy",
+    njoy_exe="/path/to/njoy",
     ace_temperatures=[293.6],
     ace_library_name="endfb81",
-    pendf_cache_dir="/mnt/c/Users/MONLEON-DE-LA-JAN/AppData/Local/Temp/kika_pendf_cache",
+    pendf_cache_dir="/path/to/kika_pendf_cache",   # optional
     output_dir="/path/to/output",
     seed=42,
     nprocs=4,
@@ -140,7 +144,7 @@ All knobs live as ALL_CAPS constants at the top of `pendf_perturbation.py`
 and as defaults in `perturb_PENDF_files`. The ones that actually move the
 needle:
 
-- `space="log"` — sampling space (preserves σ > 0; locked-in default).
+- `space="log"` — sampling space (keeps σ > 0; the default).
 - `pin_threshold_bins=True` — below-threshold bins forced to factor 1.
 - `max_relative_std=3.0` — 300 % cap on per-bin σ relative std.
 - `psd_method="auto"` + `autofix=None` — autofix is off by default; set to
@@ -190,10 +194,10 @@ summary = perturb_ENDF_PENDF_combined(
     legendre_coeffs=[1, 2, 3],
     num_samples=200,
     generate_ace=True,
-    njoy_exe="/home/MONLEON-JUAN/NJOY2016/build/njoy",
+    njoy_exe="/path/to/njoy",
     ace_temperatures=[293.6],
     ace_library_name="endfb81",
-    pendf_cache_dir="/mnt/c/Users/MONLEON-DE-LA-JAN/AppData/Local/Temp/kika_pendf_cache",
+    pendf_cache_dir="/path/to/kika_pendf_cache",   # optional
     output_dir="/path/to/output",
     seed=42,
     nprocs=8,
@@ -210,9 +214,8 @@ long run.
 
 ACE/xsdir are co-located per-sample. All isotopes and temperatures for
 sample `NNNN` share the same `ace/<NNNN>/` directory; the filename
-`<ZAID>.<ext>` disambiguates them. The extension is **caller-supplied**
-via `extensions=['06c']` (paired with `temperatures=[600]`), not derived
-from a hardcoded `K_TO_SUFFIX` lookup.
+`<ZAID>.<ext>` disambiguates them. The caller gives the extension through
+`ace_extensions=["06c"]`, one per entry of `ace_temperatures` (here `[600.0]`).
 
 ### `pendf_perturbation`
 
@@ -273,8 +276,8 @@ audit trail is complete.
 
 ### PENDF cache
 
-Lives at `pendf_cache_dir` (default = `tempfile.gettempdir()/kika_pendf_cache`,
-override on WSL to `/mnt/c/Users/MONLEON-DE-LA-JAN/AppData/Local/Temp/kika_pendf_cache`).
+Lives at `pendf_cache_dir` (default `tempfile.gettempdir()/kika_pendf_cache`).
+Point it at a directory every process of the run can reach.
 Files are keyed by `<sha256(ENDF bytes)>_<tolerance>.pendf`, so a byte
 edit to the ENDF invalidates the cache automatically.
 
@@ -306,7 +309,7 @@ the end of the file's processing.
 
 The positivity primitives live in `kika/sampling/mf4_positivity.py`
 (`check_mf4_positivity`, `project_mf4_to_positive`). They are pure
-functions and have a standalone test suite in `tests/test_mf4_positivity.py`.
+functions and have their own tests in `kika/sampling/tests/test_mf4_positivity.py`.
 
 ## Verifying a run
 
@@ -360,28 +363,19 @@ linearizer responds to even small σ changes), which by itself proves the
 
 ## Warnings you may see (and what they mean)
 
-- **`UserWarning: Skipping MF sections without parsers: [6, 8, 10, 12, 13, 14]`**
-  Emitted by `kika.endf.parsers.parse_endf` whenever an ENDF tape contains
-  MF sections kika doesn't have a parser for (energy-angle distributions,
-  decay/yield, photon production). Benign — the pipeline only needs
-  MF1/2/3/4/33/34 and ignores the rest. MF32, the resonance-parameter
-  covariance, used to appear in this list and no longer does: it is read as of
-  2026-08-10, though nothing in the sampling pipeline consumes it yet.
+- **`UserWarning: Skipping MF sections without parsers: [...]`**
+  Emitted by `kika.endf.parsers.parse_endf` when a tape holds an MF that kika's
+  ENDF reader does not decode. The pipelines need only MF 1, 2, 3, 4, 33 and 34,
+  so the warning does not affect them.
 
 - **`Unexpected MT152 in MF2 (only MT151 expected), skipping`**
-  ENDF/B-VIII added MT152 (energy-dependent self-shielding) under MF2. The
-  parser only reads MT151 (resonance parameters) and skips the rest cleanly.
+  Some evaluations carry MT 152 (unresolved-resonance self-shielding data) under
+  MF 2. The MF 2 parser reads MT 151 (resonance parameters) and skips the rest.
 
 - **`MTx: skipping MTy (circular NC reference)`**
-  The MF33 NC LTY=0 sum-rule resolver detected an MT referring back to one
-  already being resolved up the call stack. The recursion is bounded
-  by `MF33MT.resolve_nc_lty0`'s `_resolving` guard — safe to ignore.
-
-- **`RuntimeWarning: divide by zero encountered in log` at `mf33.py`**
-  Was emitted by `MF33MT._bin_average_xs` when a covariance bin edge was
-  exactly 0 eV. The current code guards `np.log(grid[g])` against
-  non-positive edges and just skips the degenerate bin (output 0). If
-  you still see it, the kika install lags behind the local source.
+  The MF33 NC LTY=0 sum-rule resolver found an MT referring back to one already
+  being resolved up the call stack. `MF33MT.resolve_nc_lty0` stops the recursion
+  there; the warning is informative.
 
 ## Common gotchas
 
@@ -426,16 +420,8 @@ linearizer responds to even small σ changes), which by itself proves the
 
 ## Reference: the test fixtures
 
-Integration tests in `tests/test_pendf_perturbation.py` and
-`tests/test_combined_perturbation.py` look for:
-
-- `NJOY_EXECUTABLE` env var **or** any of the hard-coded fallbacks (e.g.
-  `/home/MONLEON-JUAN/NJOY2016/build/njoy`).
-- `KIKA_ENDF_FILES` env var pointing to a directory holding
-  `Fe56_jeff4.0_n.endf`, **or** the default `<repo>/files/endf/`.
-
-Both skip cleanly when either is absent. For a quick smoke on this WSL
-host the JENDL-5 Fe-56 tape at
-`/mnt/c/Users/MONLEON-DE-LA-JAN/Documents/endf_files/260560.jendl5` works
-well — it carries MF34 only for MT=2 and exercises an NC LTY=0
-sub-subsection in MF33, both of which are good corners to hit.
+The integration tests in `kika/sampling/tests/test_pendf_perturbation.py` and
+`kika/sampling/tests/test_combined_perturbation.py` take NJOY and the reference
+Fe-56 tape from the fixtures of the root `conftest.py`: NJOY from
+`$NJOY_EXECUTABLE`, the tapes from the directory `$KIKA_TAPES` points to. Both
+skip cleanly when either is absent.
