@@ -123,6 +123,11 @@ def _mev(values) -> np.ndarray:
 
 def _regions(function) -> Tuple[np.ndarray, np.ndarray, List[int], List[int]]:
     """``(x, y, NBT, INT)`` of a 1-d function; NR = 0 for one lin-lin region, as NJOY writes it."""
+    if isinstance(function, _m().Constant1d):
+        # A GNDS constant (H-1's capture photon multiplicity): the two-point
+        # table over its domain that an ENDF tape states for the same yield.
+        x = np.array([function.domainMin, function.domainMax], dtype=float)
+        return x, np.full(2, float(function.constant)), [], []
     x, y, pairs = function.toEndfRegions()
     pairs = [(int(b), int(c)) for b, c in pairs]
     if len(pairs) == 1 and pairs[0][1] == 2:

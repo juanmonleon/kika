@@ -1861,6 +1861,11 @@ def _gas(work, leaves, heated, grids, zaTarget=None):
     totals: Dict[int, Dict[str, np.ndarray]] = {}
     starts: Dict[int, Dict[str, int]] = {}
     for leaf in leaves:
+        if leaf.mt == 2:
+            # Elastic emits no gas, as GASPR counts it. A GNDS file lists the
+            # target's recoil among elastic's products (H1 on H-1, He4 on He-4),
+            # which made H-1's MT203 equal its elastic cross section.
+            continue
         for gasMT, form in gasMultiplicities(leaf.reaction, zaTarget).items():
             forms = form if isinstance(form, tuple) else (form,)
             for T, values in heated.items():
