@@ -213,7 +213,7 @@ def _calculate_perturbed_density(original_material: Material, perturbed_material
     perturbed_material.density = new_mass_density
     perturbed_material.density_unit = 'g/cc'
     
-    print(f"Density change: {mass_density:.4e} → {new_mass_density:.4e} g/cm³")
+    print(f"Density change: {mass_density:.4e} -> {new_mass_density:.4e} g/cm3")
 
 
 def generate_pert_cards(inputfile, cell, reactions, material, energies=None,

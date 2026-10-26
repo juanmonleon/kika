@@ -138,7 +138,7 @@ def get_or_create_pendf(
             )
         return target
 
-    print(f"  PENDF cache miss for {endf_path.name} — running NJOY reconr "
+    print(f"  PENDF cache miss for {endf_path.name} - running NJOY reconr "
           f"(tolerance={tolerance})")
 
     # Local import — keeps module light when caller doesn't need NJOY.

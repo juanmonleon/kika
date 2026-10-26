@@ -34,17 +34,17 @@ class Input:
         sections = []
         
         # ====================== MATERIALS SECTION ======================
-        if self.materials is not None and hasattr(self.materials, 'mat'):
+        if self.materials is not None and hasattr(self.materials, 'by_id'):
             mat_section = "-" * header_width + "\n"
             mat_section += f"{'MATERIALS':^{header_width}}\n"
             mat_section += "-" * header_width + "\n"
             
-            mat_count = len(self.materials.mat)
+            mat_count = len(self.materials.by_id)
             mat_section += f"{'Number of materials:':{label_width}} {mat_count}\n"
             
             if mat_count > 0:
                 # Get material IDs
-                mat_ids = sorted(self.materials.mat.keys())
+                mat_ids = sorted(self.materials.by_id.keys())
                 
                 # Format material IDs in rows of 10
                 if mat_count <= 10:
@@ -70,7 +70,7 @@ class Input:
                 # Check if using weight or atomic fractions
                 weight_count = 0
                 atomic_count = 0
-                for mat in self.materials.mat.values():
+                for mat in self.materials.by_id.values():
                     if getattr(mat, "is_weight", False):
                         weight_count += 1
                     else:

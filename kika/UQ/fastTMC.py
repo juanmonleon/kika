@@ -304,8 +304,8 @@ def _values_only_analysis(
         print(f"  Mean tally value      : {mean_tally:.5e}")
         print(f"  Observed uncertainty  : {pct_obs:.2f}%")
         print(f"\nBootstrap {int(ci_level*100)}% CIs:")
-        print(f"  • Mean tally          : {ci['mean_tally'][0]:.5e} – {ci['mean_tally'][1]:.5e}")
-        print(f"  • Observed unc.       : {ci['percent_unc_observed'][0]:.2f}% – "
+        print(f"  * Mean tally          : {ci['mean_tally'][0]:.5e} - {ci['mean_tally'][1]:.5e}")
+        print(f"  * Observed unc.       : {ci['percent_unc_observed'][0]:.2f}% - "
               f"{ci['percent_unc_observed'][1]:.2f}%")
 
     return {
@@ -414,7 +414,7 @@ def _dataframe_analysis(
             print(f"\nNOT OK tallies (statistical uncertainty too high):")
             for tally in unreliable_tallies:
                 res = all_results[tally]
-                print(f"   • {tally}: Statistical is {res['stat_to_obs_ratio']*100:.0f}% of observed")
+                print(f"   * {tally}: Statistical is {res['stat_to_obs_ratio']*100:.0f}% of observed")
         
         print("=" * 70)
     
@@ -428,11 +428,11 @@ def _print_summary(mean_tally: float, pct_obs: float, pct_stat: float, pct_nuc: 
     """Print formatted summary of FTMC results."""
     # ALWAYS show the result - user-friendly and concise
     if is_reliable:
-        print(f"✓ OK - Use Nuclear Data uncertainty ({pct_nuc:.2f}%)")
+        print(f"OK - Use Nuclear Data uncertainty ({pct_nuc:.2f}%)")
     else:
-        print(f"✗ NOT OK - Use Observed uncertainty ({pct_obs:.2f}%) instead")
+        print(f"NOT OK - Use Observed uncertainty ({pct_obs:.2f}%) instead")
         print(f"           Statistical uncertainty is {stat_to_obs_ratio*100:.0f}% of observed (threshold: <{reliability_threshold*100:.0f}%)")
-        print(f"           → Reduce statistical uncertainty from your results or use observed uncertainty")
+        print(f"           -> Reduce statistical uncertainty from your results or use observed uncertainty")
     
     # Detailed breakdown only if verbose
     if verbose:
@@ -540,10 +540,10 @@ def _compute_confidence_intervals(
     
     if verbose:
         print(f"\nBootstrap {int(ci_level*100)}% CIs:")
-        print(f"  • Mean tally                : {ci['mean_tally'][0]:.5e} – {ci['mean_tally'][1]:.5e}")
-        print(f"  • Observed unc.             : {ci['percent_unc_observed'][0]:.2f}% – "
+        print(f"  * Mean tally                : {ci['mean_tally'][0]:.5e} - {ci['mean_tally'][1]:.5e}")
+        print(f"  * Observed unc.             : {ci['percent_unc_observed'][0]:.2f}% - "
               f"{ci['percent_unc_observed'][1]:.2f}%")
-        print(f"  • Nuclear-data unc.         : {ci['percent_unc_nuclear_data'][0]:.2f}% – "
+        print(f"  * Nuclear-data unc.         : {ci['percent_unc_nuclear_data'][0]:.2f}% - "
               f"{ci['percent_unc_nuclear_data'][1]:.2f}%")
     
     return ci

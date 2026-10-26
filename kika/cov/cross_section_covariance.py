@@ -1706,7 +1706,7 @@ class CrossSectionCovariance:
 
         # --- Print nicely formatted summary ---
         print("=" * 80)
-        print(f"Eigenvalue block contributions (idx={idx}, λ={λ:.4e})")
+        print(f"Eigenvalue block contributions (idx={idx}, lambda={λ:.4e})")
         print(f"Top {top_n} block contributions (tol={tol}, symmetric={symmetric}, relative={relative}):")
         print("-" * 80)
         header = (
@@ -4011,7 +4011,7 @@ class CrossSectionCovariance:
                     iso_i, rxn_i = pairs[bi]
                     iso_j, rxn_j = pairs[bj]
                     old = R[i, j]
-                    print(f"  ({iso_i},{rxn_i})-g{gi+1:02d} ↔ ({iso_j},{rxn_j})-g{gj+1:02d}   {old:+.3e} → +0.000e+00")
+                    print(f"  ({iso_i},{rxn_i})-g{gi+1:02d} <-> ({iso_j},{rxn_j})-g{gj+1:02d}   {old:+.3e} -> +0.000e+00")
             else:
                 print("[COV] [CORRELATION] No entries exceeded zero_threshold")
 
@@ -4024,7 +4024,7 @@ class CrossSectionCovariance:
         clip_pairs = np.argwhere(to_clip & tri_mask)
 
         if verbose and clip_pairs.size:
-            print(f"[COV] [CORRELATION] Clipped {len(clip_pairs)} off-diagonal pairs to ±{max_abs_corr}:")
+            print(f"[COV] [CORRELATION] Clipped {len(clip_pairs)} off-diagonal pairs to +/-{max_abs_corr}:")
             for i, j in clip_pairs:
                 bi, gi = divmod(i, G)
                 bj, gj = divmod(j, G)
@@ -4033,7 +4033,7 @@ class CrossSectionCovariance:
                 old = R_clipped[i, j]
                 new = np.sign(old) * max_abs_corr
                 if abs(old - new) > report_tol:
-                    print(f"  ({iso_i},{rxn_i})-g{gi+1:02d} ↔ ({iso_j},{rxn_j})-g{gj+1:02d}   {old:+.3e} → {new:+.3e}")
+                    print(f"  ({iso_i},{rxn_i})-g{gi+1:02d} <-> ({iso_j},{rxn_j})-g{gj+1:02d}   {old:+.3e} -> {new:+.3e}")
         R_clipped[to_clip] = np.sign(R_clipped[to_clip]) * max_abs_corr
 
         # --- enforce exact 1’s on diagonal (or 0 if var==0) ---

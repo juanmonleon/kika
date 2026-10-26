@@ -972,10 +972,10 @@ class SensitivityData:
                     # If using print statements for coefficient details
                     if print_coefficients:
                         print(f"\n--- Energy Bin: {e_low:.2e} - {e_high:.2e} MeV ---")
-                        print(f"R₀ = {r0:.4e} ± {e0_relative*100:.2f}% (rel) = {r0:.4e} ± {e0_abs:.4e} (abs)")
-                        print(f"c₁ = {c1:.4e} ± {c1_err_rel*100:.2f}% (rel) = {c1:.4e} ± {c1_err_abs:.4e} (abs)")
-                        print(f"c₂ = {c2:.4e} ± {c2_err_rel*100:.2f}% (rel) = {c2:.4e} ± {c2_err_abs:.4e} (abs)")
-                        print(f"c₂/c₁ = {c2/c1 if c1 != 0 else float('nan'):.4e}")
+                        print(f"R0 = {r0:.4e} +/- {e0_relative*100:.2f}% (rel) = {r0:.4e} +/- {e0_abs:.4e} (abs)")
+                        print(f"c1 = {c1:.4e} +/- {c1_err_rel*100:.2f}% (rel) = {c1:.4e} +/- {c1_err_abs:.4e} (abs)")
+                        print(f"c2 = {c2:.4e} +/- {c2_err_rel*100:.2f}% (rel) = {c2:.4e} +/- {c2_err_abs:.4e} (abs)")
+                        print(f"c2/c1 = {c2/c1 if c1 != 0 else float('nan'):.4e}")
                         max_p_abs = max(abs(p_range[0]), abs(p_range[1]))
                         nonlin = (c2 * (max_p_abs/100)) / c1 * 100 if c1 != 0 else float('nan')
                         print(f"Ratio (c2*p/c1) at {max_p_abs}%: {nonlin:.2f}%")
