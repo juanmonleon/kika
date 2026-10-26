@@ -7,7 +7,7 @@ and reads the inputs and outputs of the transport codes that use the data. Array
 NumPy, tables pandas or xarray, plots matplotlib.
 
 Contributions are welcome on GitHub at
-`https://github.com/juanmonleon/KIKA.git <https://github.com/juanmonleon/KIKA.git>`_.
+`https://github.com/juanmonleon/kika <https://github.com/juanmonleon/kika>`_.
 
 Current Features
 ----------------
@@ -18,6 +18,7 @@ The Model and the Formats
 - ``kika.read`` and ``kika.write`` for ENDF-6, GNDS, ACE, G4NDL and OpenMC HDF5, through
   one in-memory model shaped and named after GNDS
 - A conversion report with each read and write: what was lost, approximated or refused
+- ENDF tapes read section by section on demand, edited and written back
 - Thermal-scattering libraries indexed and read in any of these formats
 
 Processing an Evaluation
@@ -25,77 +26,52 @@ Processing an Evaluation
 
 - Resonance reconstruction (Breit-Wigner, Reich-Moore, R-matrix limited, unresolved
   range) and Doppler broadening, without NJOY
-- Unresolved-resonance probability tables, heating (KERMA) and damage
-- PENDF, OpenMC HDF5 or GNDS output, each read back and checked before it is kept
+- Unresolved-resonance probability tables, heating (KERMA), damage and gas production
+- PENDF, ACE, OpenMC HDF5 or GNDS output, each read back and checked before it is kept,
+  with an HTML report of the run; ``kika.process`` and the ``kika process`` command
+- ACE tables for thermal scattering, dosimetry, photo-atomic and photonuclear data
+
+Checking an Evaluation
+~~~~~~~~~~~~~~~~~~~~~~
+
+- Physics and consistency checks of a tape or a whole library, with a report;
+  ``kika.check`` and the ``kika check`` command
+- Checks of the covariance files (MF 31-35, 40)
 
 Covariances and Sampling
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-- Checks of the covariance files of a tape or a library (MF 31-35, 40)
+- Covariance matrices from ENDF, SCALE and NJOY, their decomposition and plots
 - Conditioning before a draw, and perturbed evaluations drawn from the covariances
   (cross-sections, angular distributions, multiplicities, fission spectra), written as
   ENDF, ACE, GNDS or OpenMC HDF5
 
-MCNP Input Processing
-~~~~~~~~~~~~~~~~~~~~~
+Sensitivities and Uncertainty Propagation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-- Parsing MCNP input files for materials and PERT cards
-- Conversion between atomic and weight fractions for materials
-- Generation and printing of materials in MCNP input format
-- PERT card generation for sensitivity analysis
+- PERT cards for MCNP sensitivity calculations, and sensitivity coefficients from their
+  results, with second-order checks of linearity
+- Sensitivity Data Files (SDF) read and written in the SCALE format, from MCNP or Serpent
+- The sandwich rule, the similarity index :math:`c_k`, and Total Monte Carlo statistics
+- ICSBEP/DICE benchmarks ranked by similarity, and SINBAD experimental covariances
 
-MCTAL Analysis
-~~~~~~~~~~~~~~
+Transport Codes
+~~~~~~~~~~~~~~~
 
-- Parsing of MCNP tally output (MCTAL) files, every tally axis kept
+- MCNP input files: materials and PERT cards read, materials created, converted and
+  written back
+- MCNP tally output (MCTAL), every tally axis kept, as labelled xarray or pandas tables,
+  with the Tally Fluctuation Chart
 - Mesh tallies (FMESH) from MESHTAL text files and MCNP 6.3 HDF5 runtapes
-- Tally results and their uncertainties as labelled xarray or pandas tables
-- Access to Tally Fluctuation Chart (TFC) data
-- Conversion of tally results to pandas DataFrames
-- Visualization of tally convergence
+- Serpent materials and sensitivity output, and MCNP weight-window (WWINP) files
 
-Sensitivity Analysis
-~~~~~~~~~~~~~~~~~~~~
+Experimental Data
+~~~~~~~~~~~~~~~~~
 
-- Preparation of MCNP input files for sensitivity calculations using PERT cards
-- Processing and analysis of MCNP perturbation calculations
-- Generation and visualization of sensitivity profiles
-- Creation of Sensitivity Data Files (SDF) compatible with SCALE
-- Analysis of linearity and visualization of sensitivity coefficients
-
-ACE File Processing
-~~~~~~~~~~~~~~~~~~~
-
-- Parsing of ACE (A Compact ENDF) format nuclear data files
-- Reading and processing xsdir files
-- Cross-section data extraction and analysis
-
-Covariance Matrix Handling
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-- Reading covariance matrices from SCALE and NJOY outputs
-- Covariance matrix decomposition and analysis
-- Heatmap visualization for correlation and covariance data
-- Support for MF34 angular distribution covariances
-
-ENDF Data Processing
-~~~~~~~~~~~~~~~~~~~~
-
-- Reading and parsing Evaluated Nuclear Data Files (ENDF)
-- Support for various ENDF file sections (MF/MT combinations)
-- Data extraction and conversion utilities
+- Angular distributions from EXFOR, with frame conversion and the energy resolution of
+  each experiment
 
 Energy Group Structures
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-- Predefined energy group structures commonly used in nuclear analysis
-- Support for SCALE, VITAMIN, and other standard group structures
-
-Additional Features
-~~~~~~~~~~~~~~~~~~~
-
-- **Serpent**: Support for Serpent Monte Carlo code outputs
-- **NJOY**: Integration with NJOY nuclear data processing results
-- **Sampling**: Tools for uncertainty quantification through sampling
-- **Plotting**: Consistent visualization utilities for nuclear data
-
+- Predefined group structures (SCALE, VITAMIN-J, CASMO, WIMS, ECCO, XMAS and others)

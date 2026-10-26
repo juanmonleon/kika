@@ -1,209 +1,98 @@
-Quickstart Guide
-================
+# Quickstart
 
-This guide will help you get started with KIKA by walking through basic usage examples.
+## Installation
 
-Installation
-------------
+kika needs Python 3.12 or later:
 
-Install KIKA using pip (requires Python 3.12 or later):
+```bash
+pip install kika-nd
+```
 
-.. code-block:: bash
+`pip install --upgrade kika-nd` upgrades it, and `pip show kika-nd` says which version
+is installed.
 
-   pip install kika-nd
+## Read an evaluation
 
+{py:func}`kika.read` opens an ENDF (Evaluated Nuclear Data File), GNDS, ACE, G4NDL or
+OpenMC HDF5 file, telling the format from the content, and gives back the same model
+every time:
 
-To upgrade to the latest version:
+```python
+import kika
 
-1. Clear the pip cache (optional but recommended):
+ev = kika.read("n-026_Fe_056.endf")
+E, xs = ev.cross_section(2)     # elastic, as two NumPy arrays (eV, b)
+print(ev.summary())             # what the file contained
+ev.report.isClean               # False when something could not be read into the model
+```
 
-   .. code-block:: bash
+{doc}`reading_files` explains the model and the report.
 
-      pip cache purge
+## Check it
 
-2. Upgrade KIKA:
+{py:func}`kika.check` checks a file, a folder or a list of files against the format,
+mathematics and physics, covariances included, and changes nothing:
 
-   .. code-block:: bash
+```python
+report = kika.check("n-026_Fe_056.endf")
+print(report)                         # one line per finding, worst first
+report.to_html("Fe56.check.html")
+```
 
-      pip install --upgrade kika-nd
+## Process it for transport
 
-3. Verify the installation:
+{py:func}`kika.process` takes an evaluation to transport files with kika's own
+processing (no NJOY), checks every stage, and writes a report of the run:
 
-   .. code-block:: bash
+```python
+def main():
+    run = kika.process("n-026_Fe_056.endf")        # 293.6 K unless temperatures=[...]
+    run.write("out/", ["ace", "hdf5"])             # ACE + xsdir, OpenMC HDF5 + cross_sections.xml
+    run.report_document().save("out/Fe56.html")
 
-      pip show kika-nd
+if __name__ == "__main__":
+    main()
+```
 
-   This command will display the package information, including the currently installed version.
+The processing runs in several processes, so on Windows a script that calls it needs the
+`if __name__ == "__main__":` guard. From the command line, the same is
+`kika process n-026_Fe_056.endf --to ace hdf5 -o out/`.
 
+## Convert it
 
+{py:func}`kika.write` writes the model in another format:
 
-Basic Usage
------------
+```python
+kika.write(ev, "Fe56.gnds.xml", format="gnds")
+```
 
-Import the KIKA package:
+## Perturb it
 
-.. code-block:: python
+{py:func}`kika.sampling.model_perturbation.perturbFromModel` draws perturbed
+evaluations from the covariances the file states:
 
-   import kika
+```python
+from kika.sampling.model_perturbation import perturbFromModel
 
-Working with MCNP Input Files
------------------------------
+run = perturbFromModel("n-026_Fe_056.endf", {33: None, 34: [2]}, 100, seed=1,
+                       outputDir="samples")
+run.paths("endf-delta")    # samples/0000/n-026_Fe_056_0000.endf, ...
+```
 
-Parse an MCNP input file:
+On a tape whose resolved resonances are stated as parameters, the run first
+reconstructs them with NJOY, so that the factors act on the resonance cross-section;
+point the `NJOY_EXECUTABLE` environment variable at NJOY, or pass `njoyExe=`.
 
-.. code-block:: python
+## Transport-code files
 
-   from kika import read_mcnp
-   
-   # Parse an input file
-   input_data = read_mcnp('path/to/input_file.i')
+```python
+inp = kika.read_mcnp("model.i")          # materials and PERT cards
+mctal = kika.read_mctal("mctal")         # tallies as labelled xarray tables
+mesh = kika.read_meshtal("meshtal")      # FMESH, text or the MCNP 6.3 HDF5 runtape
+sens = kika.compute_sensitivity(inputfile="model.i", mctalfile="mctal", tally=4,
+                                zaid=26056, label="Fe-56")
+```
 
-   # Print a summary of the input file
-   input_data
-   
-   # Access materials or PERT cards (if available)
-   materials = input_data.materials
-   perturbations = input_data.perturbation
-   
-   # Print a summary of materials
-   materials
-
-   # Print materials in MCNP format
-   print(materials)
-
-   # Print a summary of perturbations
-   perturbations
-
-
-
-Working with MCTAL Files
-------------------------
-
-Parse and analyze MCNP tally files:
-
-.. code-block:: python
-
-   import kika
-   from kika import read_mctal
-   
-   # Parse a mctal file
-   mctal = read_mctal('path/to/mctal_file')
-   
-   # Print a summary of the mctal file
-   mctal
-
-   # Access tallies
-   tally = mctal[tally_number]
-   
-   # Print a summary of the tally
-   tally
-
-   # Labelled values (xarray), and the energy-integrated tally
-   tally.to_xarray()
-   tally.total("energy")
-
-   # FMESH mesh tallies: MESHTAL text or the MCNP 6.3+ HDF5 runtape
-   meshtal = kika.read_meshtal('path/to/meshtal')
-   meshtal[4].to_xarray()
-
-
-Working with Sensitivities
---------------------------
-
-Process perturbation data for sensitivity analysis:
-
-.. code-block:: python
-
-   from kika.sensitivities import compute_sensitivity
-   
-   # Compute sensitivity data
-   sensdata = compute_sensitivity(
-       input_path='path/to/input.i',
-       mctal_path='path/to/mctal',
-       tally=4,
-       zaid=26056,
-       label='Fe-56'
-   )
-   
-   # Print a summary of the sensitivity data
-   sensdata
-
-
-
-Working with SDF Files
-----------------------
-
-
-Create and process Sensitivity Data Files (SDF) compatible with SCALE:
-
-.. code-block:: python
-
-   from kika.sensitivities.sdf import compute_sensitivity, create_sdf_data
-   
-   # Read the sensitivity data for each set
-   sensdata1 = compute_sensitivity('path/to/input_file1', 'path/to/mctal_file1', 4, [pertuberd_nuclide], 'label-1')
-   sensdata2 = compute_sensitivity('path/to/input_file1', 'path/to/mctal_file2', 4, [pertuberd_nuclide], 'label-2')
-
-   # Create a list with the sensitivity data
-   sensdata_list = [sensdata1, sensdata2]
-
-   # Print detector energy bins
-   sensdata1.energies
-
-   # Create an sdf data object with the list of sensitivity data
-   sdf_data = create_sdf_data(sensdata_list, energy='1.00e+00_3.00e+00', title='Example SDF Data')
-
-   # Print a summary of the sdf data
-   sdf_data
-   
-   # Write the sdf data to a sdf format file
-   sdf_data.write_file()
-
-
-
-Next Steps
-----------
-
-For more detailed examples, see the :doc:`tutorials/index`.
-
-
-Working with ACE Files
-----------------------
-
-Parse ACE format nuclear data files:
-
-.. code-block:: python
-
-   from kika import read_ace
-   
-   # Read an ACE file
-   ace_data = read_ace('path/to/ace_file')
-
-
-Working with Covariance Matrices
---------------------------------
-
-Read and process covariance matrices from SCALE or NJOY:
-
-.. code-block:: python
-
-   from kika import read_coverx, read_covfil
-
-   # Read a COVERX covariance matrix (text or binary, auto-detected)
-   covmat = read_coverx('path/to/coverx_file')
-
-   # Read an NJOY COVFIL/GENDF covariance matrix
-   covmat = read_covfil('path/to/njoy_covmat')
-
-
-Working with ENDF Files
------------------------
-
-Read Evaluated Nuclear Data Files:
-
-.. code-block:: python
-
-   from kika.endf import read_endf
-   
-   # Read an ENDF file
-   endf_data = read_endf('path/to/endf_file')
+The tutorials take these one by one: {doc}`tutorials/input_files`,
+{doc}`tutorials/mctal_files`, {doc}`tutorials/mesh_tallies`, {doc}`tutorials/pert_cards`
+and {doc}`tutorials/sensitivity_analysis`.

@@ -1,13 +1,11 @@
 Tutorials
 =========
 
-This section contains detailed tutorials to help you learn how to use KIKA effectively.
-
-
+Worked examples of common tasks.
 
 .. toctree::
    :maxdepth: 1
-   
+
    input_files
    mctal_files
    mesh_tallies
@@ -15,12 +13,10 @@ This section contains detailed tutorials to help you learn how to use KIKA effec
    sensitivity_analysis
    native_resonance_reconstruction
 
-
-You can run these tutorials by cloning the KIKA repository and opening the notebooks:
+The MCNP input and MCTAL files the MCNP tutorials use are in ``examples/data/`` of the
+kika repository:
 
 .. code-block:: bash
 
-   git clone https://github.com/juanmonleon/KIKA.git
-   cd KIKA/examples
-   jupyter notebook
-
+   git clone https://github.com/juanmonleon/kika.git
+   cd kika/examples/data

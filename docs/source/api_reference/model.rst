@@ -13,6 +13,10 @@ The doors
 
 .. autofunction:: kika.identify
 
+.. autofunction:: kika.check
+
+.. autofunction:: kika.process
+
 The model
 ---------
 

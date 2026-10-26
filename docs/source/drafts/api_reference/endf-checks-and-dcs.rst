@@ -4,7 +4,7 @@ kika.endf: checks of evaluated data and angular readings
 One door to every check
 -----------------------
 
-.. autofunction:: kika.check
+:func:`kika.check` is documented with the other doors, in :doc:`/api_reference/model`.
 
 Data and covariance checks
 --------------------------

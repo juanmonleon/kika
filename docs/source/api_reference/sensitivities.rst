@@ -37,6 +37,12 @@ kika.sensitivities.sdf
    :show-inheritance:
 
 
+kika.sensitivities.sdf_parser
+-----------------------------
+
+.. automodule:: kika.sensitivities.sdf_parser
+   :members: read_sdf
+
 kika.sensitivities.profile
 --------------------------
 

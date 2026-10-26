@@ -10,7 +10,7 @@ staged entry point for an ENDF-6 tape is :func:`kika.endf.process_endf`.
 The one call
 ------------
 
-.. autofunction:: kika.process
+:func:`kika.process` is documented with the other doors, in :doc:`/api_reference/model`.
 
 .. autoclass:: kika._process.Processing
    :members: write, report_document

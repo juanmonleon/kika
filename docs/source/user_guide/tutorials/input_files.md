@@ -1,231 +1,213 @@
-Working with MCNP Input Files
-=============================
+# Working with MCNP input files
 
-This tutorial covers how to use KIKA to work with MCNP input files, including parsing, manipulation, and generation.
+How to read the materials and PERT cards of an MCNP input file, change or create
+materials, and write them back. The examples run on the input files under
+`examples/data/` in the kika repository; the outputs shown are what they printed.
 
-Parsing Input Files
--------------------
+kika reads two parts of an MCNP input file: the material cards and the PERT cards.
+Cells, surfaces and the rest of the file are not parsed, and they are left untouched
+when materials are written back.
 
-The first step in working with MCNP input files is to parse them into Python objects:
+## Reading an input file
 
-.. code-block:: python
+{py:func}`kika.mcnp.parse_input.read_mcnp` returns an
+{py:class}`~kika.mcnp.input.Input` with two attributes, `materials` and `perturbation`.
+Printing it gives a summary of both:
 
-   from kika import read_mcnp
-   
-   # Parse an MCNP input file
-   input_file = read_mcnp('path/to/input.i')
-   
-   # Print a summary of the input file
-   input_file.print_summary()
+```python
+import kika
 
-Accessing Input Components
---------------------------
+inp = kika.read_mcnp("examples/data/inputfile_example_1.i")
+print(inp)
+```
 
-Once parsed, you can access various components of the input file:
+```text
+============================================================
+                      MCNP Input Data
+============================================================
 
-.. code-block:: python
+------------------------------------------------------------
+                         MATERIALS
+------------------------------------------------------------
+Number of materials:      4
+Material IDs:             100000, 200100, 300000, 300001
+Atomic fraction mats:     4
 
-   # Access cells
-   cells = input_file.cells
-   
-   # Get a specific cell
-   cell_5 = cells[5]
-   print(f"Cell 5 material: {cell_5.material}")
-   print(f"Cell 5 density: {cell_5.density}")
-   
-   # Access surfaces
-   surfaces = input_file.surfaces
-   
-   # Get a specific surface
-   surf_10 = surfaces[10]
-   print(f"Surface 10 type: {surf_10.type}")
-   print(f"Surface 10 parameters: {surf_10.params}")
-   
-   # Access materials
-   materials = input_file.materials
-   
-   # Get a specific material
-   mat_100 = materials.mat[100]
-   print(f"Material 100 nuclides: {list(mat_100.nuclide.keys())}")
+Use .materials to access material data.
 
-Working with Materials
-----------------------
+------------------------------------------------------------
+                       PERTURBATIONS
+------------------------------------------------------------
+Number of perturbations:  1760
+Perturbation IDs:         1-1760
+Reactions available:      1, 2, 4, 51, 52, 102, 103, 107
+Methods available:        -3, -2, 1, 2, 3
+Perturbed materials:      300001
+Energy range:             1.00e-11 - 2.00e+01 MeV
+Energy bins:              44
+Energy structure:         SCALE44
+```
 
-KIKA provides detailed access to material definitions:
+## Materials
 
-.. code-block:: python
+`inp.materials` is a {py:class}`~kika.mcnp.material.MaterialCollection`. Materials are
+looked up by number through `by_id`:
 
-   # Print materials summary
-   materials.print_summary()
-   
-   # Access a specific material
-   mat = materials.mat[100]
-   
-   # Get all material IDs
-   material_ids = list(materials.mat.keys())
-   print(f"Available material IDs: {material_ids}")
-   
-   # Get material composition
-   for zaid, nuclide in mat.nuclide.items():
-       fraction_type = "Weight" if nuclide.fraction < 0 else "Atomic"
-       print(f"ZAID: {zaid}, Element: {nuclide.element}, "
-             f"Fraction: {abs(nuclide.fraction):.6e} ({fraction_type})")
-   
-   # Accessing nuclide details
-   zaid = list(mat.nuclide.keys())[0]  # First nuclide
-   nuclide = mat.nuclide[zaid]
-   print(f"Element symbol: {nuclide.element}")
-   print(f"Neutron library: {nuclide.nlib if nuclide.nlib else 'Using material default'}")
-   print(f"Photon library: {nuclide.plib if nuclide.plib else 'Using material default'}")
+```python
+materials = inp.materials
+list(materials.by_id)             # [100000, 200100, 300000, 300001]
 
-Converting Between Atomic and Weight Fractions
-----------------------------------------------
+mat = materials.by_id[300000]
+mat.fraction_type, mat.libs       # ('ao', {'nlib': '06c'})
+```
 
-MCNP uses positive values for atomic fractions and negative values for weight fractions.
-KIKA allows converting between these formats:
+Each {py:class}`~kika.mcnp.material.Material` keeps its nuclides in `nuclide`, keyed by
+symbol and reachable by ZAID too. Fractions are stored as positive numbers, and
+`fraction_type` says whether they are atomic (`'ao'`) or weight (`'wo'`) fractions; the
+sign MCNP uses on the card is applied only when the material is written.
 
-.. code-block:: python
+```python
+for symbol, nuclide in mat.nuclide.items():
+    print(symbol, nuclide.zaid, f"{nuclide.fraction:.6e}", nuclide.libs)
+```
 
-   # Create a copy of a material
-   new_material = mat.copy(new_id=mat.id+1000)
-   
-   # Convert to atomic fractions
-   new_material.to_atomic_fraction()
-   print(new_material)
-   
-   # Convert to weight fractions
-   new_material.to_weight_fraction()
-   print(new_material)
-   
-   # Convert all materials at once
-   materials.to_atomic_fractions()  # Convert all to atomic fractions
-   materials.to_weight_fractions()  # Convert all to weight fractions
+```text
+C12 6012 9.126127e-03 {}
+C13 6013 1.022318e-04 {}
+...
+Fe56 26056 8.810613e-01 {}
+...
+```
 
-Converting Natural Elements to Isotopes
----------------------------------------
+```python
+mat.nuclide["Fe56"] is mat.nuclide[26056]    # the same nuclide
+mat.get_effective_library("Fe56")            # '06c', the material's nlib
+```
 
-KIKA provides functionality to convert materials containing natural elements (ZAIDs ending in '00') 
-into their constituent isotopes based on natural abundances:
+A nuclide's own `libs` override the material's; `get_effective_library` gives the one
+MCNP would use.
 
-.. code-block:: python
+## Atomic and weight fractions
 
-   # Create a material with natural elements
-   natural_mat = kika.mcnp.material.Mat(id=200, nlib="80c")
-   
-   # Add natural carbon (ZAID 6000)
-   natural_mat.add_nuclide(zaid=6000, fraction=0.5)
-   
-   # Add natural oxygen (ZAID 8000)
-   natural_mat.add_nuclide(zaid=8000, fraction=0.5)
-   
-   print("Material with natural elements:")
-   print(natural_mat)
-   
-   # Convert all natural elements to isotopes
-   natural_mat.expand_natural_elements()
-   
-   print("Material after converting natural elements to isotopes:")
-   print(natural_mat)
-   
-   # You can also convert only specific natural elements:
-   another_mat = kika.mcnp.material.Mat(id=300, nlib="80c")
-   another_mat.add_nuclide(zaid=6000, fraction=0.3)  # Natural carbon
-   another_mat.add_nuclide(zaid=8000, fraction=0.7)  # Natural oxygen
-   
-   # Convert only carbon to isotopes
-   another_mat.expand_natural_elements(zaid_to_expand=6000)
-   
-   print("Material after converting only carbon to isotopes:")
-   print(another_mat)
+`to_weight_fraction` and `to_atomic_fraction` convert a material in place. `copy` gives
+a new material with another number, so the original is kept:
 
-Creating New Materials
-----------------------
+```python
+w = mat.copy(new_id=300100)
+w.to_weight_fraction()
+w.fraction_type, w.nuclide["Fe56"].fraction    # ('wo', 0.8888965...)
+w.to_atomic_fraction()
+w.fraction_type, w.nuclide["Fe56"].fraction    # ('ao', 0.8810613...)
+```
 
-You can create new materials from scratch using the KIKA API:
+## Creating a material
 
-.. code-block:: python
+A material is built nuclide by nuclide, or element by element for natural elements.
+`add_nuclide` and `add_element` take the fraction type of the value they are given:
 
-   from kika.mcnp.material import Mat, Materials
-   
-   # Create a new material - water (H2O)
-   water = Mat(id=100, nlib="80c")
-   
-   # Add hydrogen (atomic fraction 2/3)
-   water.add_nuclide(zaid=1001, fraction=2/3)
-   
-   # Add oxygen (atomic fraction 1/3)
-   water.add_nuclide(zaid=8016, fraction=1/3)
-   
-   # Create a materials collection with our new material
-   new_materials = Materials()
-   new_materials.add_material(water)
-   
-   # Convert to weight fractions
-   water.to_weight_fraction()
+```python
+from kika.materials import Material, MaterialCollection
 
-Modifying Input Files
----------------------
+steel = Material(id=500, libs={"nlib": "80c"})
+steel.add_element("Fe", 0.7, "wo")
+steel.add_element("Cr", 0.2, "wo")
+steel.add_nuclide("Ni58", 0.1, "wo")
+print(steel.to_mcnp())
+```
 
-You can also modify input files programmatically:
+```text
+m500 nlib=80c
+     24000         -2.000000e-01   $ Cr
+     26000         -7.000000e-01   $ Fe
+     28058         -1.000000e-01   $ Ni58
+```
 
-.. code-block:: python
+`expand_natural_elements` replaces natural elements with their isotopes, by natural
+abundance. Given element symbols it expands only those:
 
-   # Change a cell's material
-   input_file.cells[5].material = 200
-   
-   # Modify a surface parameter
-   input_file.surfaces[10].params[0] = 1.5
-   
-   # Add a nuclide to a material
-   from kika.mcnp.material import Nuclide
-   materials.mat[100].add_nuclide(zaid=1001, fraction=2.0)
-   
-   # TODO: Write the modified input to a new file
-   # This functionality is planned for future releases
+```python
+steel.expand_natural_elements("Cr")
+list(steel.nuclide)    # ['Fe', 'Ni58', 'Cr50', 'Cr52', 'Cr53', 'Cr54']
+steel.expand_natural_elements()
+list(steel.nuclide)    # ['Ni58', 'Cr50', 'Cr52', 'Cr53', 'Cr54', 'Fe54', 'Fe56', 'Fe57', 'Fe58']
+```
 
-Working with Perturbations
---------------------------
+A density is set with its unit, and is written as a comment on the material card, with
+the atom density kika derives from it:
 
-KIKA provides tools for analyzing MCNP perturbation cards:
+```python
+steel.set_density(7.9, "g/cc")
+print(steel.to_mcnp())
+```
 
-.. code-block:: python
+```text
+m500 nlib=80c  $ KIKA_DENSITY: 7.900000e+00 g/cc, 8.614467e-02 atoms/b-cm
+     24050         -8.347373e-03   $ Cr50
+     ...
+     28058         -1.000000e-01   $ Ni58
+```
 
-   # Access perturbations
-   perturbations = input_file.perturbation
-   
-   # Get a list of all perturbation IDs
-   pert_ids = list(perturbations.pert.keys())
-   print(f"Available perturbation IDs: {pert_ids}")
-   
-   # Access a specific perturbation
-   pert_id = pert_ids[0]  
-   pert = perturbations.pert[pert_id]
-   print(pert)
-   
-   # Convert to pandas DataFrame for easier analysis
-   pert_df = perturbations.to_dataframe()
-   
-   # Extract unique reaction types and energy bins
-   reactions = perturbations.reactions
-   energies = perturbations.pert_energies
+`to_serpent` writes the same material as a Serpent `mat` card.
 
-Generating Perturbation Cards
------------------------------
+## Writing materials back to an input file
 
-KIKA can help generate perturbation cards for sensitivity studies:
+`MaterialCollection.write_to_mcnp` updates the material cards of an input file. It
+rewrites only the materials that changed or are new, so the others keep their formatting
+and comments, and returns the numbers it wrote. Without `output_filepath`, the input file
+is updated in place.
 
-.. code-block:: python
+```python
+inp = kika.read_mcnp("model.i")
+inp.materials.add_material(steel)
+inp.materials.write_to_mcnp("model.i", output_filepath="model_new.i")    # [500]
+sorted(kika.read_mcnp("model_new.i").materials.by_id)    # [500, 100000, 200100, 300000]
+```
 
-   from kika.mcnp.pert_generator import generate_material_perturbations
-   
-   perturbations = generate_material_perturbations(
-       material_id=300,
-       cell_ids=[3, 5, 7, 9],
-       zaid=26056,
-       rxns=[1, 2, 102],  # MT numbers for reactions
-       energy_groups=[1e-11, 1e-10, 1e-9, 1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1, 20],
-       methods=[1, 2, 3, -1, -2, -3]
-   )
-   
-   for pert in perturbations[:5]:  # Print first 5 perturbations
-       print(pert)
+`MaterialCollection.from_mcnp` and `from_serpent` read only the materials of a file;
+`to_file` and `write_to_serpent` write them.
+
+## PERT cards
+
+`inp.perturbation` holds the PERT cards of the file. Each card is in `pert`, keyed by its
+number:
+
+```python
+pert = inp.perturbation
+len(pert.pert)       # 1760
+pert.reactions       # [1, 2, 4, 51, 52, 102, 103, 107]
+pert.materials       # [300001]
+print(pert.pert[1])
+```
+
+```text
+Perturbation ID: 1
+Particle type:   n
+Cells:           3, 5, 7, 9
+Material:        300001
+Density:         1.603930e-01
+Method:          2
+Reaction:        1
+Energy range:    1.000000e-11 - 3.000000e-09 MeV
+```
+
+`pert_energies` gives the energy boundaries of the cards (45 here, the SCALE 44-group
+structure), and `to_dataframe` one row per card:
+
+```python
+pert.to_dataframe().head(3)
+```
+
+```text
+   particle        cell  material       rho  method  reaction         e_min         e_max  zaid original_material
+id
+1         n  3, 5, 7, 9    300001  0.160393       2         1  1.000000e-11  3.000000e-09  None              None
+2         n  3, 5, 7, 9    300001  0.160393       3         1  1.000000e-11  3.000000e-09  None              None
+3         n  3, 5, 7, 9    300001  0.160393      -2         1  1.000000e-11  3.000000e-09  None              None
+```
+
+The `zaid` and `original_material` columns are filled when the cards are read with
+`pert_metadata`, which tells `read_mcnp` which nuclide and material each range of cards
+belongs to. With it, `pert.zaids`, `reactions_for_zaid` and `materials_for_zaid` answer
+per nuclide.
+
+Writing PERT cards for a sensitivity study is the subject of {doc}`pert_cards`.

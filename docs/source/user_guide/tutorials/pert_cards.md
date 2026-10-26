@@ -1,157 +1,112 @@
-Setting up Sensitivity Analysis with PERT Cards
-===============================================
+# Setting up a sensitivity calculation with PERT cards
 
-This tutorial demonstrates how to prepare MCNP input files for sensitivity analysis using KIKA's perturbation card generation capabilities.
+How to prepare an MCNP input file for a sensitivity calculation: make a perturbed copy of
+a material, write it into the input file, and generate the PERT cards that perturb it
+reaction by reaction and energy group by energy group. The examples run on
+`examples/data/inputfile_example_0.i`, copied to the working directory as `model.i`; the
+outputs shown are what they printed. Reading the results back is
+{doc}`sensitivity_analysis`.
 
-Overview
---------
+## The approach
 
-The process of setting up sensitivity analysis involves:
+A PERT card tells MCNP to estimate how a tally would change if, in the given cells, the
+material were replaced by another material at another density, for one reaction and one
+energy range. To get the sensitivity to one nuclide, the replacement material is the
+original with that nuclide's amount doubled (a +100 % change of its atom density), and
+the cards are written once per reaction and per energy group. MCNP's first-order
+(`METHOD=2`) and second-order (`METHOD=3`) estimates of the change then give the
+sensitivity coefficients and their Taylor terms.
 
-1. Reading an existing MCNP input file
-2. Creating a perturbed material for a specific nuclide
-3. Generating PERT cards for sensitivity calculations
-4. Preparing the input for MCNP execution
+## 1. Perturb the material
 
-After completing these steps, you'll have an MCNP input file ready for sensitivity analysis calculations.
+{py:func}`kika.mcnp.pert_generator.perturb_material` works on the material collection
+read from the file. It adds a material with the nuclide's fraction raised by 100 %,
+numbered `material_id * 100 + 1` unless `pert_mat_id` says otherwise, and returns it:
 
-Setting up the Environment
---------------------------
+```python
+import kika
 
-Start by importing the necessary libraries:
+inp = kika.read_mcnp("model.i")
+pert_mat = kika.perturb_material(inp.materials, 300000, "Fe56", density=-7.85)
+```
 
-.. code-block:: python
+```text
+Density change: 7.8500e+00 -> 1.4828e+01 g/cm3
+Perturbed material 30000001 added to collection (100% increase in Fe56)
+```
 
-   import kika
-   from pathlib import Path
+`density` is the density of the original material, with MCNP's sign convention
+(negative in g/cm³, positive in atoms/b-cm). It is needed when the material card does
+not carry one, as here, where the density is on the cell cards. From it kika computes
+the density of the perturbed material, which is what the PERT cards need. The nuclide
+can be given by symbol (`"Fe56"`) or ZAID (`26056`). `fraction_type` chooses atomic or
+weight fractions for the new material (by default those of the original), and
+`in_place=False` returns a new collection and leaves `inp.materials` as it was.
+{py:func}`~kika.mcnp.pert_generator.perturb_materials` does the same for several
+materials holding the same nuclide.
 
-   # Setup paths
-   repo_root = Path.cwd().resolve().parent
-   data_dir = repo_root / 'examples' / 'data'
-   
-   # Input file path
-   inputfile = data_dir / 'inputfile_example_0.i'
-   
-   # Create a working copy of the input file
-   working_file = data_dir / 'inputfile_example_0_working.i'
-   
-   with open(inputfile, 'r') as f_in, open(working_file, 'w') as f_out:
-       f_out.write(f_in.read())
-       print(f"Created working copy: {working_file}")
+## 2. Write it into the input file
 
-Reading the MCNP Input File
----------------------------
+`perturb_material` changes only the collection in memory. Write the new material into
+the file with `write_to_mcnp`, which adds the materials that are new and leaves the
+others as they were:
 
-The first step is to read the MCNP input file to understand its structure and examine the materials:
+```python
+inp.materials.write_to_mcnp("model.i")    # [30000001]
+```
 
-.. code-block:: python
+## 3. Generate the PERT cards
 
-   # Read the input file
-   input_data = kika.read_mcnp(working_file)
-   
-   # Check if our target material exists
-   material_number = 300000
-   if material_number in input_data.materials.mat:
-       print(f"Material {material_number} found in the input file")
-       
-       # Display material composition
-       print(input_data.materials.mat[material_number])
+{py:func}`kika.mcnp.pert_generator.generate_pert_cards` writes the cards into the input
+file. It reads the density for `RHO=` from the material card it is given, so the
+perturbed material has to be in the file first (step 2):
 
-Creating a Perturbed Material
------------------------------
+```python
+kika.generate_pert_cards(
+    "model.i",
+    cell=[3, 5, 7, 9],                       # the cells holding the material
+    reactions=[1, 2, 4, 51, 102],            # MT numbers
+    material=30000001,                       # the perturbed material
+    energies=kika.energy_grids.SCALE44,      # group boundaries, in MeV
+    order=2,                                 # METHOD=2 and METHOD=3
+)
+```
 
-For sensitivity analysis, we need to create a perturbed version of the material of interest:
+```text
+PERT1:n CELL=3 5 7 9 MAT=30000001 RHO=-1.482784e+01 METHOD=2 RXN=1 &
+     ERG=1.000000e-11 3.000000e-09
+PERT2:n CELL=3 5 7 9 MAT=30000001 RHO=-1.482784e+01 METHOD=3 RXN=1 &
+     ERG=1.000000e-11 3.000000e-09
+...
+```
 
-.. code-block:: python
+That is 5 reactions × 44 groups × 2 methods = 440 cards. The arguments:
 
-   # Perturb Fe-56 of the material
-   kika.perturb_material(
-       inputfile=working_file,
-       material_number=300000,
-       density=-7.85,
-       nuclide=26056,
-       pert_mat_id=None,  # Will use default: material_number*100 + 1
-       in_place=True,
-       format='atomic'  # Output in atomic fractions
-   )
+- `energies`: the group boundaries in MeV, MCNP's unit, written as given.
+  `kika.energy_grids` holds the usual structures (`SCALE44`, `SCALE56`, `SCALE238`,
+  `SCALE252`, `VITAMINJ175`, ...). `energy_range=(low, high)` keeps only the boundaries
+  inside a range, and `energies=None` writes energy-integrated cards.
+- `order`: `1` writes only first-order cards (`METHOD=2`); `2`, the default, also the
+  second-order ones (`METHOD=3`) that {doc}`sensitivity_analysis` uses to check how
+  linear the response is.
+- `errors=True` adds the exact-error cards (`METHOD=-2`, `-3` and `1`). They are rarely
+  needed and cost run time.
+- `density` overrides the density read from the file.
+- `in_place=False` writes to a new file with the suffix `_pert_cards` instead of the
+  input file.
+- With lists for `cell`, `material`, `pert_material` and `pert_density`, one call writes
+  the cards for several materials; see the function's documentation.
 
-The ``perturb_material`` function creates a new material in the MCNP input file with a 100% increase in the specified nuclide (Fe-56 in this example). The new material ID is set to material_number*100 + 1 by default (30000001 in this case).
+`generate_PERTcards` is the same function under its older name.
 
-Generating PERT Cards
----------------------
+## 4. Check what was written
 
-Now we'll generate the PERT cards needed for sensitivity analysis:
+Reading the file back shows the cards:
 
-.. code-block:: python
+```python
+p = kika.read_mcnp("model.i").perturbation
+len(p.pert), p.reactions, p.materials    # (440, [1, 2, 4, 51, 102], [30000001])
+```
 
-   # Define cells, reactions and energy grid
-   cells = [3, 5, 7, 9]  # Cells where perturbation will be applied
-   reactions = [1, 2, 4, 51, 102]  # MT numbers of reactions
-   
-   # We'll use the scale44 energy grid
-   print(f"Energy grid has {len(kika.energyGrids.scale44)} points, creating {len(kika.energyGrids.scale44)-1} energy bins")
-   
-   # Generate PERT cards
-   kika.generate_PERTcards(
-       inputfile=working_file,
-       cell=cells,
-       density=0.01,  # 1% perturbation is typical for sensitivity analysis
-       reactions=reactions,
-       energies=kika.energyGrids.scale44,
-       material=material_number * 100 + 1,  # Use the perturbed material ID
-       order=2,  # Generate both first and second order perturbations
-       errors=False,  # Don't generate error method cards
-       in_place=True  # Add PERT cards to the input file
-   )
-
-Key parameters in the ``generate_PERTcards`` function:
-
-- ``cell``: List of cells where the perturbation will be applied
-- ``density``: Perturbation magnitude (typically 0.01 or 1%)
-- ``reactions``: MT numbers of nuclear reactions to analyze
-- ``energies``: Energy grid for perturbation (built-in options available through ``kika.energyGrids``)
-- ``material``: Material ID of the perturbed material
-- ``order``: Order of perturbation (1 for first-order, 2 for both first and second-order)
-
-Examining the Generated PERT Cards
-----------------------------------
-
-After generating the cards, you can inspect them in the MCNP input file:
-
-.. code-block:: python
-
-   # Read back the file to examine the PERT cards
-   modified_input_data = kika.read_mcnp(working_file)
-   
-   # Display the PERT cards
-   print(modified_input_data.perturbation)
-
-Running MCNP with Prepared Input
---------------------------------
-
-The prepared input file with perturbed material and PERT cards is now ready for MCNP execution. After running MCNP, you'll have output files including a MCTAL file containing the perturbation results.
-
-Analyzing Sensitivity Results
------------------------------
-
-After running MCNP with the prepared input file, you can analyze the results using KIKA's sensitivity analysis tools:
-
-.. code-block:: python
-
-   # Compute sensitivity coefficients for Fe-56
-   sens_fe56 = kika.compute_sensitivity(
-       inputfile="inputfile_example_0_working.i",
-       mctalfile="inputfile_example_0.m", 
-       tally=4,  # Tally number to analyze
-       zaid=26056,  # Fe-56
-       label="Fe-56 Sensitivity"
-   )
-   
-   # Visualize sensitivity profiles
-   sens_fe56.plot_sensitivity(
-       energy="integral",
-       reaction=[1, 2, 4, 51, 102],
-       xlim=(0, 10)  # Limit x-axis to 0-10 MeV
-   )
-
-For more detailed information on analyzing sensitivity results, see the :doc:`sensitivity_analysis` tutorial.
+The input file is then ready for MCNP. The MCTAL file of the run, with the input file,
+is what {doc}`sensitivity_analysis` starts from.
