@@ -187,7 +187,7 @@ def _xs_form(node):
 
 
 def _target_awr(suite) -> Optional[float]:
-    target = suite.PoPs.particles.get(getattr(suite, "target", None))
+    target = suite.PoPs.get(getattr(suite, "target", None))
     mass = getattr(target, "mass", None)
     if mass is None:
         return None

@@ -979,6 +979,10 @@ class _Encoder:
                     xs = np.asarray(host.xs, dtype=float)
                     sigma = float(multiplicity.constant) * np.asarray(host.ys, dtype=float)
                 else:
+                    # One table, or a GNDS regions1d (Pu-240's MF13 photons) flattened
+                    if not hasattr(multiplicity, "xs"):
+                        rx, ry, _, _ = _regions(multiplicity)
+                        multiplicity = NS(xs=rx, ys=ry)
                     xs = np.asarray(multiplicity.xs, dtype=float)
                     sigma = np.asarray(multiplicity.ys, dtype=float) * np.interp(xs, host.xs, host.ys)
                     for i, value in (attributes.get("sigmaGammaWhereSigmaIsZero") or {}).items():

@@ -166,6 +166,7 @@ def _graph(entries,style):
         targets=[_target(part.href,_path(key).rsplit('/crossSection',1)[0]+'/summands/add',entries,style) for part in summands]
         if any(label!=style for _,label in targets):raise UnsupportedResonanceError('sum links must select the requested source style')
         graph[key]=tuple(target for target,_ in targets)
+    _fission_chances(entries,graph)
     order=[];leaves={}
     def visit(key,active):
         if key in active:raise ValueError('cycle in reaction sum graph')
@@ -180,6 +181,21 @@ def _graph(entries,style):
         return covered
     for key in graph:visit(key,set())
     return graph,tuple(order)
+
+
+def _fission_chances(entries,graph):
+    """MT18 is the sum of its chances (MT19-21, 38) wherever they are given.
+
+    An ENDF tape decodes that way (MT18 a sum, the chances reactions). GNDS keeps
+    MT18 a reaction and the chances under ``fissionComponents``, linked to nothing,
+    so the total summed MT18 and the chances were left over: B-VIII.1 Ac-225 and
+    38 other actinides refused to broaden ("overlapping aggregate").
+    """
+    total=[k for k,r in entries.items() if k.container=='reactions' and r.ENDF_MT==18]
+    chances=sorted((k for k,r in entries.items() if k.container=='fissionComponents' and r.ENDF_MT in (19,20,21,38)),
+                   key=lambda k:entries[k].ENDF_MT)
+    if len(total)==1 and chances and total[0] not in graph:
+        graph[total[0]]=tuple(chances)
 
 
 def _sum_leaves(key,graph):
@@ -1156,9 +1172,15 @@ def _resonance_mass(resonances,target_id):
     FUDGE writes MF2's AWRI there and MF1's AWR on the top-level target; the
     resonance parameters were fitted with AWRI, which is also what the ENDF
     route (``context_from_endf``) reconstructs with. So it wins over PoPs's.
+
+    The resolved ranges' only, when there are any: FUDGE writes a local PoPs
+    where a range's AWRI differs from MF1's AWR, so a resolved range without one
+    is at the top-level mass. B-VIII.1 Rh-103's R-matrix range has none and its
+    URR has 102.0216; taken for the whole material, the URR's mass contradicted
+    the R-matrix elastic pair (MF1's 102.0211) and the file refused to process.
     """
     sources=[r.formalism for r in resonances.resolved or []]
-    if resonances.unresolved is not None:sources.append(resonances.unresolved.tabulatedWidths)
+    if resonances.unresolved is not None and not sources:sources.append(resonances.unresolved.tabulatedWidths)
     for source in sources:
         local=getattr(source,'PoPs',None)
         if local is None:continue

@@ -288,6 +288,11 @@ def _interpolation(element: ET.Element) -> Interpolation:
 #: Hf-181/182), on outgoing-energy spectra (``XYs2d`` of ``flat`` ``XYs1d``),
 #: so those 11 do not read today. The other three occur nowhere.
 #:
+#: **Except** ``unitbase-unscaled`` on a Kalbach-Mann ``r`` or ``a``, which is
+#: read as ``unitBase`` (:data:`KALBACH_UNSCALED`): there it is not a choice
+#: between neighbours but FUDGE's fixed spelling of ENDF-6's unit-base INT
+#: (21-25) for those two parameters.
+#:
 #: Accepted **silently**, without a report entry. A warning on every qualified
 #: node would mean roughly 500 warnings on a single evaluation, which is how a
 #: report teaches its reader to ignore it — the same reasoning
@@ -295,6 +300,26 @@ def _interpolation(element: ET.Element) -> Interpolation:
 SPEC_TOKEN_FOR = {
     "unitbase": InterpolationQualifier.unitBase,
 }
+
+
+#: FUDGE's ``unitbase-unscaled``, read where it means ENDF's unit base: the
+#: ``r`` and ``a`` of a Kalbach-Mann. FUDGE turns MF6 LAW=1 LANG=2 with INT=22
+#: into ``unitbase`` on ``f`` and ``unitbase-unscaled`` on ``r`` and ``a``
+#: (ENDFToGNDS/ENDF_ITYPE_0_Misc.py, ``ra_interpolationQualifier``), the same
+#: interpolation without the density's Jacobian, which a fraction and a slope do
+#: not have; its KalbachMann.XYs2d evaluates them unscaled whatever they say.
+#: kika's ENDF reader gives all three the tape's INT=22 as ``unitBase``, and its
+#: tabulation reads ``r`` and ``a`` node by node, never scaled. Read as
+#: ``unitBase`` they are the tape's model: 11 B-VIII.1 files (Mo-94..98,
+#: Yb-170..174, Hf-181/182) refused to read before.
+KALBACH_UNSCALED = "unitbase-unscaled"
+
+
+def _axisLabel(element: ET.Element, index: int) -> Optional[str]:
+    for axis in element.iterfind("axes/axis"):
+        if axis.attrib.get("index") == str(index):
+            return axis.attrib.get("label")
+    return None
 
 
 def _qualifier(element: ET.Element) -> Optional[InterpolationQualifier]:
@@ -305,6 +330,8 @@ def _qualifier(element: ET.Element) -> Optional[InterpolationQualifier]:
         return None
     if declared in SPEC_TOKEN_FOR:
         return SPEC_TOKEN_FOR[declared]
+    if declared == KALBACH_UNSCALED and _axisLabel(element, 0) in ("r", "a"):
+        return InterpolationQualifier.unitBase
     try:
         return InterpolationQualifier(declared)
     except ValueError:

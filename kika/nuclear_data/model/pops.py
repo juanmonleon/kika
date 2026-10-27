@@ -69,6 +69,11 @@ class Nuclide(Particle):
     #: §18.4 ``fissionFragmentData`` on the nuclide: the fission product
     #: yields of a fission yield sublibrary evaluation.
     fissionFragmentData: Optional[object] = None
+    #: The mass was not stated: it is the ground state's plus the excitation
+    #: energy, as FUDGE reads an excited level's mass. Set for a metastable
+    #: level a file names in ``aliases`` (the target of an isomer evaluation);
+    #: the GNDS writer leaves it out, as the file did.
+    massDerived: bool = False
 
     @property
     def ZA(self) -> Optional[int]:
@@ -153,13 +158,26 @@ class PoPs:
         return True
 
     def __contains__(self, pid: str) -> bool:
-        return pid in self.particles
+        return pid in self.particles or (pid in self.aliases and self.aliases[pid].pid in self.particles)
 
     def __getitem__(self, pid: str) -> Particle:
+        """The particle ``pid`` names, through a metastable alias when it is one.
+
+        An isomer's evaluation names its target by the alias (``Al26_m1``) and
+        PoPs states the level (``Al26_e1``); without following it, the 23
+        metastable targets of ENDF/B-VIII.1-GNDS had no target at all.
+        """
         try:
             return self.particles[pid]
         except KeyError:
+            alias = self.aliases.get(pid)
+            if alias is not None and alias.pid in self.particles:
+                return self.particles[alias.pid]
             raise KeyError(f"no particle {pid!r} in PoPs; have {sorted(self.particles)}") from None
+
+    def get(self, pid: Optional[str], default: Optional[Particle] = None) -> Optional[Particle]:
+        """``self[pid]`` (through a metastable alias), or ``default``."""
+        return self[pid] if pid is not None and pid in self else default
 
     def add(self, particle: Particle) -> None:
         self.particles[particle.id] = particle

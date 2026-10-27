@@ -163,7 +163,7 @@ def _halflife(node: ET.Element, halflife) -> None:
 def _nuclideProperties(node: ET.Element, nuclide: Nuclide) -> None:
     """The atom's mass and charge on the ``nuclide``, the nucleus's spin and
     parity on the ``nucleus`` — which is where each was read from."""
-    if nuclide.mass is not None:
+    if nuclide.mass is not None and not getattr(nuclide, "massDerived", False):
         _set(ET.SubElement(ET.SubElement(node, "mass"), "double"),
              label="eval", value=_number(nuclide.mass.value),
              unit=nuclide.mass.unit)

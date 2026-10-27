@@ -168,8 +168,12 @@ def write_ace_checked(ace: Ace, filepath) -> None:
             ints = unpack_int_words(getattr(ace, "xss_int_words", None), a.size - 1)
             ints = np.zeros(a.size - 1, dtype=bool) if ints is None else np.asarray(ints, dtype=bool)
             x, y = a[1:], b[1:]
+            # Half a unit in E20.11's twelfth figure is 5e-12 of a mantissa of 1, and
+            # a value that rounds exactly half (B-VIII.1 Tc-98's 1.000000107585e-20
+            # -> 1.00000010759e-20) lands on it, 4.5e-17 past it in binary (x and y each
+            # carry ~1e-16 of their own): four materials refused to write over the one word.
             same = (np.array_equal(x[ints], y[ints])
-                    and bool(np.all(np.abs(x[~ints] - y[~ints]) <= 5.0e-12 * np.abs(x[~ints]))))
+                    and bool(np.all(np.abs(x[~ints] - y[~ints]) <= 5.001e-12 * np.abs(x[~ints]))))
         if not same:
             raise ValueError(f"{target.name} does not read back as it was written")
     except Exception:

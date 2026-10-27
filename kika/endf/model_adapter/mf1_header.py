@@ -166,7 +166,7 @@ def _lrp(resonances) -> int:
 
 def _level(suite, target: str, report) -> Tuple[int, float, int, int]:
     """(LIS, ELIS, STA, LISO) for the target."""
-    particle = suite.PoPs.particles.get(target) if suite.PoPs is not None else None
+    particle = suite.PoPs.get(target) if suite.PoPs is not None else None
     lis = int(getattr(particle, "nuclearLevel", 0) or 0)
     if not lis and "_e" in target:
         lis = int(target.split("_e")[1] or 0)

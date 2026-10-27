@@ -318,6 +318,7 @@ class _SuiteReader:
 
         from .decay import readAliases
         pops.aliases = readAliases(element.find("aliases"), self.tally)
+        _metastableMasses(pops)
         return pops
 
     def readParticle(self, element: ET.Element) -> Particle:
@@ -845,3 +846,30 @@ def readReactionSuite(
         )
     suite.report = report
     return suite, report
+
+
+#: An atomic mass unit in eV (CODATA 2018), for an excited level's mass.
+_AMU_EV = 931.49410242e6
+
+
+def _metastableMasses(pops) -> None:
+    """A metastable level with no mass of its own: the ground state's plus E*/c².
+
+    FUDGE writes the mass on the ground state only, and reads a level's as that
+    plus its excitation energy. The target of an isomer evaluation is such a
+    level (B-VIII.1 Al-26m1 is ``Al26_e1``, 228 keV, no mass), and its
+    reconstruction needs the mass. Only the levels an alias names: the other
+    excited levels are products, read as the ENDF tape reads them.
+    """
+    from kika.nuclear_data.model.quantities import PhysicalQuantity
+    for alias in pops.aliases.values():
+        level = pops.particles.get(alias.pid)
+        if not isinstance(level, Nuclide) or level.mass is not None or level.energy is None:
+            continue
+        ground = pops.particles.get(alias.pid.split("_e")[0])
+        if ground is None or ground.mass is None:
+            continue
+        mass = ground.mass.convertedTo("amu").value + level.energy.convertedTo("eV").value / _AMU_EV
+        level.mass = PhysicalQuantity(mass, "amu")
+        level.massDerived = True
+

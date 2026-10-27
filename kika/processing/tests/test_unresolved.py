@@ -48,23 +48,28 @@ def test_cross_sections_against_direct_gamma_average(nu):
 
 @pytest.mark.parametrize('law',[Interpolation.linlin,Interpolation.loglog])
 def test_interpolate_cross_sections_not_parameters(law):
+    # Within a panel no wider than RECONR's 1.26, sigma is only interpolated.
     from kika.algebra import evaluate
-    m=model(law=law,grid=[100.,200.]);prepared=prepare_resonances(m,CONTEXT)
-    endpoints=prepare_resonances(model(),CONTEXT).evaluate([100.,200.])
-    got=prepared.evaluate([125.,150.,175.])
+    m=model(law=law,grid=[100.,120.]);m.unresolved.domainMax=120.
+    prepared=prepare_resonances(m,CONTEXT)
+    physical_model=model();physical_model.unresolved.domainMax=120.
+    endpoints=prepare_resonances(physical_model,CONTEXT).evaluate([100.,120.])
+    got=prepared.evaluate([105.,110.,115.])
     for mt in got:
         if mt==1:continue
-        expected=evaluate([100.,200.],endpoints[mt],2 if law==Interpolation.linlin else 5,[125.,150.,175.])
+        expected=evaluate([100.,120.],endpoints[mt],2 if law==Interpolation.linlin else 5,[105.,110.,115.])
         np.testing.assert_allclose(got[mt],expected,rtol=1e-14)
-    physical=prepare_resonances(model(),CONTEXT).evaluate([125.,150.,175.])
-    assert np.max(abs(physical[102]/got[102]-1))>1e-3
+    physical=prepare_resonances(physical_model,CONTEXT).evaluate([105.,110.,115.])
+    assert np.max(abs(physical[102]/got[102]-1))>1e-5
 
 
 def test_wide_panel_is_filled_before_sigma_interpolation():
+    # RECONR's rdf2u2: a panel wider than 1.26 takes its standard grid (egridu).
+    from kika.processing.resonances.probability_tables import EGRIDU
     m=model(law=Interpolation.linlin,grid=[100.,10000.]);m.unresolved.domainMax=10000.
     prepared=prepare_resonances(m,CONTEXT);grid=np.array(prepared.regions[0].unresolved.grid)
-    assert len(grid)==21
-    assert np.max(grid[1:]/grid[:-1])<=10**.1*(1+1e-14)
+    np.testing.assert_array_equal(grid,np.r_[100.,EGRIDU[(EGRIDU>=100.1)&(EGRIDU<10000.)],10000.])
+    assert np.max(grid[1:]/grid[:-1])<=1.26
     physical=deepcopy(m);physical.unresolved.tabulatedWidths.spinGroups[0].crossSectionInterpolation=None
     expected=prepare_resonances(physical,CONTEXT).evaluate(grid)
     for mt,values in prepared.evaluate(grid).items():np.testing.assert_allclose(values,expected[mt],rtol=2e-14)
@@ -253,13 +258,14 @@ def test_case_b_reader_declares_sigma_law_and_kernel_uses_it():
     from kika.endf.model_adapter import decodeMF2MT151
     section=MF2MT151(number=151)
     section._za,section._awr,section._mat,section._nis=100100.,100.,1001,1
-    parameters=UnresolvedCaseB(0.,.6,0,2,1,[100.,200.],[URR_LValue_CaseB(100.,0,[
+    # A panel narrower than RECONR's 1.26, where sigma is only interpolated.
+    parameters=UnresolvedCaseB(0.,.6,0,2,1,[100.,120.],[URR_LValue_CaseB(100.,0,[
         URR_JState_CaseB(d=100.,aj=.5,amun=1.,gn0=.02,gg=.1,muf=2,gf=[.1,.9])])])
-    section._isotopes=[Isotope(100100.,1.,1,1,[EnergyRange(100.,200.,2,1,0,0,parameters)])]
+    section._isotopes=[Isotope(100100.,1.,1,1,[EnergyRange(100.,120.,2,1,0,0,parameters)])]
     m,_,report=decodeMF2MT151(section);assert report.isClean
     g=m.unresolved.tabulatedWidths.spinGroups[0]
     assert g.crossSectionInterpolation==Interpolation.linlin
-    prepared=prepare_resonances(m,CONTEXT);v=prepared.evaluate([100.,150.,200.])
+    prepared=prepare_resonances(m,CONTEXT);v=prepared.evaluate([100.,110.,120.])
     for mt in v:assert v[mt][1]==pytest.approx((v[mt][0]+v[mt][2])*.5,rel=1e-14)
 
 

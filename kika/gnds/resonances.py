@@ -46,6 +46,7 @@ cannot write the file back.
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
+from dataclasses import replace
 from typing import Callable, List, Optional
 
 import numpy as np
@@ -158,12 +159,34 @@ class _ResonanceReader:
         unresolved = element.find("unresolved")
         if unresolved is not None:
             resonances.unresolved = self.readUnresolved(unresolved, here)
+            self.inheritRadius(resonances)
 
         known = {"scatteringRadius", "resolved", "unresolved"}
         for child in element:
             if child.tag not in known:
                 self.unsupported(child.tag, here, "not a §19 resonance node kika reads")
         return resonances
+
+    def inheritRadius(self, resonances: Resonances) -> None:
+        """An unresolved block with no radius of its own takes ``resonances``'.
+
+        ``tabulatedWidths/scatteringRadius`` is optional (gnds.xsd), and FUDGE
+        reads its absence as the radius of the whole ``resonances`` node. FUDGE's
+        translation of ENDF/B-VIII.1 writes it only where the URR's AP differs
+        from the resolved range's: 69 of the library's files leave it out, and
+        without this every one of them failed with "missing radius".
+        """
+        widths = resonances.unresolved.tabulatedWidths
+        shared = resonances.scatteringRadius
+        if widths is None or shared is None or widths.scatteringRadius is not None:
+            return
+        policy = widths.radiusPolicy
+        if shared.isEnergyDependent:
+            if policy is not None and policy.phaseRadius is None:
+                widths.radiusPolicy = replace(policy, phaseRadius=shared)
+        else:
+            widths.scatteringRadius = float(shared.constant)
+            widths.radiusUnit = shared.unit
 
     def readScatteringRadius(self, element: Optional[ET.Element],
                              path: str) -> Optional[ScatteringRadius]:

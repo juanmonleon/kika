@@ -890,3 +890,45 @@ def test_a_non_null_l0_block_is_compared_with_mf33():
                                              l0=np.multiply(SELF2, 2.0))),
                   "magnitude_covariance_in_mf34")
     assert other.level == WARN and other.evidence["mf33"] == "different"
+
+
+def test_joint_on_a_union_grid_is_checked_in_its_reduced_form():
+    """Repeated and empty rows fold away without changing what the full joint says.
+
+    O-16 of ENDF/B-VIII.1 put 48 MTs on one 1641-bin union grid: a 78768-row
+    joint, 46 GB, for blocks that are constant over most of those bins.
+    """
+    from kika.endf.checks import covariances as module
+
+    rng = np.random.default_rng(7)
+    coarse = {1: 4, 2: 3, 3: 2}
+    spread = {m: rng.integers(1, 5, size=k) for m, k in coarse.items()}
+    expand = {m: np.repeat(np.eye(k), spread[m], axis=0) for m, k in coarse.items()}
+    # Every member on the same union grid, with at least one empty bin at its end.
+    bins = max(int(v.sum()) for v in spread.values()) + 2
+    for m in coarse:
+        pad = bins - expand[m].shape[0]
+        expand[m] = np.vstack([expand[m], np.zeros((pad, coarse[m]))])
+    total = sum(coarse.values())
+    a = rng.normal(size=(total, total))
+    c = a @ a.T - 0.8 * np.eye(total)          # slightly indefinite
+    cut = np.cumsum([0, *coarse.values()])
+    piece = {m: slice(cut[i], cut[i + 1]) for i, m in enumerate(coarse)}
+    selfs = {m: expand[m] @ c[piece[m], piece[m]] @ expand[m].T for m in coarse}
+    cross = {(x, y): expand[x] @ c[piece[x], piece[y]] @ expand[y].T
+             for x in coarse for y in coarse if x < y}
+    grids = {m: np.arange(bins + 1.0) for m in coarse}
+    members = sorted(coarse)
+
+    full, _ = module._joint_matrix(members, grids, selfs, cross)
+    reduced, w = module._joint_reduced(members, grids, selfs, cross)
+    assert reduced.shape[0] < full.shape[0]
+    ev_full = np.linalg.eigvalsh(full)
+    ev_red = np.linalg.eigvalsh(reduced)
+    assert ev_red[0] == pytest.approx(ev_full[0], rel=1e-10)
+    assert ev_red[-1] == pytest.approx(ev_full[-1], rel=1e-10)
+    assert module._half_ulp_norm(reduced, w) == pytest.approx(module._half_ulp_norm(full), rel=1e-10)
+    ef, vf = np.linalg.eigh(full)
+    er, vr = np.linalg.eigh(reduced)
+    assert module._clipping_impact(er, vr, reduced, w) == pytest.approx(
+        module._clipping_impact(ef, vf, full), rel=1e-8)

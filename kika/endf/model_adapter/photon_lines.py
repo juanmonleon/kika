@@ -505,14 +505,61 @@ def _decodedPrimary(meta, piece) -> float:
 # For the writers that put the lines back in the table (HDF5, G4NDL)
 # ---------------------------------------------------------------------------
 
-def mergedLineSpectra(reaction):
+def _recordFromTotal(reaction, totals, fromMF6, awr):
+    """The split MF6 record of a reaction read without one (GNDS), or ``None``.
+
+    FUDGE writes a split subsection's yield as the reaction's ``multiplicitySum``
+    "total gamma multiplicity", and each line's multiplicity only at the incident
+    energies of the spectrum: B-VIII.1-GNDS B-11 MT107's one line holds
+    ``0 -> 0.683`` at 7.24 and 20 MeV, the total the tape's 21 points (0.595 at
+    12 MeV, 0.255 from the line). :func:`deriveLineSpectrum` regroups the pieces
+    under that total, as the ENDF writer does, so a GNDS evaluation is merged
+    with the yield its tape gives. ``fromMF6(label)`` says a photon was in MF6
+    (FUDGE's conversion flags): MF12 photons carry yields of their own.
+    """
+    from kika.nuclear_data.model import ConversionReport, DiscreteGamma, PrimaryGamma
+
+    from .photons import _tab1Of
+
+    mt = getattr(reaction, "ENDF_MT", None)
+    total = totals.byENDF_MT(int(mt)) if totals is not None and mt is not None else None
+    if total is None or total.multiplicity is None:
+        return None
+    channel = getattr(reaction, "outputChannel", None)
+    photons = [p for p in (getattr(channel, "products", None) or ()) if p.pid == "photon"]
+    if not photons or not all(fromMF6(p.label) for p in photons):
+        return None
+    forms = [_evaluated(p) for p in photons]
+    if any(getattr(f, "energy", None) is None or getattr(p.multiplicity, "form", None) is None
+           for p, f in zip(photons, forms)):
+        return None
+    if not any(isinstance(f.energy, (DiscreteGamma, PrimaryGamma)) for f in forms):
+        return None
+    try:
+        fields = deriveLineSpectrum(photons, total.multiplicity.form, awr, 0, int(mt),
+                                    ConversionReport())
+        pairs, x, y = _tab1Of(total.multiplicity.form)
+    except (TypeError, ValueError, AttributeError):
+        return None
+    if fields is None:
+        return None
+    frame = getattr(forms[0], "productFrame", None)
+    lct = 1 if getattr(frame, "value", frame) == "lab" else 2
+    return {"index": 0, "zap": 0.0, "awp": 0.0, "lip": 0, "law": 1, "modelled": True,
+            "label": photons[0].label, "y_interp": pairs, "y_energies": x, "y_values": y,
+            "law_fields": fields}, lct
+
+
+def mergedLineSpectra(reaction, totals=None, fromMF6=None, awr=None):
     """``(merged, hidden)`` for *reaction*'s split MF6 photons.
 
     ``merged`` maps the first piece's label to a product with the section's own
     yield and one ``uncorrelated`` spectrum that opens each node with its lines
     (the shape the decoder used to give, which is ACER's: lines first in the
     table, counted by ND in the record); ``hidden`` is the other pieces' labels.
-    Both empty for a reaction with none.
+    Both empty for a reaction with none. A reaction with no ENDF record is
+    merged from ``totals`` (the suite's ``multiplicitySums``) when ``fromMF6``
+    says its photons were MF6's (:func:`_recordFromTotal`).
     """
     from kika.nuclear_data.model import (EVAL_LABEL, ConversionReport, Distribution,
                                          Product)
@@ -524,6 +571,10 @@ def mergedLineSpectra(reaction):
     block = fields.get("mf6") if isinstance(fields, dict) else None
     records = [r for r in ((block or {}).get("products") or [])
                if isinstance(r, dict) and (r.get("law_fields") or {}).get(LINES_KEY)]
+    if not records and block is None and totals is not None and fromMF6 is not None:
+        derived = _recordFromTotal(reaction, totals, fromMF6, awr)
+        if derived is not None:
+            records, block = [derived[0]], {"lct": derived[1]}
     if not records:
         return {}, set()
     channel = getattr(reaction, "outputChannel", None)
@@ -555,6 +606,9 @@ def mergedLineSpectra(reaction):
                           multiplicity=_multiplicityOf(restored, multiplicityAxes()))
         product.distribution = Distribution()
         product.distribution[EVAL_LABEL] = distribution
+        # The record a consumer reads ND from (hdf5.processing._mf6Record):
+        # derived from the total, a GNDS reaction has none in its provenance.
+        product._lineRecord = record
         merged[labels[0]] = product
         hidden.update(labels[1:])
     return merged, hidden

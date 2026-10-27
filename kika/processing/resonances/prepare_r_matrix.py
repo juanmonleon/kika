@@ -423,6 +423,15 @@ def normalize_suite_pairs(suite, context):
             charge = declared('Z')
             if charge is None:charge = declared('charge')
             mass,spin,parity = (declared(name) for name in ('mass','spin','parity'))
+            if mass is None and '_e' in pid:
+                # An excited residual (B-VIII.1 Fe-57's inelastic channel to
+                # Fe57_e1): GNDS states the mass on the ground state only, and
+                # FUDGE reads a level's as that plus E*/c^2.
+                ground = suite.PoPs.particles.get(pid.split('_e')[0]);energy = declared('energy')
+                if ground is not None and ground.mass is not None and energy is not None:
+                    from kika.nuclear_data.model.quantities import PhysicalQuantity
+                    mass = PhysicalQuantity(ground.mass.convertedTo('amu').value
+                                            + energy.convertedTo('eV').value/931.49410242e6,'amu')
             if any(v is None for v in (mass,spin,parity,charge)):
                 raise ValueError(f'native RML particle {pid} lacks mass/spin/parity/charge')
             return ChannelParticle(mass.convertedTo('amu').value/mn,charge,spin.convertedTo('hbar').value,parity)

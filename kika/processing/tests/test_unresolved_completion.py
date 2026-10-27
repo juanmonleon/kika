@@ -13,11 +13,13 @@ from test_unresolved import model,CONTEXT,writable_urr_suite
 
 @pytest.mark.parametrize('law',[Interpolation.flat,Interpolation.linlin,Interpolation.linlog,Interpolation.loglin,Interpolation.loglog])
 def test_all_scalar_sigma_laws_follow_declared_algebra(law):
-    m=model(law=law,grid=[100.,150.,200.]);p=prepare_resonances(m,CONTEXT)
-    nodes=prepare_resonances(model(),CONTEXT).evaluate([100.,150.,200.])
-    e=np.array([100.,125.,150.,175.,200.]);v=p.evaluate(e)
+    # Panels within RECONR's 1.26, where sigma is only interpolated.
+    m=model(law=law,grid=[100.,120.,140.]);m.unresolved.domainMax=140.;p=prepare_resonances(m,CONTEXT)
+    physical=model();physical.unresolved.domainMax=140.
+    nodes=prepare_resonances(physical,CONTEXT).evaluate([100.,120.,140.])
+    e=np.array([100.,110.,120.,130.,140.]);v=p.evaluate(e)
     from kika.nuclear_data.model.enums import INTERPOLATION_TO_ENDF_INT
-    for mt in (2,18,102):np.testing.assert_allclose(v[mt],evaluate([100.,150.,200.],nodes[mt],INTERPOLATION_TO_ENDF_INT[law],e),rtol=2e-14)
+    for mt in (2,18,102):np.testing.assert_allclose(v[mt],evaluate([100.,120.,140.],nodes[mt],INTERPOLATION_TO_ENDF_INT[law],e),rtol=2e-14)
     table=tabulate_resonances(p)
     assert max(table.verify_forms(table.forms).values())<=1
     np.testing.assert_allclose(table.evaluate(e)[102],v[102],rtol=2e-3)

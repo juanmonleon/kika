@@ -54,11 +54,16 @@ def width_products(means,degrees,*,entrance=0,diagnostics=None,accelerated=True)
                         log_theta[c],np.column_stack((.5*nu[fluctuating],log_theta[fluctuating])).ravel()]
                     callback=LowLevelCallable(_native.URR_INTEGRAND,
                         ctypes.c_void_p(parameters.ctypes.data))
+            # A fixed width cuts the integrand off doubly exponentially at
+            # s=-log(fixed); across that edge quad's error estimate misses
+            # 1e-9 (B-VIII.1 Xe-133: Gn/Gg=5.3, nu=1), so split there.
+            cuts=[-np.inf,-np.log(fixed),np.inf] if fixed>0 else [-np.inf,np.inf]
             with warnings.catch_warnings():
                 warnings.simplefilter('error',IntegrationWarning)
-                try:integrals[key]=quad(callback,-np.inf,np.inf,epsabs=0.,epsrel=2e-12,limit=250)
+                try:pieces=[quad(callback,a,b,epsabs=0.,epsrel=2e-12,limit=250) for a,b in zip(cuts[:-1],cuts[1:])]
                 except IntegrationWarning as exc:
                     raise FloatingPointError('URR Laplace quadrature did not converge') from exc
+                integrals[key]=(sum(p[0] for p in pieces),sum(p[1] for p in pieces))
         value,error=integrals[key]
         if not np.isfinite(value+error) or value<=0 or error>1e-10*value:
             raise FloatingPointError('URR Laplace quadrature failed its error check')

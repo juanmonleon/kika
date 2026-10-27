@@ -439,13 +439,25 @@ def _bins(grid: Sequence[float], idx: Iterable[int]) -> List[List[float]]:
     return [[float(g[i]), float(g[i + 1])] for i in idx]
 
 
-def _half_ulp_norm(matrix: np.ndarray) -> float:
-    """Frobenius norm of the rounding of every element to ENDF_DIGITS figures."""
-    a = np.abs(matrix[matrix != 0])
-    if a.size == 0:
+def _half_ulp_norm(matrix: np.ndarray, weights: Optional[np.ndarray] = None) -> float:
+    """Frobenius norm of the rounding of every element to ENDF_DIGITS figures.
+
+    With *weights*, *matrix* is the reduced form of :func:`_joint_reduced`: each
+    element stands for ``w_i w_j`` equal elements of the full matrix.
+    """
+    if weights is None:
+        a = np.abs(matrix[matrix != 0])
+        if a.size == 0:
+            return 0.0
+        ulp = 0.5 * 10.0 ** (np.floor(np.log10(a)) - (ENDF_DIGITS - 1))
+        return float(np.sqrt(np.sum(ulp ** 2)))
+    root = np.sqrt(weights)
+    full = np.abs(matrix / np.outer(root, root))
+    nz = full != 0
+    if not nz.any():
         return 0.0
-    ulp = 0.5 * 10.0 ** (np.floor(np.log10(a)) - (ENDF_DIGITS - 1))
-    return float(np.sqrt(np.sum(ulp ** 2)))
+    ulp = 0.5 * 10.0 ** (np.floor(np.log10(full[nz])) - (ENDF_DIGITS - 1))
+    return float(np.sqrt(np.sum(ulp ** 2 * np.outer(weights, weights)[nz])))
 
 
 def _rho_quantum(corr: np.ndarray) -> Optional[float]:
@@ -605,7 +617,8 @@ def _quantised_allowance(records: Sequence[Tuple[int, object]], sec, grid):
     return total, quanta
 
 
-def _clipping_impact(ev: np.ndarray, vecs: np.ndarray, sym: np.ndarray) -> Optional[float]:
+def _clipping_impact(ev: np.ndarray, vecs: np.ndarray, sym: np.ndarray,
+                     weights: Optional[np.ndarray] = None) -> Optional[float]:
     """How much forcing the block to PSD would move its uncertainties.
 
     Setting the negative eigenvalues to zero (the nearest PSD matrix in the
@@ -613,6 +626,10 @@ def _clipping_impact(ev: np.ndarray, vecs: np.ndarray, sym: np.ndarray) -> Optio
     the largest relative change of sigma over the rows whose sigma is at least
     PSD_IMPACT_FLOOR of the block's largest: a tail row with sigma ~1e-12 would
     otherwise turn any absolute correction into an enormous relative one.
+
+    With *weights* (the reduced form of :func:`_joint_reduced`) the relative
+    change of a row is the same as in the full matrix; only the floor needs the
+    full matrix's variances, ``d / w``.
     """
     d = np.diag(sym)
     live = d > 0
@@ -620,7 +637,8 @@ def _clipping_impact(ev: np.ndarray, vecs: np.ndarray, sym: np.ndarray) -> Optio
         return None
     added = (vecs ** 2) @ (-np.minimum(ev, 0.0))
     sd = np.sqrt(np.where(live, d, 0.0))
-    rows = live & (sd >= PSD_IMPACT_FLOOR * sd.max())
+    true_sd = sd if weights is None else sd / np.sqrt(weights)
+    rows = live & (true_sd >= PSD_IMPACT_FLOOR * true_sd.max())
     return float(np.max(np.sqrt(d[rows] + added[rows]) / sd[rows] - 1.0))
 
 
@@ -1618,6 +1636,60 @@ def _joint_matrix(members, grids, selfs, cross):
     return joint, offsets
 
 
+def _joint_reduced(members, grids, selfs, cross):
+    """The joint matrix with its repeated and empty rows folded away, and the weights.
+
+    A block summed on a union grid (the NC joint puts every member on the union
+    of all their grids: 48 MTs x 1641 bins for O-16 of ENDF/B-VIII.1, a 46 GB
+    matrix) repeats a row wherever a member's own grid has no edge. With P the
+    0/1 matrix that copies each kept row to its repeats and W = P^T P the counts,
+    the full matrix is P C P^T, and its nonzero eigenvalues are those of
+    S = W^1/2 C W^1/2, with eigenvectors P W^-1/2 u. S is what is returned, with
+    the counts w, so lambda_min, lambda_max and the relative sigma change are the
+    full matrix's; rows that are zero everywhere add only zero eigenvalues and
+    are dropped.
+    """
+    keep: Dict[object, np.ndarray] = {}
+    for m in members:
+        s = np.asarray(selfs[m])
+        k = s.shape[0]
+        change = np.zeros(k, dtype=bool)
+        change[0] = True
+        if k > 1:
+            change[1:] |= np.any(np.diff(s, axis=0) != 0, axis=1)
+            change[1:] |= np.any(np.diff(s.T, axis=0) != 0, axis=1)
+        live = np.any(s != 0, axis=1) | np.any(s != 0, axis=0)
+        for (a, b), block in cross.items():
+            if a not in members or b not in members or (a != m and b != m):
+                continue
+            rows = np.asarray(block) if a == m else np.asarray(block).T
+            if k > 1:
+                change[1:] |= np.any(np.diff(rows, axis=0) != 0, axis=1)
+            live |= np.any(rows != 0, axis=1)
+        group = np.cumsum(change) - 1
+        counts = np.bincount(group)
+        first = np.flatnonzero(change)
+        keep[m] = (first[live[first]], counts[live[first]])
+    idx = {m: keep[m][0] for m in members}
+    weights = np.concatenate([keep[m][1] for m in members]).astype(float)
+    offsets, n = {}, 0
+    for m in members:
+        offsets[m] = n
+        n += idx[m].size
+    joint = np.zeros((n, n))
+    for m in members:
+        o, i = offsets[m], idx[m]
+        joint[o:o + i.size, o:o + i.size] = np.asarray(selfs[m])[np.ix_(i, i)]
+    for (a, b), block in cross.items():
+        if a in offsets and b in offsets:
+            sub = np.asarray(block)[np.ix_(idx[a], idx[b])]
+            oa, ob = offsets[a], offsets[b]
+            joint[oa:oa + sub.shape[0], ob:ob + sub.shape[1]] = sub
+            joint[ob:ob + sub.shape[1], oa:oa + sub.shape[0]] = sub.T
+    root = np.sqrt(weights)
+    return joint * np.outer(root, root), weights
+
+
 def _pick(block_on_union: np.ndarray, union, row_grid, col_grid) -> np.ndarray:
     """A block summed on the union of two grids, read back on each grid.
 
@@ -1657,14 +1729,18 @@ def _joint_psd(nodes, grids, selfs, cross, describe, loc, out) -> None:
         where = describe(members)
         self_min = {m: float(np.linalg.eigvalsh(0.5 * (selfs[m] + selfs[m].T))[0])
                     if selfs[m].size else 0.0 for m in members}
-        joint, _ = _joint_matrix(members, grids, selfs, cross)
+        joint, w = _joint_reduced(members, grids, selfs, cross)
         sym = 0.5 * (joint + joint.T)
-        ev, vecs, sub, excess = _negative_excess(sym, min(self_min.values()))
+        if not sym.size:
+            continue
+        ev, vecs = np.linalg.eigh(sym)
+        sub = sym
+        excess = min(float(ev[0]), 0.0) - min(min(self_min.values()), 0.0)
         lam_max = float(ev[-1])
         if lam_max <= 0 or excess >= 0:
             continue
         excess = -excess
-        if excess <= _half_ulp_norm(sub):
+        if excess <= _half_ulp_norm(sub, w):
             continue
         ratio = excess / lam_max
         if ratio < PSD_NOTE:
@@ -1674,15 +1750,16 @@ def _joint_psd(nodes, grids, selfs, cross, describe, loc, out) -> None:
         evidence = {"nodes": [describe([m]) for m in members], "lambda_min": float(ev[0]),
                     "lambda_max": lam_max, "self_lambda_min": min(self_min.values()),
                     "excess_ratio": ratio, "n_negative": int(np.sum(ev < 0)),
-                    "sigma_change_if_clipped": _clipping_impact(ev, vecs, sub)}
+                    "sigma_change_if_clipped": _clipping_impact(ev, vecs, sub, w)}
         d = np.diag(sub)
         live = d > 0
         if live.sum() >= 3 and level == WARN:
             s = np.sqrt(d[live])
             q = _rho_quantum(sub[np.ix_(live, live)] / np.outer(s, s))
             if q is not None:
+                # Rows and largest variance of the full matrix, not of its reduced form.
                 bound = (RHO_QUANTUM_SLACK * 2.0 * (q / math.sqrt(12.0))
-                         * math.sqrt(int(live.sum())) * float(d.max()))
+                         * math.sqrt(float(w[live].sum())) * float((d / w).max()))
                 evidence.update({"rho_quantum": [q], "quantised_rounding_bound": bound})
                 if excess <= bound:
                     level = NOTE

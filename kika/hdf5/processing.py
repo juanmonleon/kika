@@ -37,6 +37,7 @@ import contextvars
 import copy
 import math
 import os
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -774,6 +775,15 @@ def _processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMA
             leaves.append(_Leaf(reaction, container, mt))
     present = {leaf.mt for leaf in leaves}
     chances = present & {19, 20, 21, 38}
+    # GNDS states MT18 as a reaction beside its chances (``fissionComponents``),
+    # where an ENDF tape makes it their sum: the broadening takes it for the sum
+    # (kika.processing.resonances.suite._fission_chances), and it is written as
+    # the summed fission below, the same as from the tape.
+    statedFission = next((leaf for leaf in leaves if leaf.mt == 18 and leaf.container == "reactions"),
+                         None) if chances else None
+    if statedFission is not None:
+        leaves.remove(statedFission)
+        present.discard(18)
     # The pure-Python tabulations start now, beside the broadening.
     _startPrefetch(work, leaves, awr, 1000 * Z + A, tabOptions, particles, workers, omit)
 
@@ -882,6 +892,8 @@ def _processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMA
     # out (Pu-240); written as chances, the file had no fission neutrons.
     summedFission = next((r for r in work.sums if r.ENDF_MT == 18), None) \
         if chances and 18 not in present else None
+    if statedFission is not None:
+        summedFission = statedFission.reaction
     for leaf in leaves:
         reaction = leaf.reaction
         mt = leaf.mt
@@ -905,7 +917,7 @@ def _processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMA
             cs[RECON_LABEL] = m.XYs1d(xs=x, ys=y, axes=m.crossSectionAxes(), label=RECON_LABEL)
         channel = channelOf(reaction)
         _products(reaction, channel, mt, awr, zaTarget, tabOptions, report, work.PoPs, flags=photonFlags,
-                  particles=particles, qi=channel.Q.value)
+                  particles=particles, qi=channel.Q.value, totals=work.sums.multiplicitySums)
         redundant = 1 if (mt == 18 and chances) else 0
         rid = m.ReactionId(label=reaction.label, ENDF_MT=mt, fissionGenre=reaction.id.fissionGenre)
         new = (m.CrossSectionSum if redundant else m.Reaction)(
@@ -1262,6 +1274,9 @@ def _hasURR(suite) -> bool:
 # ----------------------------------------------------------------------
 
 def _mf6Record(reaction, product):
+    derived = getattr(product, "_lineRecord", None)
+    if derived is not None:
+        return derived
     provenance = getattr(reaction, "provenance", None)
     fields = getattr(provenance, "headerFields", None) or {}
     block = fields.get("mf6")
@@ -1403,7 +1418,7 @@ def _keptOrphan(orphan, own, mt, heated, grids, awr, zaTarget, options, report, 
 
 
 def _products(reaction, channel, mt, awr, zaTarget, options, report, pops=None, flags=None,
-              particles=("n", "photon"), qi=None):
+              particles=("n", "photon"), qi=None, totals=None):
     """The ``particles`` products with Monte Carlo distributions, onto ``channel``."""
     m = _m()
     from kika.processing.tabulation import TabulationContext, tabulateDistribution
@@ -1411,8 +1426,9 @@ def _products(reaction, channel, mt, awr, zaTarget, options, report, pops=None, 
     from kika.endf.model_adapter.photon_lines import mergedLineSpectra
 
     # An MF6 photon whose lines the decoder split into products goes back
-    # to one product with the lines first in its tables, as ACER writes it.
-    merged, hidden = mergedLineSpectra(reaction)
+    # to one product with the lines first in its tables, as ACER writes it;
+    # from GNDS, under the file's total photon multiplicity (``totals``).
+    merged, hidden = mergedLineSpectra(reaction, totals, _fromMF6(reaction, flags), awr)
     explicitPhotons = False
     for product in reaction.outputChannel.products:
         if product.pid not in particles or product.label in hidden:
@@ -1636,9 +1652,11 @@ def _startPrefetch(work, leaves, awr, zaTarget, options, particles, workers, omi
         return
     m = _m()
     jobs = []
+    flags = _photonFlags(work)
     for leaf in leaves:
         reaction = leaf.reaction
-        merged, hidden = mergedLineSpectra(reaction)
+        merged, hidden = mergedLineSpectra(reaction, work.sums.multiplicitySums,
+                                           _fromMF6(reaction, flags), awr)
         for product in reaction.outputChannel.products:
             if product.pid not in particles or product.label in hidden or product.label in merged:
                 continue
@@ -1714,6 +1732,13 @@ def _tabulatedProduct(product, reaction, mt, awr, zaTarget, options, report, del
     return new
 
 
+def _fromMF6(reaction, flags):
+    """``label -> bool``: FUDGE's flags put the reaction's photon in MF6 (GNDS only)."""
+    if not flags:
+        return None
+    return lambda label: flags.get((reaction.label, label), "") == "MF6"
+
+
 def _photonFile(reaction, record, product=None, flags=None) -> int:
     """The ACE MFTYPE of a photon: 16 from MF6, 13 from MF13, 12 from MF12.
 
@@ -1782,6 +1807,15 @@ def _emitted(reaction) -> Optional[Dict[int, int]]:
         out = {1: 1}
         for pid, n in LR_PRODUCTS.get(lr, {}).items():
             out[_PID_ZA[pid]] = out.get(_PID_ZA[pid], 0) + n
+        if not lr:
+            # GNDS has no LR: the level's breakup is the residual's own decay,
+            # ``n + (Li7_e2 -> H3 + He4)``. Without it, B-VIII.1 Li-7 from GNDS
+            # had no triton production and half its alphas.
+            for product in reaction.outputChannel.products:
+                channel = getattr(product, "outputChannel", None)
+                for part in (channel.products if channel is not None else ()):
+                    if part.pid in _PID_ZA and part.pid != "n":
+                        out[_PID_ZA[part.pid]] = out.get(_PID_ZA[part.pid], 0) + 1
         return out
     for start, letter in GAS_SERIES.items():
         if start <= mt < start + 50:
@@ -1851,6 +1885,16 @@ def gasMultiplicities(reaction, targetZA: Optional[int] = None) -> Dict[int, obj
                     out[gasMT] = (out[gasMT], form)
                 else:
                     out[gasMT] = form
+    mt = reaction.ENDF_MT
+    if mt is not None and 600 <= mt < 850:
+        # A two-body reaction whose residual is itself light: ENDF-6 describes
+        # the emitted particle only (MF4), GNDS lists both. B-VIII.1 Be-7
+        # MT800, n + Be7 -> He4 + He4, had half GASPR's alphas from ENDF-6.
+        stated = Counter(p.pid for p in reaction.outputChannel.products)
+        for gasMT, count in _impliedGas(reaction, targetZA).items():
+            if stated[GAS_MTS[gasMT]] < count:
+                out[gasMT] = _m().Constant1d(constant=float(count), domainMin_=0.0,
+                                             domainMax_=float("inf"))
     return out
 
 

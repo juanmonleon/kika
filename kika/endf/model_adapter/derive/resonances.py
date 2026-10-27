@@ -32,7 +32,7 @@ __all__ = ["deriveRadiusOnlyResonances"]
 
 def _targetSpin(suite) -> Optional[float]:
     pops = getattr(suite, "PoPs", None)
-    particle = pops.particles.get(suite.target) if pops is not None else None
+    particle = pops.get(suite.target) if pops is not None else None
     spin = getattr(particle, "spin", None)
     value = getattr(spin, "value", spin)
     return None if value is None else float(value)

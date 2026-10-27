@@ -233,14 +233,34 @@ def _potential(energy,groups):
     return result
 
 
-def _sigma_nodes(grid,low,high):
+def _sigma_nodes(grid,low,high,reconr=True):
+    """Where sigma is computed from the parameters; INT interpolates it in between.
+
+    The parameters' nodes, and in every gap wider than WIDE (1.26) the standard grid
+    EGRIDU, as RECONR does (``rdf2u2``: ``enex>wide*ener`` fills from ``egridu``
+    past ``ener+ener/1000``). With the nodes alone, B-VIII.1 Co-58 had 4 and 6 keV
+    and nothing between, and sigma at 5 keV came out 3.5 % above NJOY's. A gap
+    the standard grid does not reach (below 10 eV, above 8.5 MeV) keeps ten
+    points a decade once it is wider than a factor 3.
+
+    ``reconr=False`` keeps that factor-3 rule alone, for the per-group and
+    potential-scattering grids of kika's GNDS extension, which RECONR has not.
+    """
+    from .probability_tables import EGRIDU,WIDE
     grid=np.asarray(grid,dtype=float)
     if (grid.ndim!=1 or len(grid)<2 or not np.all(np.isfinite(grid))
             or grid[0]!=low or grid[-1]!=high or np.any(np.diff(grid)<=0)):
         raise ValueError('URR sigma grid must span its domain in increasing order')
     nodes=set(grid)
     for a,b in zip(grid[:-1],grid[1:]):
-        if b/a>3:nodes.update(np.geomspace(a,b,int(np.ceil(10*np.log10(b/a)))+1))
+        if not reconr:
+            if b/a>3:nodes.update(np.geomspace(a,b,int(np.ceil(10*np.log10(b/a)))+1))
+            continue
+        if b<=WIDE*a:continue
+        fill=EGRIDU[(EGRIDU>=a+a/1000)&(EGRIDU<b)]
+        nodes.update(float(e) for e in fill)
+        if b/a>3 and (not fill.size or fill[0]/a>3 or b/fill[-1]>3):
+            nodes.update(np.geomspace(a,b,int(np.ceil(10*np.log10(b/a)))+1))
     return nodes
 
 
@@ -367,7 +387,7 @@ def prepare_unresolved(region,context,notes):
         for group,(code,declared_grid) in zip(groups,policies):
             cuts={v for v in _group_breaks(group) if low<v<high};breaks.update(cuts)
             if code is None:components.append(());continue
-            local_nodes=_sigma_nodes(declared_grid,low,high)|cuts;nodes.update(local_nodes)
+            local_nodes=_sigma_nodes(declared_grid,low,high,reconr=False)|cuts;nodes.update(local_nodes)
             if code==1:breaks.update(v for v in local_nodes if low<v<high)
             sampled={}
             def calculate(e):
@@ -387,7 +407,7 @@ def prepare_unresolved(region,context,notes):
                 for nbt,code in radius.interpolation:
                     if code==1:potential_cuts.update(v for v in radius.energies[previous:nbt] if low<v<high)
                     previous=nbt
-            local_nodes=_sigma_nodes(declared,low,high)|potential_cuts;nodes.update(local_nodes)
+            local_nodes=_sigma_nodes(declared,low,high,reconr=False)|potential_cuts;nodes.update(local_nodes)
             potential_curves=_sigma_curves(local_nodes,potential_cuts,potential_law,low,high,lambda e:_potential(e,groups))
             breaks.update(potential_cuts)
             if potential_law==1:breaks.update(v for v in local_nodes if low<v<high)

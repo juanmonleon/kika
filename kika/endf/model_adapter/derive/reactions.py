@@ -98,17 +98,21 @@ def _lr(residual, label: str, report) -> int:
 
     last = entries[-1]
     leftover = last.pid not in _LIGHT or any(p.pid == last.pid for p in entries[:-1])
-    light = Counter()
-    heavy = []
-    for product in entries[:-1] if leftover else entries:
-        if product.pid in _LIGHT:
-            light[product.pid] += _count(product)
-        else:
-            heavy.append(product.pid)
-    if not heavy:
-        for lr, products in LR_PRODUCTS.items():
-            if dict(light) == products:
-                return lr
+    # A light last entry that matches no LR is the leftover after all, as FUDGE
+    # always takes it: B-VIII.1 Li-7 MT52-82, (Li7_eN -> H3 + He4), is LR=33,
+    # and without an LR its QM was lost and the heating took QI (-13 MeV).
+    for leftover in (leftover, True) if not leftover else (leftover,):
+        light = Counter()
+        heavy = []
+        for product in entries[:-1] if leftover else entries:
+            if product.pid in _LIGHT:
+                light[product.pid] += _count(product)
+            else:
+                heavy.append(product.pid)
+        if not heavy:
+            for lr, products in LR_PRODUCTS.items():
+                if dict(light) == products:
+                    return lr
     raise ValueError(
         f"{label}: the residual {residual.pid} breaks up into {dict(light)}"
         f"{' + ' + str(heavy) if heavy else ''}, which is no LR of ENDF-102's "

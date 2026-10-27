@@ -1222,8 +1222,12 @@ class _SuiteWriter:
             function = getattr(form, name)
             if function is None:
                 continue
-            _function(ET.SubElement(element, name), function, self.report,
-                      where)
+            written = _function(ET.SubElement(element, name), function, self.report,
+                                where)
+            if name != "f" and written is not None and \
+                    written.attrib.get("interpolationQualifier") == "unitbase":
+                # FUDGE's spelling for r and a (primitives.KALBACH_UNSCALED).
+                written.attrib["interpolationQualifier"] = "unitbase-unscaled"
 
     @writes("distributionForm", "energyAngularMC")
     def energyAngularMC(self, parent: ET.Element, form, label: str,

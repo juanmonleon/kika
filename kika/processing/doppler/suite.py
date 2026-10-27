@@ -105,7 +105,7 @@ def _mass(suite, context):
         if za<1000 or za%1000==0: raise ValueError('not a single isotope')
     except ValueError as exc:
         raise UnsupportedDopplerError('unsupported-target','single identified isotope required') from exc
-    target=suite.PoPs.particles.get(suite.target)
+    target=suite.PoPs.get(suite.target)
     if isinstance(target,Unorthodox):
         raise UnsupportedDopplerError('bound-target','thermal scattering target')
     neutron=suite.PoPs.particles.get('n')

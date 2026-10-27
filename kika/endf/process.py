@@ -1479,8 +1479,8 @@ def _working_suite(rec, suite=None):
     which stays untouched so ``write_pendf`` still attaches and verifies the
     reconstruction itself, or ``suite``, a fresh decode of the whole tape for
     an output that needs the distributions too. Its orphan products (photons
-    stated on a sum) and productions (MF10) carry no 0 K form; any other
-    reaction must be one the reconstruction covered."""
+    stated on a sum), productions (MF10) and GNDS's incomplete reactions carry
+    no 0 K form; any other reaction must be one the reconstruction covered."""
     from kika.hdf5 import processing as hp
     from kika.nuclear_data.model import CrossSectionReconstructed
     from kika.processing.resonances.suite import _entries
@@ -1488,7 +1488,7 @@ def _working_suite(rec, suite=None):
     label = rec.result.label
     for key, reaction in _entries(work).items():
         if key not in rec.result.forms:
-            if key.container in ("orphanProducts", "productions"):
+            if key.container in ("orphanProducts", "productions", "incompleteReactions"):
                 continue
             raise ValueError(f"{key} is in the tape but not in the reconstruction")
         reaction.crossSection[label] = copy.deepcopy(rec.result.forms[key])
@@ -1874,8 +1874,12 @@ def process_gnds(path, plan: ProcessingPlan | None = None, progress: Progress | 
     # (MF10-like, under a reaction's MT) share another reaction's MT and carry
     # no resonance contribution: they sit out of the reconstruction, as an ENDF
     # tape's MF1-MF3 read never has them, and come back for the outputs that
-    # carry them (write_hdf5, write_gnds).
-    aside = {name: getattr(suite, name) for name in ("orphanProducts", "productions")}
+    # carry them (write_hdf5, write_gnds). So do FUDGE's incomplete reactions:
+    # a cross section with no products, which on the tape is an MF10 production
+    # (B-VIII.1 W-182's MT18 above 58 MeV) or a stated gas production that the
+    # computed one replaces (Li-7's MT203-207); 12 files refused to process.
+    aside = {name: getattr(suite, name) for name in ("orphanProducts", "productions",
+                                                      "incompleteReactions")}
     for name, container in aside.items():
         setattr(suite, name, type(container)())
     context, source = _context_from_model(suite)
