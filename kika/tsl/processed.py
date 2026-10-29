@@ -43,10 +43,18 @@ OUTGOING_KINDS = ("continuous", "discrete", "skewed")
 
 @dataclass
 class BraggTable:
-    """Coherent elastic at one temperature: Bragg-edge energies (eV), cumulative S (eV·b)."""
+    """Coherent elastic at one temperature: Bragg-edge energies (eV), cumulative S (eV·b).
+
+    ``energies`` and ``xs`` are THERMR's σ_coh(E) tabulated on its own grid,
+    when the format ships one beside the edges (G4NDL's
+    ``Coherent/CrossSection``): the physics is the edges, the table is what
+    that consumer interpolates.
+    """
 
     edges: np.ndarray
     s: np.ndarray
+    energies: Optional[np.ndarray] = None
+    xs: Optional[np.ndarray] = None
 
     def cross_section(self, energies) -> np.ndarray:
         """σ_coh = S(E_i)/E for E between edge *i* and the next, 0 below the first."""

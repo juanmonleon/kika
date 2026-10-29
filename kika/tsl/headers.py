@@ -227,15 +227,15 @@ def g4ndl_tsl_tapes(root: Union[str, Path]) -> List:
         source = ""
         bragg = None
         if "Inelastic" in files:
-            source, blocks = _pairs_blocks(files["Inelastic"])
+            source, _mfmt, blocks = _pairs_blocks(files["Inelastic"])
             temperatures = [b[0] for b in blocks]
         if "Incoherent" in files:
-            source, blocks = _pairs_blocks(files["Incoherent"])
+            source, _mfmt, blocks = _pairs_blocks(files["Incoherent"])
             elastic_t = [b[0] for b in blocks]
         if "Coherent" in files:
             fs = root / "Coherent" / "FS" / f"{name}.z"
             if fs.is_file():
-                blocks = _bragg_blocks(fs)
+                _mfmt, blocks = _bragg_blocks(fs)
                 elastic_t = sorted(set(elastic_t) | {b[0] for b in blocks})
                 bragg = int(blocks[0][1].edges.size) if blocks else None
         coherent, incoherent = "Coherent" in files, "Incoherent" in files

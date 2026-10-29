@@ -203,7 +203,9 @@ def test_a_g4ndl_thermal_folder_is_a_library_of_materials(tmp_path):
     np.testing.assert_allclose(material.bragg(600.0).edges, EDGES)
     np.testing.assert_allclose(material.bragg(600.0).s, [0.005, 0.009])
     table = material.outgoing(600.0)
-    assert [len(e) for e in table.energies] == [1, 1]           # the E' = 0 row dropped
+    # Every row is kept, E' = 0 too: Geant4's cdf is the trapezoid rule over all of them.
+    assert [len(e) for e in table.energies] == [2, 2]
+    np.testing.assert_allclose(table.cdf[0], [0.0, 1.0])
     suite = kika.read(str(root), format="g4ndl", target="al_metal")
     assert len(suite.reactions) == 2
 
