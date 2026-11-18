@@ -7,7 +7,7 @@ build:
 
 sphinx:
   configuration: docs/source/conf.py
-  # docs/WRITING_DOCS.md §8: a page is built with warnings as errors.
+  # docs/WRITING_DOCS.md §7: a page is built with warnings as errors.
   fail_on_warning: true
 
 python:

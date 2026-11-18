@@ -18,7 +18,7 @@ version = release
 
 # -- Drafts ------------------------------------------------------------------
 # docs/source/drafts/ holds pages the maintainer has not reviewed yet
-# (docs/WRITING_DOCS.md §9). The published site (Read the Docs "latest" and
+# (docs/WRITING_DOCS.md §8). The published site (Read the Docs "latest" and
 # "stable") leaves them out. A review build includes them, under their own
 # "Drafts" section and with a banner on every page: set KIKA_DOCS_DRAFTS=1
 # locally; on Read the Docs every version except the published "latest" and
@@ -39,7 +39,7 @@ extensions = [
     'sphinx.ext.intersphinx',
 ]
 
-# $...$ and $$...$$ math, and amsmath environments (docs/WRITING_DOCS.md §5.3).
+# $...$ and $$...$$ math, and amsmath environments (docs/WRITING_MANUAL.md §8).
 myst_enable_extensions = ['dollarmath', 'amsmath']
 
 templates_path = ['_templates']
@@ -88,6 +88,10 @@ html_theme_options = {
 html_static_path = ['_static']
 
 html_title = "KIKA Documentation"
+
+# Figures, tables and code listings are numbered, on the web as in the PDF, so the
+# text can refer to them by number (docs/WRITING_MANUAL.md §2.3).
+numfig = True
 html_short_title = "KIKA"
 
 # -- LaTeX (the PDF Read the Docs builds) -------------------------------------
@@ -96,10 +100,10 @@ html_short_title = "KIKA"
 latex_engine = 'xelatex'
 # The PDF is the manual of methods and architecture: its root is pdf_index.rst,
 # which leaves out the user guide and api_reference/ (both read online;
-# docs/WRITING_DOCS.md §5.6). One document, built from that root.
+# docs/WRITING_MANUAL.md §2). One document, built from that root.
 # The title page has no room for the email beside the name.
 latex_documents = [
-    ('pdf_index', 'kika.tex', 'KIKA Documentation',
+    ('pdf_index', 'kika.tex', 'The KIKA Manual',
      'Juan Antonio Monleon de la Lluvia', 'manual'),
 ]
 # An inline literal can only break after . , ; ? ! / by default, so a test
@@ -117,7 +121,7 @@ latex_elements = {
 
 # -- EPUB (also built by Read the Docs) ----------------------------------------
 # A figure's PDF twin (for LaTeX) and the script that draws it live next to it
-# under _static/ (docs/WRITING_DOCS.md §5.5). An EPUB has no media type for
+# under _static/ (docs/WRITING_MANUAL.md §5.3). An EPUB has no media type for
 # either, and says so as a warning, so they are left out of it; the EPUB uses
 # the SVG.
 _STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_static")
@@ -159,7 +163,7 @@ def _wireDrafts(app, docname, source):
     if docname == "index":
         source[0] += _DRAFTS_TOCTREE
     elif docname == "pdf_index":
-        # The PDF is the manual of methods and architecture (WRITING_DOCS §5.6):
+        # The PDF is the manual of methods and architecture (WRITING_MANUAL §2):
         # the user-guide and API drafts stay online.
         source[0] += (_DRAFTS_TOCTREE.replace("   drafts/user_guide/**\n", "")
                       .replace("   drafts/api_reference/**\n", ""))
