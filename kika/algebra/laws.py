@@ -50,7 +50,7 @@ _LIN_Y = {LOGLIN: LINLIN, LOGLOG: LINLOG}
 def method_laws(y, method: str) -> np.ndarray:
     """One law per interval for reading the ordinates *y* under *method*.
 
-    *method* is a key of :data:`METHODS`: the reader's choice of interpolation,
+    *method* is a key of ``METHODS``: the reader's choice of interpolation,
     not a law the table states. So where a log-y law has no value -- an
     interval with an end at or below zero, a coefficient crossing zero say --
     that interval is read with the same x law and a linear y. Only those
@@ -62,7 +62,7 @@ def method_laws(y, method: str) -> np.ndarray:
     y : array_like
         The ordinates of the table; only their signs matter here.
     method : str
-        A key of :data:`METHODS`.
+        A key of ``METHODS``.
 
     Returns
     -------
@@ -73,7 +73,7 @@ def method_laws(y, method: str) -> np.ndarray:
     Raises
     ------
     ValueError
-        If *method* is not a key of :data:`METHODS`.
+        If *method* is not a key of ``METHODS``.
     """
     if method not in METHODS:
         raise ValueError(f"unknown interpolation {method!r}; "
@@ -247,7 +247,7 @@ def validate(x, y, laws) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     matching shapes, finite values, non-decreasing ``x``, codes 1-5, and that
     every log law has positive values on its own axis. A zero-width interval
     (a repeated abscissa) has no law and is not checked. A log-y interval with
-    an end at exactly 0 is let through (:func:`vanishing_panels`); one below 0
+    an end at exactly 0 is let through (``vanishing_panels``); one below 0
     is refused.
 
     Parameters
