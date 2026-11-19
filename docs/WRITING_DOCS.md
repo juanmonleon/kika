@@ -109,13 +109,19 @@ for OpenMC"). A page that turns out to cover two tasks is split.
 - **The public surface of a package is its `__all__`**, with the public methods and
   properties of the classes in it. It is what the API reference documents and what a user
   may rely on. A name that is not exported is internal, whatever its spelling.
-- A submodule that an API page lists by its own path (`kika.nuclear_data.forward`) is
-  public in the same way, through its own `__all__`.
+- A name an API page lists by its submodule path (`kika.nuclear_data.forward.fold`) is
+  public in the same way. The page is then the list: what it does not name is internal.
 - **Whatever a public function takes, returns or raises is public**: a class of kika in a
   public signature, and an exception a caller is expected to catch, have their own entry,
-  so that the reader can follow the link.
-- One entry per object, under the name a user imports (`kika.algebra.integral`, never a
-  second one under `kika.algebra.integrate.integral`).
+  so that the reader can follow the link. It stops there: what the methods of that class
+  return is public only if a page names it.
+- That another part of kika, or an application, imports a name does not make it public.
+  A name is public when a user is told to call it or receives it.
+- **One entry per object**, on the page of the package that defines it and under the name
+  that package exports (`kika.algebra.integral`, never a second one under
+  `kika.algebra.integrate.integral`). An alias, or the same name exported again by another
+  package, links to that entry.
+- A role in a docstring or on a page points at the entry's name, or it does not resolve.
 
 ### 6.2 The docstring is the contract
 
