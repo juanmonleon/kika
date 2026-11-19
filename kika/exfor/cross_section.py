@@ -42,20 +42,29 @@ XS_TO_B = {
 @dataclass
 class ExforCrossSection(ExforEntry):
     """
-    EXFOR cross section data with unit conversion support.
+    EXFOR cross-section against incident energy, with unit conversion and interpolation.
 
-    This class represents experimental cross section data from EXFOR,
-    with built-in support for:
-    - Unit conversions (energy, cross section)
-    - Energy interpolation
-    - Plotting and comparison with theoretical data via PlotBuilder
+    Returned by the database queries for cross-section quantities, or built from a
+    dict or a JSON file with :meth:`from_dict` and :meth:`from_json`. The data are
+    a table of energy, cross-section and error.
 
     Attributes
     ----------
-    units : Dict[str, str]
-        Units dictionary with keys 'energy' and 'cross_section'
-    _data : pd.DataFrame
-        DataFrame with columns: energy, cross_section, error
+    entry, subentry, quantity, citation, reaction, facility, method, detector, sample
+        As in :class:`~kika.exfor.ExforEntry`.
+    units : dict of str
+        Units of the table, with the keys ``"energy"`` (``"eV"``, ``"keV"`` or
+        ``"MeV"``) and ``"cross_section"`` (``"b"``, ``"mb"``, ``"ub"`` or
+        ``"nb"``). The default is MeV and b. The conversion methods update it.
+        Objects built from the database get ``"b/sr"`` when the dataset's unit
+        contains ``/SR``. That string is not one of the four, so conversions
+        treat it as a factor of 1.0: it neither scales to nor from ``"b/sr"``.
+
+    Notes
+    -----
+    The table has the columns ``energy`` and ``cross_section`` in the units above
+    and ``error``, the uncertainty in the cross-section unit. The ``data``
+    property returns a copy of it.
 
     Examples
     --------
@@ -207,17 +216,22 @@ class ExforCrossSection(ExforEntry):
         **kwargs,
     ) -> pd.DataFrame:
         """
-        Filter data by energy value or range.
+        Rows of the table at an energy or in an energy range, in MeV and b.
+
+        It is :meth:`to_dataframe` with its defaults, so the energy is in MeV with a
+        5 % relative tolerance for a single value, and the cross-section is in b.
 
         Parameters
         ----------
-        energy : float or Tuple[float, float], optional
-            Energy value or (min, max) range
+        energy : float or tuple of float, optional
+            An energy in MeV, or ``(minimum, maximum)``. None keeps every row.
+        **kwargs
+            Accepted and ignored.
 
         Returns
         -------
-        pd.DataFrame
-            Filtered data
+        pandas.DataFrame
+            Columns ``energy`` (MeV), ``cross_section`` and ``error`` (b).
         """
         return self.to_dataframe(energy=energy)
 
@@ -389,14 +403,14 @@ class ExforCrossSection(ExforEntry):
         Parameters
         ----------
         energy : float, tuple, or None
-            Energy selection:
-            - float: Select data at specific energy (with tolerance)
+            Energy selection, in *energy_unit*:
+            - float: Select data at specific energy (with a 5 % relative tolerance)
             - tuple: Select data in energy range (min, max)
             - None: Include all data (default)
-        energy_unit : str, default 'MeV'
-            Energy unit for x-axis
-        cross_section_unit : str, default 'b'
-            Cross section unit for y-axis
+        energy_unit : {'eV', 'keV', 'MeV'}
+            Energy unit of the x-axis, and of *energy*.
+        cross_section_unit : {'b', 'mb', 'ub', 'nb'}
+            Cross-section unit of the y-axis.
         uncertainty : bool, default True
             If True, include error bars in the plot
         connect_points : bool, default True
@@ -414,10 +428,15 @@ class ExforCrossSection(ExforEntry):
 
         Returns
         -------
-        CrossSectionPlotData, tuple, or None
-            - None if no data found
-            - CrossSectionPlotData if uncertainty=False
-            - Tuple[CrossSectionPlotData, None] if uncertainty=True
+        ~kika.plotting.CrossSectionPlotData, tuple or None
+            The points sorted by energy, in *energy_unit* and *cross_section_unit*.
+            With ``uncertainty=True`` and at least one positive error, the absolute
+            errors are in ``metadata["yerr"]``.
+
+            - None if no row matches *energy*.
+            - ``uncertainty=True``: the tuple ``(plot_data, None)``. The second item
+              is always None.
+            - ``uncertainty=False``: the plot data alone.
 
         Examples
         --------
@@ -581,7 +600,24 @@ class ExforCrossSection(ExforEntry):
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ExforCrossSection":
-        """Create from dictionary."""
+        """
+        Build a cross-section from a dict with the layout of the JSON files.
+
+        ``units`` is taken as written, with no normalisation; missing, it is MeV and
+        b. ``data`` is a list of records with the keys ``energy``,
+        ``cross_section`` and ``error``, in those units. Missing or empty, the table
+        is empty.
+
+        Parameters
+        ----------
+        data : dict
+            The values, as in a JSON file.
+
+        Returns
+        -------
+        ExforCrossSection
+            The cross-section, with the table and units of *data*.
+        """
         fields = cls._parse_base_fields(data)
         fields["units"] = data.get("units", {"energy": "MeV", "cross_section": "b"})
 

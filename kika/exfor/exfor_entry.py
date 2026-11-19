@@ -85,22 +85,31 @@ def _normalize_units(units: Dict[str, str]) -> Dict[str, str]:
 @dataclass
 class ExforEntry:
     """
-    Base class for all EXFOR entries.
+    Metadata common to every EXFOR subentry, kept as plain dicts that map onto JSON.
 
-    Metadata is stored as plain dictionaries for simplicity and direct
-    mapping to JSON structure. Properties provide convenient access to
-    commonly used fields.
+    The subclasses add the data: :class:`~kika.exfor.ExforAngularDistribution`,
+    :class:`~kika.exfor.ExforCrossSection` and :class:`~kika.exfor.ExforExperiment`.
+    A user gets one from the readers and the database, not by building it.
 
-    Attributes:
-        entry: EXFOR entry number (e.g., "27673")
-        subentry: EXFOR subentry number (e.g., "002")
-        quantity: Quantity type (e.g., "DA" for angular distribution)
-        citation: Citation metadata as dict
-        reaction: Reaction metadata as dict
-        facility: Facility metadata as dict
-        method: Method metadata as dict
-        detector: Optional detector metadata as dict
-        sample: Optional sample metadata as dict
+    Attributes
+    ----------
+    entry : str
+        EXFOR entry number, for example ``"27673"``.
+    subentry : str
+        EXFOR subentry number, for example ``"002"``.
+    quantity : str
+        EXFOR quantity code, for example ``"DA"`` for an angular distribution.
+    citation : dict
+        Bibliographic data: ``authors`` (a list of names) and ``year``, which
+        :attr:`label` uses.
+    reaction : dict
+        Keys ``target`` (``"Fe56"``), ``target_zaid`` (``26056``), ``projectile``
+        (``"n"``), ``process`` (``"EL"``) and ``notation`` (the EXFOR reaction
+        string).
+    facility, method : dict
+        Facility and measurement metadata, as the source gives them.
+    detector, sample : dict or None
+        Detector and sample metadata, None when the source has none.
     """
 
     # Core identifiers
@@ -248,11 +257,16 @@ class ExforEntry:
 
     def to_json(self, filepath: str, indent: int = 2) -> None:
         """
-        Write to JSON file in standardized format.
+        Write the object to a JSON file, from :meth:`to_dict`.
 
-        Parameters:
-            filepath: Path to output JSON file
-            indent: JSON indentation level (default: 2)
+        A subclass writes its own fields too. An existing file is overwritten.
+
+        Parameters
+        ----------
+        filepath : str
+            Path of the file to write.
+        indent : int
+            Indentation of the JSON text, in spaces.
         """
         with open(filepath, "w") as f:
             json.dump(self.to_dict(), f, indent=indent)
@@ -295,23 +309,53 @@ class ExforEntry:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ExforEntry":
-        """Create from dictionary."""
+        """
+        Build the metadata of an entry from a dict with the layout of the JSON files.
+
+        Missing keys default to ``"Unknown"`` for ``entry`` and ``subentry``, to
+        ``"DA"`` for ``quantity``, to empty dicts for the metadata and to None for
+        ``detector`` and ``sample``. A ``reaction`` given as an EXFOR string is
+        split into target, ZAID, projectile and process.
+
+        Parameters
+        ----------
+        data : dict
+            The values, as in a JSON file.
+
+        Returns
+        -------
+        ExforEntry
+            An instance of the class it is called on.
+        """
         fields = cls._parse_base_fields(data)
         return cls(**fields)
 
     @classmethod
     def from_json(cls, filepath: str) -> "ExforEntry":
         """
-        Load from JSON file.
+        Read an entry from a JSON file, choosing the class from ``quantity``.
 
-        This method dispatches to the appropriate subclass based on the
-        'quantity' field in the JSON data.
+        A file whose ``quantity`` is ``"DA"`` (or missing) gives an
+        :class:`~kika.exfor.ExforAngularDistribution`, whichever class this is
+        called on. Any other quantity gives an instance of the class it is called on,
+        with the metadata only: the data of the file are not read.
 
-        Parameters:
-            filepath: Path to JSON file
+        Parameters
+        ----------
+        filepath : str
+            Path to the JSON file.
 
-        Returns:
-            ExforEntry instance (or appropriate subclass)
+        Returns
+        -------
+        ExforEntry
+            The entry.
+
+        Raises
+        ------
+        FileNotFoundError
+            If *filepath* does not exist.
+        ValueError
+            If the file is not valid JSON.
         """
         with open(filepath, "r") as f:
             data = json.load(f)
