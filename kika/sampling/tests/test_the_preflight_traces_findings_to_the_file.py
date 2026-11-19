@@ -111,7 +111,7 @@ def test_the_sampler_shows_layer1_and_names_the_cause_when_it_refuses(tmp_path, 
     endf = _defect_a()
     suite, covReport = decodeCovarianceSuite(endf)
     monkeypatch.setattr(mp, "_readSource",
-                        lambda source, log, covarianceSource=None:
+                        lambda source, log, covarianceSource=None, pendfSource=None:
                         (None, suite, endf, None, "endf", (covReport, None)))
     with pytest.raises(ValueError, match="Traced to the file:.*ls1_in_cross_block"):
         mp.perturbFromModel("tape.endf", {34: None}, 1, dryRun=True)
