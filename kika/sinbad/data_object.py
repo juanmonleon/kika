@@ -48,7 +48,26 @@ class DataObject:
     """
     One set of numbers from a SINBAD entry, with its metadata.
 
-    Built by the reader; not constructed directly.
+    Built by the reader; not constructed directly. Reached with
+    ``benchmark["label"]``, through the ``data`` of a
+    :class:`~kika.sinbad.SinbadBenchmark` or of a
+    :class:`~kika.sinbad.Calculations`.
+
+    Values are kept as the file states them, in the unit the file declares for
+    them (on the table column or the grid); kika converts nothing.
+
+    Parameters
+    ----------
+    element : xml.etree.ElementTree.Element
+        The ``dataObject`` element.
+    index
+        The ``LabelIndex`` of the files that are open together: the look-up
+        table of every label.
+    entry : SinbadBenchmark or Calculations, optional
+        The file the object belongs to, which resolves its label references
+        (:attr:`normalisation`, :attr:`convention`, :attr:`frame`,
+        :attr:`position`, :attr:`calculated_by`, :attr:`detectors`). With
+        ``None`` they all give ``None`` or an empty list.
 
     Attributes
     ----------
@@ -249,19 +268,36 @@ class DataObject:
         The values, brought to another convention.
 
         Applies every correction the object declares as *not applied* whose
-        ``@to`` is the convention asked for. A correction the entry declares
-        without a magnitude cannot be applied and raises, with its stated
-        reason -- silently returning the uncorrected numbers would be worse.
+        ``@to`` is the convention asked for, in the order the file lists them.
+        A correction changes the values only (``subtract``, ``add`` or
+        ``multiply``, by its magnitude, see :meth:`Correction.apply`): the
+        uncertainty budget is left as it is, and so is the object, which keeps
+        its stored values. A correction the entry declares without a magnitude
+        cannot be applied and raises, with its stated reason -- silently
+        returning the uncorrected numbers would be worse. A correction already
+        applied (``applied="true"``) is never undone, so going to a convention
+        the stored values were taken from is not possible.
 
         Parameters
         ----------
         to : str, optional
-            Label of the target ``valueConvention``. With ``None``, the values
-            as stored.
+            Label of the target ``valueConvention``. With ``None``, or equal to
+            the object's own convention, a copy of the values as stored.
 
         Returns
         -------
         numpy.ndarray
+            A new array, the single value column of the table or the array of a
+            gridded object (:attr:`values`), in the unit the file declares.
+
+        Raises
+        ------
+        SinbadError
+            If a correction to *to* has no magnitude, or if the object has a
+            convention other than *to* and declares no correction to it.
+        ContentTypeError
+            If the object holds no value array, or a table with several value
+            columns.
 
         Examples
         --------
@@ -299,7 +335,22 @@ class DataObject:
         """
         The covariance of this object's points, from its uncertainty budget.
 
-        See :func:`kika.sinbad.covariance` for the rule.
+        See :func:`kika.sinbad.covariance` for the rule: the components are
+        relative standard deviations at 1 s.d., combined by correlation scope.
+
+        Parameters
+        ----------
+        relative : bool, default False
+            Return the relative (dimensionless) covariance. Otherwise each
+            entry is multiplied by the stored values of the two points, so the
+            result is in the square of the unit of the values.
+
+        Returns
+        -------
+        matrix : numpy.ndarray
+            Square, one row per point of the table whose value is filled.
+        index : list of tuple
+            ``(object label, position)`` for each row.
         """
         return covariance([self], relative=relative)
 
@@ -307,11 +358,19 @@ class DataObject:
 
     def to_dataframe(self):
         """
-        The content as a :class:`pandas.DataFrame`.
+        The content as a ``pandas.DataFrame``.
 
         What the frame holds depends on the container: a table gives its
         columns, a gridded array one row per cell, a geometry one row per
-        layer, materials one row per nuclide.
+        layer, materials one row per nuclide. Values are as the file states
+        them, with no unit conversion, and the frame carries no unit: read it
+        from :attr:`content` (``Table.units()`` for a table, ``unit`` of a
+        gridded array or grid).
+
+        Returns
+        -------
+        pandas.DataFrame
+            See the ``to_dataframe`` of the container, :attr:`content`.
         """
         return self.content.to_dataframe()
 
@@ -357,6 +416,11 @@ class DataObjectCollection:
     filters chain::
 
         b.data(quantity="reaction rate")(nature="measured")
+
+    Parameters
+    ----------
+    objects : sequence of DataObject
+        The objects, kept in this order.
 
     Examples
     --------
@@ -448,6 +512,7 @@ class DataObjectCollection:
 
     @property
     def labels(self) -> List[str]:
+        """The labels of the objects, in order."""
         return [o.label for o in self._objects]
 
     @property
@@ -464,21 +529,36 @@ class DataObjectCollection:
         Every table in the collection, stacked, with an ``object`` column.
 
         Objects that hold no table are skipped. With ``convention``, values are
-        brought there first, and a ``convention`` column records it.
+        brought there first, and a ``convention`` column records it. Values
+        stay in the unit each table declares and the frame carries no unit;
+        nothing is converted, so rows from tables that declare different units
+        for a column of the same name are stacked as they are.
 
         Parameters
         ----------
         convention : str, optional
-            Label of the ``valueConvention`` to bring the values to.
+            Label of the ``valueConvention`` to bring the values to, with
+            :meth:`DataObject.corrected`. Only the value column of a table with
+            a single one is changed.
+
+        Returns
+        -------
+        pandas.DataFrame
+            The frames of ``Table.to_dataframe``, one after another with a new
+            index, with ``object`` (the label) as first column and ``reaction``
+            second when the object has one. Empty when there is no table.
 
         Raises
         ------
         SinbadError
-            If an object would have to be corrected to reach ``convention``
-            but holds more than one value column, so that
-            :meth:`DataObject.corrected` cannot say which. Stamping the frame
-            with a convention the numbers are not in would be worse than
-            stopping.
+            If an object with a single value column has no declared correction
+            to ``convention`` (and has a different convention of its own), or
+            one of them has no magnitude (see
+            :meth:`~kika.sinbad.DataObject.corrected`). Also if an object has
+            zero or several value columns and a convention other than
+            ``convention``, so that it cannot be corrected as one table.
+            Stamping the frame with a convention the numbers are not in would
+            be worse than stopping.
         """
         import pandas as pd  # noqa: PLC0415
 
@@ -511,7 +591,26 @@ class DataObjectCollection:
         return pd.concat(frames, ignore_index=True)
 
     def covariance(self, relative: bool = False):
-        """The joint covariance of every object in the collection."""
+        """
+        The joint covariance of every object in the collection.
+
+        See :func:`kika.sinbad.covariance`: components with a shared label
+        correlate points across objects.
+
+        Parameters
+        ----------
+        relative : bool, default False
+            Return the relative (dimensionless) covariance. Otherwise each
+            entry is multiplied by the stored values of the two points.
+
+        Returns
+        -------
+        matrix : numpy.ndarray
+            Square, one row per point with a value, objects in collection
+            order.
+        index : list of tuple
+            ``(object label, position)`` for each row.
+        """
         return covariance(list(self._objects), relative=relative)
 
     def __repr__(self) -> str:

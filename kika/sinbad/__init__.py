@@ -28,9 +28,8 @@ A benchmark entry is one XML file, ``sinbad``, plus one file per set of
 calculations, ``sinbadCalculations``, in ``calculations/`` beside it. The nodes
 are GNDS-2.1's where GNDS has them (``table``, ``grid``, ``gridded1d``,
 ``documentation``, ``externalFile``), SFCOMPO's for materials and geometry, and
-SINBAD's own for what neither had. ``Structures/Data_structures.md`` in the
-``sinbadv2-data-format`` repository is the specification, and its section
-numbers are cited throughout this subpackage.
+SINBAD's own for what neither had. The SINBAD v2 data-format specification is
+the reference, and its section numbers are cited throughout this subpackage.
 
 This reader is written against draft **v0.4** (2026-09-30). The format is work
 in progress: a container it does not model yet opens as
@@ -60,11 +59,11 @@ Relation to the rest of kika
 ----------------------------
 This is a different repository of benchmarks from :mod:`kika.benchmarks`, which
 holds ICSBEP/DICE criticality entries; nothing is shared between them. What is
-shared is GNDS: :meth:`~kika.sinbad.content.Gridded.to_gnds` and
-:func:`~kika.sinbad.gnds.check_units` translate into
-:mod:`kika.nuclear_data.model`, and
-:meth:`~kika.sinbad.content.Materials.to_kika_materials` into
-:mod:`kika.materials`. Those imports happen at call time, so reading an entry
+shared is GNDS: :meth:`~kika.sinbad.Gridded.to_gnds` and
+``kika.sinbad.gnds.check_units`` translate into
+``kika.nuclear_data.model``, and
+:meth:`~kika.sinbad.Materials.to_kika_materials` into
+``kika.materials``. Those imports happen at call time, so reading an entry
 costs nothing but the standard library, numpy, and pandas when a frame is
 asked for.
 """

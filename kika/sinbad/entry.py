@@ -251,7 +251,26 @@ class Documentation:
         )
 
     def bibitem(self, xref: str) -> BibItem:
-        """One reference, by the ``xref`` other nodes cite."""
+        """
+        One reference, by the ``xref`` other nodes cite.
+
+        Parameters
+        ----------
+        xref : str
+            The reference number, compared as text (``str(xref)``), so ``3`` and
+            ``"3"`` find the same item.
+
+        Returns
+        -------
+        ``BibItem``
+            The item, with its ``xref`` and its ``text`` (the citation as the
+            entry prints it).
+
+        Raises
+        ------
+        KeyError
+            If the bibliography has no item with that ``xref``.
+        """
         for item in self.bibliography:
             if item.xref == str(xref):
                 return item
@@ -315,7 +334,21 @@ class Issue:
 
 @dataclass(frozen=True)
 class Status:
-    """§4.3. Availability, maturity, the quality assessment and the known issues."""
+    """
+    §4.3. Availability, maturity, the quality assessment and the known issues.
+
+    Attributes
+    ----------
+    availability : str
+        As the file states it; ``""`` when the entry has no status block.
+    maturity_level : str or None
+        As the file states it.
+    quality : ``QualityAssessment`` or None
+        The rating the entry was given (``rating``, the bibliography ``xref`` it
+        cites, and the assessor's ``reservations`` as a tuple of text).
+    issues : tuple of Issue
+        What the entry says is wrong or inconsistent in its own sources.
+    """
 
     availability: str = ""
     maturity_level: Optional[str] = None
@@ -395,6 +428,17 @@ class ExternalFile:
         """
         The absolute path of this file under an entry directory.
 
+        Parameters
+        ----------
+        entry_root : str or pathlib.Path
+            The entry directory the ``path`` of the file is relative to. A leading
+            ``~`` is expanded.
+
+        Returns
+        -------
+        pathlib.Path
+            ``entry_root / path``. The file is not checked to exist.
+
         Raises
         ------
         SinbadError
@@ -412,14 +456,22 @@ class ExternalFile:
         """
         Whether the file on disk still has the checksum the entry recorded.
 
+        Parameters
+        ----------
+        entry_root : str or pathlib.Path
+            The entry directory the ``path`` of the file is relative to.
+
         Returns
         -------
         bool
+            ``True`` when the sha1 of the file's bytes, as it is on disk now,
+            equals the recorded checksum.
 
         Raises
         ------
         SinbadError
-            If the entry stored no checksum, or the file is not there.
+            If the file is inside an archive, the entry stored no checksum, the
+            file is not there, or the checksum algorithm is not ``sha1``.
         """
         path = self.resolve(entry_root)
         if not self.checksum:
@@ -448,6 +500,18 @@ class Normalisation:
     The format keeps this separate from the unit on purpose -- ``units`` holds
     the dimension, the convention holds *per watt of plate*. Mixing the two is
     how normalisations get lost.
+
+    Attributes
+    ----------
+    label : str
+        What a data object's ``normalisation`` points at.
+    basis : str
+        What the numbers are per, as the file states it.
+    provenance : str or None
+        As the file states it.
+    value : Double or None
+        The size of the normalisation (for example the power), in the unit the
+        file declares; ``None`` when the entry gives none.
     """
 
     label: str
@@ -472,7 +536,19 @@ class Normalisation:
 
 @dataclass(frozen=True)
 class ValueConvention:
-    """§4.4. What the stored values include -- background in, or background out."""
+    """
+    §4.4. What the stored values include -- background in, or background out.
+
+    A data object names one by ``convention``, and a correction goes between
+    two of them (``from`` and ``to``).
+
+    Attributes
+    ----------
+    label : str
+        What ``convention`` and a correction's ``from`` and ``to`` point at.
+    basis : str
+        What the values include, as the file states it.
+    """
 
     label: str
     basis: str = ""
@@ -507,7 +583,26 @@ class NamedPoint:
 
 @dataclass(frozen=True)
 class CoordinateFrame:
-    """§4.5. The frame every coordinate in the entry is given in."""
+    """
+    §4.5. The frame every coordinate in the entry is given in.
+
+    Attributes
+    ----------
+    label : str
+        What a data object's ``frame`` points at.
+    unit : str
+        The unit of the coordinates, as the file declares it; kika does not
+        convert it.
+    source : str
+        Where the frame comes from, as the file states it.
+    directions : tuple of ``Direction``
+        One per axis, each with its ``name`` and ``description``.
+    points : tuple of ``NamedPoint``
+        The named points of the frame (for example the nuclear centre), each
+        with ``name`` and ``x``, ``y``, ``z`` as the file gives them (NaN for a
+        coordinate it omits). A point keeps no unit, and kika does not tie its
+        coordinates to ``unit``; in the format they are in the frame's unit.
+    """
 
     label: str
     unit: str = ""
@@ -542,6 +637,16 @@ class Position:
 
     ``label`` is what every table's ``position`` column holds, which is how
     rows from different files are matched.
+
+    Attributes
+    ----------
+    label : str
+        The position name.
+    layer : str or None
+        The name of the geometry layer it is in.
+    shield_thickness : float
+        The shield in front of it, as the number the file gives; this object
+        keeps no unit for it. NaN when the file gives none.
     """
 
     label: str
@@ -564,7 +669,31 @@ class Position:
 
 @dataclass
 class RadiationSource:
-    """§4.6. What produced the radiation, where it sat, and how it is distributed."""
+    """
+    §4.6. What produced the radiation, where it sat, and how it is distributed.
+
+    Attributes
+    ----------
+    label, kind, particle : str
+        The source name, its kind and the particle it emits, as the file states
+        them.
+    layer, material : str or None
+        Names of the geometry layer and the material it sits in.
+    spatial_distribution, z_dependence : str or None
+        As the file states them.
+    strength : str or None
+        In the format, the label of the data object holding the source
+        strength. kika stores the string and does not resolve it.
+    description : str
+        Free text of the file.
+    spectrum_ref : str or None
+        In the format, the label of the data object holding the energy
+        spectrum. kika stores the string and does not resolve it.
+    spectrum_status : str or None
+        Why there is no spectrum, when the entry says so.
+    spectrum_description : str
+        Free text about the spectrum.
+    """
 
     label: str
     kind: str = ""
@@ -615,8 +744,23 @@ class Detector:
     §4.7. One detector: what reaction it measures, and its dimensions.
 
     Dimensions are whatever the entry gives -- diameter, thickness, mass --
-    keyed by their label, as :class:`~kika.sinbad.content.Double` or
-    :class:`~kika.sinbad.content.Range`.
+    keyed by their label, as :class:`~kika.sinbad.Double` or ``Range`` (an
+    interval, with ``min``, ``max`` and ``unit``). Each keeps the unit the file
+    declares for it.
+
+    Attributes
+    ----------
+    label, kind : str
+        The detector name and its kind, as the file states them.
+    reaction : str or None
+        The reaction it measures, e.g. ``"Au197(n,g)Au198"``.
+    counting_system, form : str or None
+        As the file states them.
+    dimensions : dict
+        Label to :class:`~kika.sinbad.Double` or ``Range``.
+    cover : ``Cover`` or None
+        What the detector was wrapped in: its ``material``, the provenance of
+        that material and its own ``dimensions`` (same form as above).
 
     Examples
     --------
@@ -671,6 +815,15 @@ class Absence:
 
     *"An absence is a datum."* A missing value inside a table is a blank cell;
     this is for what has no place in the structures at all.
+
+    Attributes
+    ----------
+    kind : str
+        Why it is not there, as the file states it (``not stated``,
+        ``not reported`` or ``measured, not reported`` in the specification's
+        vocabulary, which is not enforced).
+    text : str
+        What is missing, as the entry says it.
     """
 
     kind: str
@@ -697,9 +850,24 @@ class Calculation:
         The processed library actually used (``BUGJEFF311.BOLIB``), as against
         the evaluation it came from (``JEFF-3.1.1``).
     input_files : tuple of str
-        Labels of ``externalFile`` entries.
+        In the format, labels of ``externalFile`` entries (the ``ref`` of each
+        ``inputFile``). kika stores the strings and does not resolve them.
+    options : str
+        The code options, as free text; ``""`` when the file gives none.
+    xref : str or None
+        In the format, the ``xref`` of the bibliography item describing the
+        run. kika stores the string and does not resolve it.
+    source_distribution, source_spectrum : str or None
+        In the format, labels of the data objects used as the source
+        distribution and the source spectrum. kika stores the strings and
+        does not resolve them.
+    output_files : tuple of str
+        In the format, labels of ``externalFile`` entries holding the output
+        (the ``ref`` of each ``outputFile``). kika stores the strings and does
+        not resolve them.
     output_status : str or None
-        Why the output is not distributed, when it is not.
+        Why the output is not distributed, when it is not. It is the first status
+        found among the output files.
     """
 
     label: str
@@ -746,9 +914,26 @@ class Comparison:
     two calculations). :attr:`against` says which.
 
     Row by row on ``position``, in the convention it declares. The published
-    numbers are in :attr:`table`; :meth:`recompute` forms the same comparison
-    from the two data objects, which is how a reader finds out whether the
-    entry's C/E can be reproduced from the entry's own numbers.
+    numbers are in ``table`` (a :class:`~kika.sinbad.Table`, or ``None`` when
+    the file gives none), in the unit each column declares; :meth:`recompute`
+    forms the same comparison from the two data objects, which is how a reader
+    finds out whether the entry's C/E can be reproduced from the entry's own
+    numbers.
+
+    ``operator`` is ``ratio`` (calculated over measured), ``difference``
+    (calculated minus measured) or ``relative`` (the difference over the
+    measured), and ``ratio`` when the file gives none. The label attributes
+    ``numerator_label``, ``denominator_label`` and ``convention`` are what the
+    file names.
+
+    Parameters
+    ----------
+    element : xml.etree.ElementTree.Element
+        The ``comparison`` element.
+    entry : Calculations, optional
+        The calculations file the comparison belongs to, which resolves
+        :attr:`numerator` and :attr:`denominator`. Without it they are ``None``
+        and :meth:`recompute` raises.
 
     Examples
     --------
@@ -796,7 +981,20 @@ class Comparison:
         return "calculated" if nature == "calculated" else "measured"
 
     def to_dataframe(self):
-        """The published comparison."""
+        """
+        The published comparison.
+
+        Returns
+        -------
+        pandas.DataFrame
+            The comparison's table as the file gives it; see
+            :meth:`Table.to_dataframe`.
+
+        Raises
+        ------
+        SinbadError
+            If the comparison holds no table.
+        """
         if self.table is None:
             raise SinbadError(f"comparison {self.label!r} holds no table")
         return self.table.to_dataframe()
@@ -812,8 +1010,19 @@ class Comparison:
         Returns
         -------
         pandas.DataFrame
-            One row per position, with the published value, the recomputed one
-            and their ratio, for every value column of the comparison.
+            One row per position and value column of the calculated table, for
+            the positions that the denominator also has and where neither value
+            is NaN. Columns ``position``, ``column`` (the calculated column),
+            ``recomputed`` (by ``operator``) and, when the published table
+            has a matching row and column, ``published`` and ``ratio``
+            (recomputed over published; NaN when the published value is 0).
+
+        Raises
+        ------
+        SinbadError
+            If the comparison was not opened from a benchmark, or the
+            denominator cannot be brought to the convention (see
+            :meth:`~kika.sinbad.DataObject.corrected`).
         """
         import pandas as pd  # noqa: PLC0415
 

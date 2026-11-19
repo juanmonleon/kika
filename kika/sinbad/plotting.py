@@ -41,18 +41,30 @@ def plot_profile(
     ----------
     benchmark : SinbadBenchmark
     convention : str, optional
-        Bring every table to this ``valueConvention`` first -- without it,
-        tables stored in different conventions are plotted as stored, which is
-        rarely what is wanted.
+        Bring every table to this ``valueConvention`` first, as
+        :meth:`~kika.sinbad.DataObject.corrected` does -- without it, tables
+        stored in different conventions are plotted as stored, which is rarely
+        what is wanted.
     labels : sequence of str, optional
         Which data objects to draw. Default: every measured table.
     ax : matplotlib.axes.Axes, optional
+        Where to draw. A new figure when ``None``.
     **kwargs
-        Passed to :meth:`~matplotlib.axes.Axes.errorbar`.
+        Passed to ``matplotlib.axes.Axes.errorbar``, over the defaults
+        ``fmt="o"``, ``capsize=3`` and ``markersize=5``.
 
     Returns
     -------
     matplotlib.axes.Axes
+        The axes drawn on, with a logarithmic y axis. The x values are the
+        table's ``shieldThickness`` column as the file states it and the y values
+        the (corrected) value column in the unit it declares; nothing is
+        converted, but the x label is fixed text ("Shield thickness [cm]") and
+        the y label takes the unit of the first object's value column. Error
+        bars are the object's total relative uncertainty
+        (:attr:`~kika.sinbad.DataObject.uncertainty`, 1 s.d.) times the plotted
+        value, and are absent when the object has none. A table with no
+        ``shieldThickness`` column is skipped.
 
     Examples
     --------
@@ -103,12 +115,25 @@ def plot_ce(benchmark, reaction: Optional[str] = None, ax=None, **kwargs):
         Draw only this reaction, e.g. ``"S32(n,p)P32"``. Without it every
         comparison is drawn, which is readable only for a small entry.
     ax : matplotlib.axes.Axes, optional
+        Where to draw. A new figure when ``None``.
     **kwargs
-        Passed to :meth:`~matplotlib.axes.Axes.plot`.
+        Passed to ``matplotlib.axes.Axes.plot``, over the defaults
+        ``marker="o"``, ``linestyle=":"`` and ``markersize=5``.
 
     Returns
     -------
     matplotlib.axes.Axes
+        The axes drawn on, with one line per calculations file and calculation
+        (the ``calculation`` column of the C/E table), against
+        the ``shieldThickness`` column as the file states it (the x label says
+        cm), and a horizontal line at 1. Ratios of two calculations are not drawn.
+
+    Raises
+    ------
+    ValueError
+        If the benchmark has no comparison against a measurement (an empty C/E
+        table). A *reaction* that matches nothing does not raise: the axes are
+        empty.
     """
     ax = _axes(ax, figsize=(9, 6))
     table = benchmark.ce()  # C/E only: a ratio of two calculations is not drawn against 1 as one
@@ -145,13 +170,20 @@ def plot_correlation(benchmark, labels: Optional[Sequence[str]] = None, ax=None,
     ----------
     benchmark : SinbadBenchmark
     labels : sequence of str, optional
+        Which data objects to include, as in
+        :meth:`~kika.sinbad.SinbadBenchmark.correlation`. Default: every
+        measured object that holds a table and a budget.
     ax : matplotlib.axes.Axes, optional
+        Where to draw. A new figure when ``None``.
     **kwargs
-        Passed to :meth:`~matplotlib.axes.Axes.imshow`.
+        Passed to ``matplotlib.axes.Axes.imshow``, over the defaults
+        ``vmin=0``, ``vmax=1``, ``cmap="viridis"`` and ``origin="upper"``.
 
     Returns
     -------
     matplotlib.axes.Axes
+        The axes drawn on: the correlation matrix, one row per measured point,
+        with a white line between data objects and a colour bar.
     """
     import matplotlib.pyplot as plt  # noqa: PLC0415
 
