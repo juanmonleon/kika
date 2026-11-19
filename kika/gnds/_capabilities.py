@@ -113,7 +113,32 @@ class Coverage(str, Enum):
 
 @dataclass(frozen=True)
 class Capability:
-    """One GNDS node, and what kika does with it."""
+    """One GNDS node, and what kika does with it.
+
+    Rows come from :func:`capabilities`; an instance is immutable.
+
+    Attributes
+    ----------
+    node
+        The ``xs:element`` name, verbatim; unique across the table.
+    where
+        The schema that declares it: ``"gnds.xsd"``, ``"covariances.xsd"``,
+        ``"gnds.xsd + covariances.xsd"`` or ``"not in gnds.xsd"`` (a name kika uses
+        that the schema does not declare).
+    coverage
+        What happens to the data in the node.
+    why
+        The reason for the coverage, citing the specification section or the source.
+    group
+        The group the row belongs to, as accepted by ``capabilities(group=...)``.
+    reportedVia
+        The node whose ``ConversionReport`` line names a loss at run time. None means
+        nothing reports it, so a non-full row with None is dropped silently.
+    families
+        The families of ``kika.gnds.nodes`` that also declare this tag, when any do.
+    caveat
+        Why the coverage is below what ``families`` alone would allow, or None.
+    """
 
     #: The ``xs:element`` name, verbatim. Unique across the table, and the key.
     node: str
@@ -829,10 +854,16 @@ SCHEMA_NODE_COUNT = len(CAPABILITIES) - len(NOT_IN_SCHEMA)
 class Capabilities:
     """A view of the table: the whole thing, or whatever a filter left.
 
-    Filters return another :class:`Capabilities`, so they compose, and an
-    unknown filter word **raises** rather than returning an empty view — "I do
-    not know that word" and "there is nothing of that kind" are different
-    answers and a support profile is the last place to conflate them.
+    A user gets one from :func:`capabilities`. It iterates over :class:`Capability`
+    rows, has a length, is always true, and ``view[node]`` returns the row of a node
+    (``KeyError`` if the view has none). Filters return another :class:`Capabilities`,
+    so they compose. An unknown filter word raises: "I do not know that word" and
+    "there is nothing of that kind" are different answers.
+
+    Parameters
+    ----------
+    entries
+        The rows of the view.
     """
 
     def __init__(self, entries: Tuple[Capability, ...]) -> None:
@@ -865,14 +896,17 @@ class Capabilities:
 
     @property
     def full(self) -> "Capabilities":
+        """The rows of this view whose coverage is ``full``."""
         return self._filter(lambda e: e.coverage is Coverage.FULL)
 
     @property
     def partial(self) -> "Capabilities":
+        """The rows of this view whose coverage is ``partial``."""
         return self._filter(lambda e: e.coverage is Coverage.PARTIAL)
 
     @property
     def unsupported(self) -> "Capabilities":
+        """The rows of this view whose coverage is ``unsupported``."""
         return self._filter(lambda e: e.coverage is Coverage.UNSUPPORTED)
 
     @property
@@ -915,11 +949,19 @@ class Capabilities:
         return line
 
     def text(self, width: int = 78) -> str:
-        """The three columns, grouped, as text a docstring can hold.
+        """The view as text, grouped, one block per group and reason.
 
-        Grouped rather than flat because three hundred alphabetical rows are
-        not readable and the group is the unit somebody thinks in — "does it
-        do thermal scattering", not "does it do BraggEdge".
+        Parameters
+        ----------
+        width
+            Column at which the reasons and node lists wrap.
+
+        Returns
+        -------
+        str
+            The :meth:`summary` line, then each block: group, coverage and schema,
+            the reason, how a loss is reported, and the nodes. Ends with a newline.
+            ``str(view)`` is the same text.
         """
         lines = [self.summary(), ""]
         # Keyed on the sentence and not on the group alone. A group whose
@@ -968,22 +1010,38 @@ def _wrap(text: str, width: int):
 def capabilities(*, coverage: Optional[str] = None,
                  group: Optional[str] = None,
                  node: Optional[str] = None) -> Capabilities:
-    """What kika does with each node of GNDS. See the module docstring.
+    """What kika does with each node of GNDS.
 
     With no argument, the whole table::
 
         >>> import kika.gnds
         >>> print(kika.gnds.capabilities().summary())
 
-    ``coverage`` is one of ``"full"``, ``"partial"``, ``"unsupported"``;
-    ``group`` one of the keys the table is written in; ``node`` an exact node
-    name. Each raises on a word the table does not have, rather than answering
-    "nothing" — see :class:`Capabilities`.
+    This does not open a file and does not know about yours. It says what the
+    library can lose; ``suite.report`` says what your file lost.
 
-    **This does not open a file and does not know about yours.** It says what
-    the library can lose; ``suite.report`` says what your file lost. The two
-    are the static and the dynamic answer to the same question and neither
-    stands in for the other.
+    Parameters
+    ----------
+    coverage : {None, "full", "partial", "unsupported"}
+        Keep the rows with this coverage.
+    group
+        Keep the rows of this group (one of the keys the table is written in).
+    node
+        Keep the one row of this node name.
+
+    Returns
+    -------
+    Capabilities
+        The rows that pass every filter given, sorted by node name (capitals before
+        lower case).
+
+    Raises
+    ------
+    ValueError
+        If *coverage* is not one of the three words, or *group* is not a group of
+        the table.
+    KeyError
+        If *node* is not in the table, or not in the view left by the other filters.
     """
     view = Capabilities(tuple(CAPABILITIES.values()))
     if coverage is not None:

@@ -1,95 +1,18 @@
-"""GNDS — reading and writing the Generalized Nuclear Database Structure.
+"""GNDS support: the capability census and staged processing.
 
-**The model must stay asleep when this package is imported, and everything
-here is arranged around that.** Nothing under ``kika/gnds`` imports
-:mod:`kika.nuclear_data.model` at module scope, for the same reason
-:mod:`kika.endf.model_adapter` does not: everything under ``kika/`` reaches
-``kika.nuclear_data`` transitively on ``import kika``, so a module-level import
-of the model would wake it for the cluster pipeline, the desktop app and every
-notebook at once. ``kika/nuclear_data/model/tests/test_dormancy.py`` asserts the
-model stays unreachable from a plain ``import kika``, and the GNDS reader is
-reached through :func:`kika.read`, which imports it inside the call.
+Reading and writing a GNDS file goes through :func:`kika.read` and :func:`kika.write`.
+Importing this package loads no model module: the GNDS reader and writer are imported
+inside those calls.
 
-This module used to say *"the package is empty at import time, and must stay
-that way"*, and that was the invariant stated one size too large. What must
-stay true is the **dormancy**, not the emptiness: :func:`capabilities` is
-exported below and imported eagerly, and it costs nothing because
-:mod:`kika.gnds._capabilities` is a table of strings that imports nothing but
-the standard library. ``import kika.gnds`` still loads zero model modules;
-``import kika.gnds.nodes`` loads thirty, which is why the capability table is
-written by hand rather than derived from :data:`kika.gnds.nodes.NODES`, and why
-the join between the two lives in ``tests/test_capabilities.py``.
+:func:`capabilities` answers, without opening a file, what kika does with each node of
+``gnds.xsd`` and ``covariances.xsd`` (300 nodes) and with the twelve names kika uses that
+those schemas do not declare. It says what the library can lose; ``suite.report`` says
+what a given file lost. :func:`process_gnds` runs a GNDS neutron evaluation through the
+same stages as :func:`kika.endf.process_endf`.
 
-**What kika supports, as something a user can ask.** :func:`capabilities`
-answers it for all 300 nodes ``gnds.xsd`` and ``covariances.xsd`` declare, plus
-the twelve names kika uses that they do not::
-
-    >>> import kika.gnds
-    >>> print(kika.gnds.capabilities().summary())
-    >>> print(kika.gnds.capabilities(coverage="unsupported").text())
-
-It says what the *library* can lose, without opening a file;
-``suite.report`` says what *your* file lost. Neither stands in for the other.
-
-**Which versions this reads, and why there is no compatibility layer.**
-:mod:`kika.gnds.version` accepts ``2.0`` and ``2.1`` through one code path and
-refuses ``1.9``/``1.10`` by name. That is not a shortcut. The 2.1 specification
-(NEA/WKP(2025)6, foreword) describes itself as *"a modest update"* over 2.0
-whose changes *"focus on improving handling for thermal neutron scattering law
-data"* — which kika does not read at all — against **149** approved change
-requests for 1.9 → 2.0. And FUDGE 6.10.0 — the reference implementation, and
-the copy installed here at ``/soft_snc/FUDGE/6.10.0/`` — lists 2.1 among its
-allowed format versions while containing not one branch on it. **Measured
-2026-08-24** over that tree: ``fudge/GNDS_formatVersion.py`` declares
-``allowed = ('1.10', '2.0', '2.1')`` with ``default = '2.0'``, and outside that
-module ``2.1`` appears **0** times against **61** for ``1.10`` — every
-per-version branch it has is a 1.10 rename. For everything kika models, 2.0 and
-2.1 are the same format, so a version-dispatch layer would have zero branches
-in it. If a later version does change a node kika reads, the branch goes in at
-that node, with a fixture of each version beside it.
-
-That measurement is of **6.10.0, the version installed here**, and it is the
-whole point of naming it: FUDGE's ``master`` has since moved on — an external
-architecture review of 2026-08-24 reports it declaring ``1.10``, ``2.0``,
-``2.1`` and ``2.2.rc1``, and defaulting to 2.1 rather than 2.0 when writing
-(not verified here; the installed copy is 6.10.0). That does not reopen the
-decision, because the specification's own foreword is the other half of the
-argument and does not move. It does mean this paragraph must be re-measured
-rather than trusted the day the installed FUDGE changes.
-
-kika's model is built to 2.1; the published libraries are written in 2.0. Both
-are read here, and the writer emits whichever version the suite came in as —
-2.0 when it came from ENDF and has no GNDS origin to preserve.
-
-XML only. §2.4 admits JSON and HDF5 as alternative meta-languages; nothing
-publishes in them and neither is implemented.
-
-**What is in here**, none of it exported from this module — import the module
-you want, or go through :func:`kika.read` / :func:`kika.write`:
-
-====================================  ============================================
-:mod:`~kika.gnds.version`             the format gate, ``ACCEPTED = ("2.0", "2.1")``
-:mod:`~kika.gnds.xpath`               ``href`` resolution, both dialects, and
-                                      ``externalFile`` checksums
-:mod:`~kika.gnds.primitives`          §5-6 ``values``/``axes``/the functionals
-:mod:`~kika.gnds.styles`              §9, shared by both roots
-:mod:`~kika.gnds.decode`              §14 ``reactionSuite`` → the model
-:mod:`~kika.gnds.distributions`       §18, split out when the §18 laws started
-                                      filling it — the reader spanned five
-                                      specification chapters and this is the
-                                      one that grows
-:mod:`~kika.gnds.resonances`          §19, split out because it is not shaped
-                                      like the rest of a ``reactionSuite``
-:mod:`~kika.gnds.covariances`         §25 ``covarianceSuite`` → the model
-:mod:`~kika.gnds.encode`              the model → XML, both roots
-:mod:`~kika.gnds.encode_resonances`   §19, the other direction
-====================================  ============================================
-
-**No intermediate format-classes layer**, unlike :mod:`kika.endf`'s
-parsers → classes → adapter. GNDS's tree *is* the model's shape, so this goes
-XML → model directly, and the thing that would have been the classes layer —
-"what the file said, in the file's own terms" — is the ``ConversionReport`` every
-reader and writer returns.
+GNDS versions 2.0 and 2.1 are read through one code path; 1.9, 1.10 and 2.2 are
+refused. The writer emits the version the suite came in as, and 2.0 for a suite that
+came from ENDF. XML is the only meta-language implemented.
 """
 from __future__ import annotations
 
@@ -106,8 +29,41 @@ __all__ = ["capabilities", "Capabilities", "Capability", "Coverage",
 
 
 def process_gnds(path, plan=None, progress=None):
-    """Process a GNDS neutron evaluation stage by stage; see
-    :func:`kika.endf.process.process_gnds` (the same stages, contract and
-    outputs as ``kika.endf.process_endf``)."""
+    """Process a GNDS neutron evaluation stage by stage.
+
+    The stages, the progress calls, the failure contract and the outputs are those of
+    :func:`kika.endf.process_endf`. The input is a ``reactionSuite``. The 0 K
+    cross-sections are always kika's, reconstructed from the evaluated resonance
+    parameters; a ``crossSectionReconstructed`` style or any other processed style of
+    the file is set aside, and the ``decode`` stage says so. A file with no resonance
+    parameters takes its evaluated pointwise cross-sections as they are.
+
+    Parameters
+    ----------
+    path
+        Path of the GNDS file.
+    plan
+        What to compute (temperatures, broadening, heating, workers). None is a
+        default :class:`~kika.endf.ProcessingPlan`.
+    progress
+        Called as ``progress(stage, fraction)``, with ``fraction`` None when a stage
+        starts and a float in (0, 1] afterwards. None reports nothing.
+
+    Returns
+    -------
+    kika.endf.EndfProcessing
+        The stage reports and the results; the outputs are its ``write_*`` methods.
+
+    Raises
+    ------
+    kika.processing.resonances.UnsupportedResonanceError
+        If the file states no target mass or spin in PoPs and the reconstruction needs
+        them (category ``context-missing``), or the resonance parameters are not
+        supported.
+    kika.processing.resonances.ReconstructionConvergenceError
+        If the resonance reconstruction does not converge.
+    RuntimeError
+        If called while a worker process is importing the main script.
+    """
     from kika.endf.process import process_gnds as run
     return run(path, plan, progress)
