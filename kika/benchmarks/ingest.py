@@ -548,7 +548,7 @@ def build_benchmarks_db(
     ----------
     source_dir : str, optional
         Path to the DICE ``sensitivity/`` folder (containing HEU/IEU/... subfolders).
-        Resolved via :func:`kika.benchmarks.config.get_source_dir` if not given.
+        Resolved via :func:`kika.benchmarks.get_source_dir` if not given.
     db_path : str, optional
         Output database path. Resolved via config/env/default if not given.
     categories : list of str, optional
@@ -582,6 +582,15 @@ def build_benchmarks_db(
         Summary counts: ``benchmarks``, ``profiles``, ``reactions``, ``spectra``,
         ``balance``, ``inputs``, ``keff_matched``, ``db_bytes``, ``files_total``,
         ``files_skipped``, ``skipped``.
+
+    Raises
+    ------
+    ValueError
+        If ``occurrences_rule`` is not one of the four above.
+    BenchmarksError
+        If the source directory is not given or is not a directory, if the
+        database exists and ``overwrite`` is false, or if ``occurrences_rule`` is
+        ``"error"`` and a profile repeats a (nuclide, MT, unit, region) key.
     """
     allowed_occurrences = {"sum", "first", "last", "error"}
     if occurrences_rule not in allowed_occurrences:

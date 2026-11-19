@@ -51,6 +51,14 @@ def plot_profile(
     Returns
     -------
     matplotlib.figure.Figure
+
+    Raises
+    ------
+    ValueError
+        If the vector has no reaction, or none of them is in ``reactions``.
+    ~kika.benchmarks.BenchmarkNotFoundError
+        If ``source`` is a benchmark id with no profile, or ``profile_id`` is not
+        in the database.
     """
     if isinstance(source, dict):
         vector = source

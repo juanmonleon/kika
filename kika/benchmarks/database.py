@@ -33,7 +33,23 @@ _REGION_COLUMN = {
 
 
 class BenchmarksDatabase:
-    """Interface to a built ``kika_benchmarks.db`` SQLite database."""
+    """Interface to a built ``kika_benchmarks.db`` SQLite database.
+
+    It is built by hand and works as a context manager that closes the
+    connection on exit. The connection opens at the first query, not in the
+    constructor. That first query raises
+    :class:`~kika.benchmarks.DatabaseNotConfiguredError` when the file does not
+    exist, and :class:`~kika.benchmarks.BenchmarksError` when it has no ``meta``
+    table or its schema version or sensitivity-uncertainty convention is not the
+    one this version of kika writes.
+
+    Parameters
+    ----------
+    db_path : str, optional
+        The database file. None resolves it as
+        :func:`~kika.benchmarks.get_db_path` does: the configured path, then
+        ``KIKA_BENCHMARKS_DB_PATH``, then ``~/.kika/benchmarks/kika_benchmarks.db``.
+    """
 
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = config.get_db_path(db_path)
@@ -75,6 +91,7 @@ class BenchmarksDatabase:
         return self._conn
 
     def close(self) -> None:
+        """Close the connection; a later query opens it again."""
         if self._conn is not None:
             self._conn.close()
             self._conn = None
@@ -113,7 +130,34 @@ class BenchmarksDatabase:
         limit: int = 200,
         offset: int = 0,
     ) -> List[dict]:
-        """List benchmarks with optional filters (one row per benchmark)."""
+        """List benchmarks with optional filters (one row per benchmark).
+
+        Parameters
+        ----------
+        category, spectrum
+            Exact match on the benchmark's category (``"HEU"``) or spectrum
+            (``"THERM"``), the first and third fields of its id. None or an empty
+            string applies no filter.
+        library
+            Keep the benchmarks that have at least one profile of this nuclear
+            data library (exact match). None or an empty string applies no filter.
+        search
+            A SQL ``LIKE`` pattern matched against the id anywhere in it, so
+            ``%`` and ``_`` in it are wildcards. None or an empty string applies
+            no filter.
+        limit, offset
+            Page of the result, taken after the rows are ordered by
+            ``benchmark_id``.
+
+        Returns
+        -------
+        list of dict
+            One dict per benchmark, ordered by ``benchmark_id``, with the keys
+            ``benchmark_id``, ``category``, ``btype``, ``spectrum``, ``series``,
+            ``case_number`` (``None`` for an id that does not follow
+            ``CATEGORY-TYPE-SPECTRUM-SERIES-CASE``) and ``n_variants`` (the
+            number of profiles stored for it).
+        """
         conn = self._get_connection()
         conditions, params = [], []
         if category:
@@ -143,7 +187,33 @@ class BenchmarksDatabase:
         return [dict(r) for r in conn.execute(query, params)]
 
     def get_benchmark(self, benchmark_id: str) -> dict:
-        """Return a benchmark's metadata plus the list of its profile variants."""
+        """Return a benchmark's metadata plus the list of its profile variants.
+
+        Parameters
+        ----------
+        benchmark_id
+            The id as stored, e.g. ``"HEU-COMP-THERM-021-079"``.
+
+        Returns
+        -------
+        dict
+            The stored row of the benchmark (``benchmark_id``, ``category``,
+            ``btype``, ``spectrum``, ``series``, ``case_number``, ``keff_exp``,
+            ``keff_exp_unc``; the last two are ``None`` without an experimental
+            value, see :meth:`get_experimental_keff`) and ``profiles``: a list
+            of dicts, the preferred profile first and then by ``profile_id``,
+            each with ``profile_id``, ``code``, ``library``,
+            ``group_structure``, ``ngroups``, ``keff`` (the response of the
+            sensitivity file, ``None`` for an ABBN table), ``keff_unc`` (its
+            absolute one-sigma uncertainty: 0.0 when the file's k-eff line has no
+            ``+/-``, ``None`` for an ABBN table),
+            ``is_preferred`` (1 or 0) and ``source_filename``.
+
+        Raises
+        ------
+        ~kika.benchmarks.BenchmarkNotFoundError
+            If the id is not in the database.
+        """
         conn = self._get_connection()
         row = conn.execute(
             "SELECT * FROM benchmarks WHERE benchmark_id = ?", (benchmark_id,)
@@ -164,7 +234,34 @@ class BenchmarksDatabase:
         return result
 
     def get_preferred_profile(self, benchmark_id: str) -> dict:
-        """Return the preferred profile row for a benchmark."""
+        """Return the preferred profile row for a benchmark.
+
+        The preferred profile is the one flagged when the database was built:
+        the lowest priority index of transport code (KENO before MCNP), nuclear
+        data library (newest ENDF/B first, ABBN-93 last) and group structure
+        (238-group, 299-group, continuous), then of the file's variant number.
+
+        Parameters
+        ----------
+        benchmark_id
+            The id as stored.
+
+        Returns
+        -------
+        dict
+            The stored ``profiles`` row: ``profile_id``, ``benchmark_id``,
+            ``code``, ``library``, ``group_structure``, ``ngroups``,
+            ``variant_index``, ``keff``, ``keff_unc`` (absolute one-sigma; 0.0
+            when the file's k-eff line has no ``+/-``, ``None`` for an ABBN
+            table),
+            ``pert_energies`` (the compressed energy boundaries as stored, not
+            decoded), ``is_preferred`` and ``source_filename``.
+
+        Raises
+        ------
+        ~kika.benchmarks.BenchmarkNotFoundError
+            If the benchmark has no profile (or is not in the database).
+        """
         conn = self._get_connection()
         row = conn.execute(
             "SELECT * FROM profiles WHERE benchmark_id = ? "
@@ -183,7 +280,24 @@ class BenchmarksDatabase:
         benchmark_ids: Optional[List[str]] = None,
         preferred_only: bool = True,
     ) -> List[dict]:
-        """Return deterministic profile candidates for c-k ranking."""
+        """Return deterministic profile candidates for c-k ranking.
+
+        Parameters
+        ----------
+        benchmark_ids
+            Restrict to these benchmarks. None keeps all of them; an empty list
+            returns an empty list.
+        preferred_only
+            True keeps only the preferred profile of each benchmark; False keeps
+            every profile.
+
+        Returns
+        -------
+        list of dict
+            Dicts with ``profile_id``, ``benchmark_id``, ``code``, ``library``,
+            ``group_structure`` and ``is_preferred``, ordered by
+            ``benchmark_id``, then preferred first, then ``profile_id``.
+        """
         conditions = []
         params: list = []
         if preferred_only:
@@ -217,6 +331,39 @@ class BenchmarksDatabase:
             {"pert_energies": [...], "reactions": [
                 {"zaid", "mt", "nuclide", "reaction_name", "sensitivity": [...],
                  "error": [...] | None}, ...]}
+
+        Parameters
+        ----------
+        profile_id
+            The ``profile_id`` of a profile of the database.
+        zaid, mt
+            Keep only the reactions with this ZAID (1000 Z + A) or this ENDF MT.
+            None applies no filter.
+
+        Returns
+        -------
+        dict
+            ``pert_energies``: the ``ngroups + 1`` group boundaries in MeV,
+            increasing. ``reactions``: one dict per reaction of the system-total
+            profile (the per-mixture sub-profiles are not returned), ordered by
+            ZAID and MT, with ``zaid``, ``mt``, ``nuclide``, ``reaction_name``
+            (as the sensitivity file names them), ``sensitivity`` and
+            ``error``. ``sensitivity`` holds ``ngroups`` values in the order of
+            increasing energy: the dimensionless relative sensitivity
+            coefficient of the profile's response (k-eff) in each group, per
+            group and not per unit lethargy. ``error`` holds
+            the absolute one-sigma uncertainty of each sensitivity coefficient,
+            in the same unit as the coefficient (not a fraction of it). It is
+            ``None`` when the database was built without errors and for the
+            30-group ABBN tables, which have none. A profile of the compact
+            TSUNAMI-1D dialect has no uncertainties either, but the build stores
+            an all-zero vector for it, so ``error`` is zeros, not ``None``.
+            Values are stored as float32.
+
+        Raises
+        ------
+        ~kika.benchmarks.BenchmarkNotFoundError
+            If ``profile_id`` is not in the database.
         """
         conn = self._get_connection()
         prof = conn.execute(
@@ -262,7 +409,37 @@ class BenchmarksDatabase:
         return {"pert_energies": pert_energies, "reactions": reactions}
 
     def get_sensitivity_profile(self, profile_id: int) -> SensitivityProfile:
-        """Return a profile as a validated, format-neutral UQ object."""
+        """Return a profile as a validated, format-neutral UQ object.
+
+        Parameters
+        ----------
+        profile_id
+            The ``profile_id`` of a profile of the database.
+
+        Returns
+        -------
+        ~kika.sensitivities.SensitivityProfile
+            Built from the system-total reactions of
+            :meth:`get_profile_vector`: ``energy_grid`` the group boundaries in
+            MeV (``energy_unit="MeV"``); each reaction's ``sensitivity`` a
+            dimensionless relative coefficient per group and ``uncertainty`` its
+            absolute one-sigma uncertainty (``None`` when not stored and for ABBN
+            tables; all zeros for the compact TSUNAMI-1D dialect, which has none);
+            ``response`` the profile's ``keff`` and ``response_uncertainty`` its
+            ``keff_unc`` (absolute one-sigma; 0.0 when the file's k-eff line has
+            no ``+/-``), both ``None`` for an ABBN table; ``label`` the benchmark id; ``metadata`` with ``source``
+            (``"benchmarks-db"``), ``profile_id``, ``benchmark_id``, ``code``,
+            ``library`` and ``group_structure``.
+
+        Raises
+        ------
+        ~kika.benchmarks.BenchmarkNotFoundError
+            If ``profile_id`` is not in the database.
+        ValueError
+            If the stored vectors do not satisfy the profile's checks (a
+            non-finite value, a negative uncertainty, boundaries that do not
+            increase).
+        """
         conn = self._get_connection()
         row = conn.execute(
             "SELECT benchmark_id, code, library, group_structure, ngroups, "
@@ -314,6 +491,60 @@ class BenchmarksDatabase:
         """
         Return benchmark reactions sensitive to ``(zaid, mt)`` in an energy region,
         ranked by absolute integral sensitivity (descending).
+
+        The integral sensitivities are not computed here: the build stored, for
+        each reaction, the sum of the per-group sensitivity coefficients over
+        the groups of each region (and over all groups, and the sum of their
+        absolute values). A group belongs to a region by its upper energy edge:
+        thermal up to 0.625 eV, epithermal above that up to 100 keV, fast above
+        100 keV. Only the system-total profiles are searched, never the
+        per-mixture sub-profiles. With the default threshold of 0, a reaction whose
+        integral in the region is exactly zero does not match.
+
+        Parameters
+        ----------
+        zaid
+            The nuclide as ``1000 Z + A`` (26056 for Fe-56).
+        mt
+            ENDF MT of the reaction. None matches every reaction of the nuclide
+            except MT 0 (the pseudo-total).
+        region : {"thermal", "epithermal", "fast", "total"}
+            The energy region whose integral is ranked; ``"total"`` is the sum over
+            all groups.
+        sensitivity_threshold
+            Keep a reaction only when ``abs(s_region)`` is strictly above this,
+            in the unit of the sensitivity (a dimensionless relative coefficient
+            summed over the groups).
+        fraction_threshold
+            When not None, also keep a reaction only when ``abs(s_region)`` is
+            strictly above this fraction of ``s_abs_total``, the sum of the
+            absolute group sensitivities of the same reaction over all groups.
+            A fraction, not a percentage. A reaction whose ``s_abs_total`` is
+            not positive is then dropped.
+        preferred_only
+            True searches only the preferred profile of each benchmark; False
+            searches every profile, so a benchmark can appear once per profile.
+        limit
+            Maximum number of rows, taken after sorting.
+
+        Returns
+        -------
+        list of dict
+            One dict per matching (profile, reaction), sorted by
+            ``abs(s_region)`` from largest to smallest (the order of equal
+            values is not defined). The keys are ``benchmark_id``, ``category``,
+            ``spectrum``, ``btype``, ``profile_id``, ``code``, ``library``,
+            ``group_structure``, ``keff`` (the profile's response), ``zaid``,
+            ``mt``, ``nuclide``, ``reaction``, ``s_region`` (the integral
+            sensitivity in the chosen region, signed), ``s_total`` (the signed
+            sum over all groups), ``s_abs_total`` (the sum of the absolute group
+            values) and ``fraction``, ``abs(s_region) / s_abs_total`` as a
+            fraction (0.0 when ``s_abs_total`` is zero).
+
+        Raises
+        ------
+        ValueError
+            If ``region`` is not one of the four above.
         """
         if region not in _REGION_COLUMN:
             raise ValueError(
@@ -365,7 +596,29 @@ class BenchmarksDatabase:
 
     # -- auxiliary per-benchmark data ----------------------------------------
     def get_experimental_keff(self, benchmark_id: str) -> dict:
-        """Return ``{'keff', 'keff_unc'}`` (the ICSBEP benchmark value), or empty dict."""
+        """Return ``{'keff', 'keff_unc'}`` (the ICSBEP benchmark value), or empty dict.
+
+        The values are read from the experimental k-eff workbook that the build
+        matched to the benchmark id; kika does not convert them.
+
+        Parameters
+        ----------
+        benchmark_id
+            The id as stored.
+
+        Returns
+        -------
+        dict
+            ``{"keff": ..., "keff_unc": ...}``, the experimental k-eff and its
+            uncertainty as the workbook gives them (``keff_unc`` is ``None``
+            when the workbook has none). An empty dict when no experimental
+            value was matched to this benchmark.
+
+        Raises
+        ------
+        ~kika.benchmarks.BenchmarkNotFoundError
+            If the id is not in the database.
+        """
         conn = self._get_connection()
         row = conn.execute(
             "SELECT keff_exp, keff_exp_unc FROM benchmarks WHERE benchmark_id = ?",
@@ -378,7 +631,24 @@ class BenchmarksDatabase:
         return {"keff": row["keff_exp"], "keff_unc": row["keff_exp_unc"]}
 
     def get_spectrum(self, benchmark_id: str) -> Optional[dict]:
-        """Return the 299-group flux spectrum ``{'energies', 'flux'}`` or None."""
+        """Return the 299-group flux spectrum ``{'energies', 'flux'}`` or None.
+
+        Parameters
+        ----------
+        benchmark_id
+            The id as stored.
+
+        Returns
+        -------
+        dict or None
+            ``None`` when no spectrum was stored for the benchmark (an unknown
+            id also gives ``None``). Otherwise two lists of equal length, one
+            entry per group and in the order of the DICE file (not sorted):
+            ``energies``, the upper energy edge of each group in MeV (the build
+            divides the file's value by 10**6, taking it as eV), and ``flux``,
+            the group flux as the file gives it (kika does not normalise it or
+            state its unit).
+        """
         conn = self._get_connection()
         row = conn.execute(
             "SELECT ngroups, energies, flux FROM benchmark_spectra WHERE benchmark_id = ?",
@@ -397,6 +667,21 @@ class BenchmarksDatabase:
 
         ``summary`` holds the extracted scalars (keff, leakage, n_zones);
         ``text`` is the full balance file rendered verbatim.
+
+        Parameters
+        ----------
+        benchmark_id
+            The id as stored.
+
+        Returns
+        -------
+        dict or None
+            ``None`` when no balance was stored (an unknown id also gives
+            ``None``). Otherwise ``summary``, a dict with those of ``keff``,
+            ``leakage`` (floats as written in the balance file) and ``n_zones``
+            (int) that the file text yields, so a key can be missing; and
+            ``text``, the decompressed file, decoded as UTF-8 with undecodable
+            bytes replaced.
         """
         conn = self._get_connection()
         row = conn.execute(
@@ -417,6 +702,23 @@ class BenchmarksDatabase:
 
         Pass ``code`` (``'KENO'`` / ``'MCNP'``) to fetch a single deck; otherwise all
         decks stored for the benchmark are returned.
+
+        Parameters
+        ----------
+        benchmark_id
+            The id as stored.
+        code
+            Exact match on the deck's code. None returns every deck, ordered by
+            code.
+
+        Returns
+        -------
+        list of dict
+            One dict per deck, ``{"code": ..., "text": ...}``: the code the
+            build read from the file name (``"KENO"``, ``"MCNP"``, or ``None``
+            when the name has neither) and the decompressed deck decoded as
+            UTF-8 with undecodable bytes replaced. Empty when nothing matches,
+            an unknown id included.
         """
         import gzip
 
@@ -447,6 +749,28 @@ class BenchmarksDatabase:
         Combines metadata, experimental keff, the profile-variant list, the preferred
         profile's sensitivity vectors, the flux spectrum, the balance, and the list of
         available input-deck codes.
+
+        Parameters
+        ----------
+        benchmark_id
+            The id as stored.
+
+        Returns
+        -------
+        dict
+            The dict of :meth:`get_benchmark` with these keys added:
+            ``experimental_keff`` (:meth:`get_experimental_keff`, empty when
+            none), ``preferred_profile_id`` (the flagged profile, else the first
+            listed; ``None`` without profiles), ``profile_vector``
+            (:meth:`get_profile_vector` of that profile, or ``None``),
+            ``spectrum`` (:meth:`get_spectrum`), ``balance``
+            (:meth:`get_balance`) and ``input_codes`` (the codes of the stored
+            decks, sorted; the decks themselves are not included).
+
+        Raises
+        ------
+        ~kika.benchmarks.BenchmarkNotFoundError
+            If the id is not in the database.
         """
         result = self.get_benchmark(benchmark_id)  # metadata + keff_exp + profiles
         preferred = next(

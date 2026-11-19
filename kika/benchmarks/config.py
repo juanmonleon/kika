@@ -89,6 +89,18 @@ def get_source_dir(explicit_path: Optional[str] = None) -> Optional[str]:
     Resolve the DICE source directory to use for ingest.
 
     Priority: explicit arg > configured > env ``KIKA_DICE_SOURCE_DIR`` > None.
+
+    Parameters
+    ----------
+    explicit_path : str, optional
+        Path passed by the caller; when not None it is returned as it is.
+
+    Returns
+    -------
+    str or None
+        The first of the explicit path, the path set by :func:`configure` and
+        the environment variable that is set; None when none is. The path is
+        not checked for existence.
     """
     if explicit_path is not None:
         return explicit_path
