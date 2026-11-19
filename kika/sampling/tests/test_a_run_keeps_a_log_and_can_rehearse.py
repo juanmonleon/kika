@@ -1,8 +1,8 @@
 """A sampling run's log, and the dry run.
 
 Two claims. The run records every stage as a typed, timed event with its
-numbers, and the two files it writes -- ``run.log.jsonl`` for a program and
-``run.log`` for a person -- are the same events. And a dry run does everything
+numbers, written as ``run.log.jsonl`` for a program, and the ``report.html`` it
+writes for a person is built from those same events. And a dry run does everything
 a run does except write tapes, so that what it says about the sampling is what
 the full run will do: same factors table, same log up to the first ``emitted``.
 """
@@ -19,6 +19,7 @@ import pytest
 from kika.sampling.model_perturbation import TAPE_EMITTERS, perturbFromModel
 from kika.sampling.perturbation_set import readFactorsTable
 from kika.sampling.run_log import EVENT_KINDS, RunLog
+from kika.sampling.run_report import PerturbationReport
 
 # The micro-tapes keep Fe-56's resonance region (MF2, LRP=1) but are cut from
 # the full tape section by section, and NJOY cannot read them (RECONR stops at
@@ -70,21 +71,15 @@ def test_every_stage_is_an_event_with_its_numbers(runs):
     assert all(Path(e.payload["path"]).exists() for e in emitted)
 
 
-def test_the_two_log_files_are_the_same_events(runs):
+def test_the_report_is_built_from_the_logged_events(runs):
     full, _dry = runs
-    jsonl, text = full.files["log"], full.files["log-text"]
-    assert jsonl.name == "run.log.jsonl" and text.name == "run.log"
+    jsonl, page = full.files["log"], full.files["report"]
+    assert jsonl.name == "run.log.jsonl" and page.name == "report.html"
 
     restored = RunLog.read(jsonl)
     assert [e.kind for e in restored] == [e.kind for e in full.log]
     assert [e.message for e in restored] == [e.message for e in full.log]
-
-    rendered = text.read_text(encoding="utf-8")
-    for event in full.log:
-        assert event.render() in rendered
-    # The problems are repeated at the bottom so a person sees them last.
-    for event in full.log.problems():
-        assert rendered.count(event.render()) == 2
+    assert PerturbationReport.read(jsonl).to_html() == page.read_text(encoding="utf-8")
 
 
 def test_a_python_logger_still_gets_every_line(tmp_path):
@@ -139,7 +134,7 @@ def test_a_dry_run_writes_no_tape_and_everything_else(runs):
     assert all(sample["files"] == {} for sample in dry.samples)
     assert not any(p.is_dir() for p in dry.outputDir.iterdir()), "no sample dirs"
     assert not dry.log.of("emitted")
-    for name in ("factors", "conditioning-plan", "metadata", "log", "log-text"):
+    for name in ("factors", "conditioning-plan", "metadata", "log", "report"):
         assert name in dry.files and dry.files[name].exists(), name
     metadata = json.loads(dry.files["metadata"].read_text("utf-8"))
     assert metadata["dryRun"] is True

@@ -31,7 +31,8 @@ Three things it does differently, each of them deliberate:
 
 * **It keeps a log of events, and it can rehearse.** Every stage is a timed
   event with its numbers on a :class:`~kika.sampling.run_log.RunLog`, written
-  as ``run.log.jsonl`` and rendered as ``run.log``; ``dryRun=True`` does all of
+  as ``run.log.jsonl`` with ``report.html`` built from it, also when the run
+  fails or is stopped; ``dryRun=True`` does all of
   it but the tapes, so a run can be checked on a laptop before it is launched.
 
 * **One factors table per run.** Every realisation goes to ``factors.parquet``
@@ -289,8 +290,8 @@ class RunResult:
     sectionFindings: Tuple[Any, ...] = ()
     attribution: Tuple[Dict[str, Any], ...] = ()
     #: The run's :class:`~kika.sampling.run_log.RunLog`: every stage, timed,
-    #: with its numbers. Written beside the samples as ``run.log.jsonl`` and
-    #: ``run.log``.
+    #: with its numbers. Written beside the samples as ``run.log.jsonl``, with
+    #: ``report.html`` built from it.
     log: Any = None
     dryRun: bool = False
     #: The request in its MF/MT spelling, whatever spelling it was given in.
@@ -1158,7 +1159,8 @@ def _dropUnstatedReactions(suite, entries, onMissing, skipped, log):
     note = (f"{names}: stated by the covariance and not by the evaluation, so "
             f"not perturbed")
     skipped.append(note)
-    log.warning(note, subject="MF33", reactions=sorted(unstated))
+    log.warning(note, subject="MF33", reactions=sorted(unstated),
+                code="not_in_evaluation")
     return kept
 
 
@@ -1199,16 +1201,18 @@ def _sumStatements(suite, endfObj, covarianceSource, log):
     present, sums = suiteSumLayout(suite)
     remainders, lumped, notes = readSumStatements(tape, present, sums)
     for note in notes:
-        log.warning(note, subject="MF33")
+        log.warning(note, subject="MF33", code="sum_statement")
     for mtl, members in lumped.items():
         log.note(f"MT{mtl} is a lumped covariance (MTL) for {_mtRanges(members)}: "
-                 f"its block moves them", subject=f"MF33/MT{mtl}")
+                 f"its block moves them", subject=f"MF33/MT{mtl}",
+                 code="lumped_covariance")
     for partial, statements in remainders.items():
         for statement in statements:
             log.note(f"MT{partial}'s covariance is stated as MT{statement.total} "
                      f"minus {_mtRanges(statement.minus)} over "
                      f"[{statement.lo:.4g}, {statement.hi:.4g}] eV: it takes the "
-                     f"difference", subject=f"MF33/MT{partial}")
+                     f"difference", subject=f"MF33/MT{partial}",
+                     code="remainder_covariance")
     return lumped, remainders
 
 
@@ -1366,7 +1370,8 @@ def _screenSumBlocks(suite, request, entries, onMissing: str, mode: str, log,
                 f"minus the rest, so MT{total}'s uncertainty reaches the tape "
                 f"through {'it' if len(partials) == 1 else 'them'}")
         notes.append(note)
-        log.note(note, subject=f"MF33/MT{total}", partials=list(partials))
+        log.note(note, subject=f"MF33/MT{total}", partials=list(partials),
+                 code="sum_block")
     if mode != "fill":
         for total, own in screen.discarded.items():
             drop |= claimKeys[total]
@@ -1376,7 +1381,8 @@ def _screenSumBlocks(suite, request, entries, onMissing: str, mode: str, log,
                     f"so it is perturbed through them and re-derived; partials "
                     f"under it with no covariance stay as evaluated")
             notes.append(note)
-            log.note(note, subject=f"MF33/MT{total}", partials=list(own))
+            log.note(note, subject=f"MF33/MT{total}", partials=list(own),
+                     code="sum_block")
 
     if mode == "never":
         named = set()
@@ -1405,7 +1411,8 @@ def _screenSumBlocks(suite, request, entries, onMissing: str, mode: str, log,
                     f"sumBlocks='never', so MT{total} and its partials are left "
                     f"as evaluated")
             notes.append(note)
-            log.warning(note, subject=f"MF33/MT{total}", partials=list(leaves))
+            log.warning(note, subject=f"MF33/MT{total}", partials=list(leaves),
+                        code="sum_block")
     else:
         for total, leaves in screen.undecomposed.items():
             record["undecomposed"][str(total)] = list(leaves)
@@ -1718,7 +1725,7 @@ def _readCovarianceFrom(path, expectedZaid, log):
         f"itself. Nothing in either file states that they belong together, so "
         f"the uncertainty applied here is the one you asserted, not one the "
         f"evaluation declares",
-        subject=path.name)
+        subject=path.name, code="covariance_from_another_file")
     return covariances, covReport
 
 
@@ -1897,11 +1904,11 @@ def _reconstructResonanceRegion(sourcePath: Path, endfObj, njoyExe, tolerance: f
     from kika.sampling.resonance_region import reconstructedBase, resonanceRanges
 
     ranges = resonanceRanges(endfObj)
-    exe = find_njoy_executable(
-        njoyExe, why="perturbing the cross sections of a resonance region")
-    with log.timed("read",
+    with log.timed("reconstructed",
                    f"resonance region reconstructed by RECONR at 0 K, tolerance "
                    f"{tolerance:g}", subject=sourcePath.name) as info:
+        exe = find_njoy_executable(
+            njoyExe, why="perturbing the cross sections of a resonance region")
         pendf = get_or_create_pendf(sourcePath, tolerance=tolerance, njoy_exe=exe)
         base = pendf.with_name(pendf.stem + ".lrp2.endf")
         if not base.is_file():
@@ -1911,6 +1918,37 @@ def _reconstructResonanceRegion(sourcePath: Path, endfObj, njoyExe, tolerance: f
         info.update(pendf=str(pendf), base=str(base),
                     ranges=[list(r) for r in ranges])
     return suite, baseObj, base, pendf
+
+
+def _nuclideName(target=None, zsymam=None) -> Optional[str]:
+    """``Fe-56`` from a GNDS target (``Fe56``) or an ENDF ZSYMAM (``26-Fe- 56``)."""
+    import re
+
+    if zsymam:
+        match = re.match(r"\s*\d+\s*-\s*([A-Za-z]+)\s*-\s*(\d+)\s*([A-Za-z]*)", zsymam)
+        if match:
+            return f"{match[1].capitalize()}-{int(match[2])}{match[3].lower()}"
+    if target:
+        match = re.fullmatch(r"([A-Za-z]+)(\d+)(.*)", str(target))
+        if match:
+            return f"{match[1]}-{match[2]}{match[3]}"
+        return str(target)
+    return None
+
+
+def _evaluationInfo(endfObj, path) -> Dict[str, Any]:
+    """File, nuclide, ZA, MAT and library of an ENDF tape, for the run's report."""
+    from kika.endf.reconstruction_report import _library, evaluation_summary
+
+    try:
+        summary = evaluation_summary(endfObj, path)
+    except Exception:
+        return {"file": Path(path).name, "path": str(path)}
+    return {"file": summary.get("file"), "path": summary.get("path"),
+            "sha256": summary.get("sha256"), "za": summary.get("za"),
+            "mat": summary.get("mat"),
+            "library": _library(summary) if summary.get("library") else None,
+            "nuclide": _nuclideName(zsymam=summary.get("zsymam"))}
 
 
 def _readSource(source, log, covarianceSource=None):
@@ -1953,6 +1991,8 @@ def _readSource(source, log, covarianceSource=None):
             covariances = getattr(suite, "covarianceSuite", None)
             info["decode"] = suite.report.summary()
             info["format"] = "gnds"
+            info["evaluation"] = {"file": path.name, "path": str(path),
+                                  "nuclide": _nuclideName(getattr(suite, "target", None))}
         if covarianceSource is not None:
             # A GNDS source carries no ZAID to compare against, so the check
             # that the two files are about the same nuclide cannot run here.
@@ -1982,6 +2022,7 @@ def _readSource(source, log, covarianceSource=None):
         info["covarianceDecode"] = covReport.summary()
         info["suiteDecode"] = suiteReport.summary()
         info["format"] = "endf"
+        info["evaluation"] = _evaluationInfo(endfObj, path)
     if covarianceSource is not None:
         covariances, covReport = _readCovarianceFrom(
             covarianceSource, getattr(endfObj, "zaid", None), log)
@@ -2170,7 +2211,8 @@ def _checkRealisation(pset: PerturbationSet, log, sample: int) -> None:
         elif not positive:
             log.warning("a multiplicative factor <= 0: the linear draw crossed "
                         "zero; draw in log space or condition the block",
-                        subject=component.describe(), sample=sample, **payload)
+                        subject=component.describe(), sample=sample,
+                        code="factor_not_positive", **payload)
         else:
             log.event("checked", "finite" + (", positive" if multiplicative else ""),
                       subject=component.describe(), sample=sample, **payload)
@@ -2359,14 +2401,15 @@ def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
             files["perturbation-set"] = pset.write(
                 sampleDir / "perturbation.json")
 
-    notes = [note for note in (_redundancyNote(suite, pset, applied,
-                                               ctx.crossSectionSums,
-                                               ctx.sumBlocks),
-                               _sumRuleNote(applied),
-                               _spectrumNote(applied), _droppedStepsNote(applied),
-                               _pointBandNote(applied),
-                               _tabulatedAngularNote(applied))
-             if note is not None]
+    notes = [(code, note) for code, note in (
+        ("sums_rederived", _redundancyNote(suite, pset, applied, ctx.crossSectionSums,
+                                           ctx.sumBlocks)),
+        ("sum_rule", _sumRuleNote(applied)),
+        ("spectrum_coverage", _spectrumNote(applied)),
+        ("dropped_steps", _droppedStepsNote(applied)),
+        ("point_band", _pointBandNote(applied)),
+        ("tabulated_angular", _tabulatedAngularNote(applied)))
+        if note is not None]
     _forget(suite, pset, applied)
     return {"sample": number, "label": label, "set": pset, "files": files,
             "applied": applied, "ace": aceProduced, "notes": notes}
@@ -2375,19 +2418,25 @@ def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
 def _recordSample(result: RunResult, out: Dict[str, Any], log) -> None:
     """Put one processed sample on the result, and its notes on the run.
 
-    A note is recorded -- and warned about -- the first time any sample raises
-    it, whichever sample that was; the same note from every other sample is
-    the same fact and is not repeated.
+    A note is recorded the first time any sample raises it, as a fact of the
+    run and not of that sample: the same note from every other sample is the
+    same fact. It is a warning when it can change a result (a rebuilt
+    multiplicity, dropped spectrum steps, anything gone negative).
     """
     number = out["sample"]
-    for note in out["notes"]:
+    for code, note in out["notes"]:
         if note not in result.notes:
             result.notes.append(note)
-            log.warning(note, sample=number)
+            if code in _WARNING_NOTES or "negative" in note:
+                log.warning(note, code=code, firstSample=number)
+            else:
+                log.note(note, code=code, firstSample=number)
     result.samples.append({"label": out["label"], "set": out["set"],
                            "files": out["files"], "applied": out["applied"],
                            "ace": out["ace"]})
 
+
+_WARNING_NOTES = frozenset({"sum_rule", "dropped_steps"})
 
 #: What a worker process holds between samples: its own suite, read once.
 _WORKER: Dict[str, Any] = {}
@@ -2431,6 +2480,55 @@ def _workerSample(task: Tuple[int, Mapping[Hashable, np.ndarray]]) -> Dict[str, 
     return out
 
 
+def _kikaVersion() -> str:
+    try:
+        from kika import __version__
+    except ImportError:  # pragma: no cover
+        return ""
+    return str(__version__)
+
+
+def _recordsItsEnd(run):
+    """Record how *run* ended (error or stop) and write its log and report.
+
+    A run that raises still leaves ``run.log.jsonl`` and ``report.html`` in its
+    output folder, so a failed run explains itself. Nothing is recorded for a
+    call refused before its ``started`` event: that is a caller error.
+    """
+    import functools
+
+    @functools.wraps(run)
+    def wrapper(*args, **kwargs):
+        from kika.sampling.run_log import RunCancelled, RunLog
+
+        log = kwargs.get("runLog")
+        if log is None:
+            log = RunLog(logger=kwargs.pop("logger", None),
+                         label=kwargs.get("labelPrefix", "realization"))
+            kwargs["runLog"] = log
+        try:
+            return run(*args, **kwargs)
+        except BaseException as failure:
+            if not log.of("started"):
+                raise
+            if isinstance(failure, (RunCancelled, KeyboardInterrupt)):
+                done = len({e.sample for e in log.of("emitted")})
+                log.event("cancelled", str(failure) or "stopped on request",
+                          stage=log.stage, samplesWritten=done)
+            elif not (log.events and log.events[-1].kind == "error"):
+                log.error(f"{type(failure).__name__}: {failure}",
+                          stage=log.stage or "read", exception=type(failure).__name__)
+            outputDir = kwargs.get("outputDir")
+            if outputDir is not None:
+                try:
+                    log.write(outputDir)
+                except Exception:  # pragma: no cover - the original failure matters more
+                    pass
+            raise
+    return wrapper
+
+
+@_recordsItsEnd
 def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                      outputDir=None, formats: Sequence[str] = ("endf-delta",),
                      grouping: str = "mf", space: str = "log",
@@ -2692,7 +2790,8 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
               covarianceSource=(str(covarianceSource)
                                 if covarianceSource is not None else None),
               outputDir=str(outputDir) if outputDir is not None else None,
-              ace=ace.to_dict() if ace is not None else None)
+              ace=ace.to_dict() if ace is not None else None,
+              kikaVersion=_kikaVersion())
 
     suite, covariances, endfObj, sourcePath, sourceFormat, reports = \
         _readSource(source, log, covarianceSource)
@@ -2734,7 +2833,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
             if mat is not None and needsTape:
                 log.note(f"MAT {mat} taken from the library's table for "
                          f"{getattr(suite, 'target', '?')}; the GNDS source states none",
-                         mat=mat)
+                         mat=mat, code="mat_from_table")
 
     from kika.sampling.cross_section_sums import checkSumBlockMode
 
@@ -2784,7 +2883,8 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                     f"resonances are added to, so this realisation barely "
                     f"perturbs those energies")
             resonanceNotes.append(note)
-            log.warning(note, subject="MF2")
+            log.warning(note, subject="MF2", code="resonance_background_only")
+    log.stage = "request"
     expansionNotes: List[str] = []
     lumped, remainders = {}, {}
     if crossSectionSums:
@@ -2976,7 +3076,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         log.note(f"nWorkers={nWorkers} not used: "
                  + ("a dry run writes no tapes, so there is nothing worth a "
                     "process" if not emitTapes else "one sample is one process"),
-                 nWorkers=nWorkers)
+                 nWorkers=nWorkers, code="workers")
     if parallel:
         if sourcePath is None:
             raise ValueError(
@@ -2989,7 +3089,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         log.note(f"{nSamples} sample(s) over {workers} worker process(es); the "
                  f"draw was made once here, each worker re-reads "
                  f"{sourcePath.name} once and writes whole samples",
-                 nWorkers=workers)
+                 nWorkers=workers, code="workers")
         tasks = [(number, {key: samples[key][number] for key in samples})
                  for number in range(nSamples)]
         done: Dict[int, Dict[str, Any]] = {}
@@ -3039,7 +3139,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
               nProblems=len(log.problems()))
     if outputDir is not None:
         result.files["log"] = outputDir / "run.log.jsonl"
-        result.files["log-text"] = outputDir / "run.log"
+        result.files["report"] = outputDir / "report.html"
         result.files["metadata"] = outputDir / "run_metadata.json"
         _writeRunMetadata(result, outputDir, covReport, suiteReport, sourcePath,
                           original, seed, space, psdMethod, nWorkers=nWorkers,

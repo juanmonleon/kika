@@ -226,7 +226,8 @@ def test_a_failed_njoy_run_is_an_error_event_and_the_run_goes_on(fakeNjoy, tmp_p
     metadata = json.loads(run.files["metadata"].read_text("utf-8"))
     assert [f["temperature"] for f in metadata["ace"]["failures"]] == [99999.0, 99999.0]
     assert run.log.verdict().startswith("RUN FAILED")
-    assert "NJOY failed" in run.files["log-text"].read_text(encoding="utf-8")
+    report = run.files["report"].read_text(encoding="utf-8")
+    assert "Completed with failures" in report and "NJOY failed" in report
 
 
 # ----------------------------------------------------------------------

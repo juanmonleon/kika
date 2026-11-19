@@ -9,10 +9,10 @@ warning concerned; that had to be recovered from the shape of the text.
 This module records **events** instead. An :class:`Event` says what happened
 (*kind*), to what (*subject*, *sample*), when, for how long, and carries a
 JSON payload with the numbers -- dimensions, rank, λ_min/λ_max, realised
-covariance error, the files written. The same list of events is written twice
-from one source: ``run.log.jsonl`` for a program (the app's timeline, a
-dashboard, a test) and ``run.log`` rendered for a person. Neither is derived
-from the other, so they cannot disagree.
+covariance error, the files written. The events are written as
+``run.log.jsonl`` for a program (the app's timeline, a dashboard, a test), and
+the report a person reads (:mod:`kika.sampling.run_report`, ``report.html``) is
+built from those same events, so it can be rebuilt from the file at any time.
 
 The Python ``logging`` interface is kept: a :class:`RunLog` given a *logger*
 forwards every event to it as one line, so a caller that already has a log
@@ -31,12 +31,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
-__all__ = ["Event", "RunLog", "EVENT_KINDS", "LEVELS"]
+__all__ = ["Event", "RunLog", "RunCancelled", "EVENT_KINDS", "LEVELS"]
 
 #: What an event can be. In the order a run produces them, roughly.
 EVENT_KINDS = (
     "started",      # the call, with its arguments
     "read",         # the source file decoded to the model
+    "reconstructed",  # the resonance region rebuilt by NJOY RECONR
     "request",      # what the request became once normalised
     "assembled",    # the covariance blocks, with their dimensions
     "inspected",    # the pre-flight's findings, per block
@@ -49,40 +50,23 @@ EVENT_KINDS = (
     "note",         # something true of the run that no output file states
     "warning",
     "error",
+    "cancelled",    # stopped on request; what was written so far is kept
     "finished",
 )
 
 LEVELS = ("info", "warning", "error")
 
 
+class RunCancelled(Exception):
+    """Raised by whoever drives a run to stop it at the next event.
+
+    The run records a ``cancelled`` event, not an ``error``, and still writes
+    its log and report.
+    """
+
+
 def _now() -> str:
     return _dt.datetime.now().astimezone().isoformat(timespec="milliseconds")
-
-
-def _secs(seconds: Optional[float]) -> str:
-    return "" if seconds is None else f"{seconds:.3f} s" if seconds < 10 else f"{seconds:.1f} s"
-
-
-def _size(nbytes) -> str:
-    if nbytes is None:
-        return ""
-    n = float(nbytes)
-    for unit in ("B", "KB", "MB", "GB"):
-        if n < 1024 or unit == "GB":
-            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
-        n /= 1024
-    return f"{nbytes} B"
-
-
-def _short(subject: str) -> str:
-    """``MF34/MT2 (ZA 26056, L=1)`` -> ``MF34/MT2 L=1``: the ZA is in the header."""
-    text = subject
-    if "(ZA " in text:
-        head, _, tail = text.partition("(ZA ")
-        inner = tail.rstrip(")")
-        extra = inner.split(",", 1)[1].strip() if "," in inner else ""
-        text = head.strip() + (f" {extra}" if extra else "")
-    return text
 
 
 def _jsonable(value):
@@ -179,6 +163,9 @@ class RunLog:
         self.events: List[Event] = []
         self._logger = logger
         self._started = time.perf_counter()
+        #: The stage under way: set by :meth:`timed` and by the pipeline between
+        #: timed blocks, so an exception raised outside one still says where.
+        self.stage: Optional[str] = None
 
     # ------------------------------------------------------------------
     # Recording
@@ -222,13 +209,17 @@ class RunLog:
         says where.
         """
         extra: Dict[str, Any] = {}
+        self.stage = kind
         start = time.perf_counter()
         try:
             yield extra
+        except RunCancelled:
+            raise
         except Exception as failure:
             self.error(f"{message}: {type(failure).__name__}: {failure}",
                        subject=subject, sample=sample,
-                       seconds=time.perf_counter() - start, stage=kind)
+                       seconds=time.perf_counter() - start, stage=kind,
+                       exception=type(failure).__name__)
             raise
         self.event(kind, message, subject=subject, sample=sample,
                    seconds=time.perf_counter() - start, **payload, **extra)
@@ -296,17 +287,6 @@ class RunLog:
     def to_dicts(self) -> List[Dict[str, Any]]:
         return [event.to_dict() for event in self.events]
 
-    def render(self) -> str:
-        """The whole log for a person, header and footer included."""
-        lines = [f"run log{' ' + self.label if self.label else ''}: "
-                 f"{len(self.events)} event(s)", ""]
-        lines += [event.render() for event in self.events]
-        problems = self.problems()
-        if problems:
-            lines += ["", f"{len(problems)} warning(s)/error(s):"]
-            lines += [f"  {event.render()}" for event in problems]
-        return "\n".join(lines) + "\n"
-
     # ------------------------------------------------------------------
     # The report: what a person reads
     # ------------------------------------------------------------------
@@ -319,6 +299,9 @@ class RunLog:
         started = self.of("started")
         dry = bool(started and started[0].payload.get("dryRun"))
         what = "DRY RUN" if dry else "RUN"
+        cancelled = self.of("cancelled")
+        if cancelled:
+            return f"{what} STOPPED: {cancelled[0].message}"
         if errors:
             first = errors[0]
             where = f" at stage '{first.payload['stage']}'" if "stage" in first.payload else ""
@@ -332,210 +315,37 @@ class RunLog:
             head += f", {len(warnings)} warning(s) -- read them below"
         return head
 
-    def report(self, *, sampleLines: int = 50) -> str:
-        """The run as a person would want to read it.
+    def report(self):
+        """The run's report (:class:`~kika.sampling.run_report.PerturbationReport`)."""
+        from kika.sampling.run_report import PerturbationReport
 
-        Built from the events alone -- the same ones ``run.log.jsonl`` holds --
-        so re-rendering a log read back from disk gives the same text. Sections
-        in the order the run happened: the verdict, what was run, what was read,
-        what was assembled, what the pre-flight found and did, the draw, the
-        samples, the files, and every warning again at the end where a reader
-        who skipped to the bottom finds them.
-
-        *sampleLines* caps the per-sample section: past it the samples are
-        summarised and only the ones with a warning are listed, because a
-        thousand identical lines are not something anyone reads.
-        """
-        L: List[str] = []
-        add = L.append
-        started = self.of("started")
-        s0 = started[0].payload if started else {}
-        finished = self.of("finished")
-
-        title = "kika perturbation run" + (f"  [{self.label}]" if self.label else "")
-        add(title)
-        add("=" * max(len(title), 60))
-        add(self.verdict())
-        add("")
-
-        # -- What was run ------------------------------------------------
-        reads = self.of("read")
-        if reads:
-            r = reads[0]
-            add(f"Source     {r.subject or s0.get('source', '?')} ({r.payload.get('format', '?')})")
-        requests = self.of("request")
-        if requests:
-            add(f"Request    {requests[0].message}")
-        if started:
-            add(f"Draw       {s0.get('nSamples', '?')} sample(s), seed {s0.get('seed', '?')}, "
-                f"{s0.get('space', '?')} space, {s0.get('samplingMethod', '?')}/"
-                f"{s0.get('decompositionMethod', '?')}, psd_method={s0.get('psdMethod', '?')}")
-            formats = s0.get("formats") or []
-            out = s0.get("outputDir")
-            if s0.get("dryRun"):
-                add("Output     dry run: no tapes" + (f"; run-level files in {out}" if out else ""))
-            elif out:
-                add(f"Output     {out}  ({', '.join(formats)})")
-            else:
-                add("Output     none (no outputDir)")
-        if finished and finished[0].seconds is not None:
-            add(f"Elapsed    {finished[0].seconds:.1f} s")
-        add("")
-
-        # -- Read ----------------------------------------------------------
-        step = 0
-        if reads:
-            r = reads[0]
-            step += 1
-            add(f"{step}  Read           {_secs(r.seconds)}")
-            for key in ("decode", "covarianceDecode", "suiteDecode"):
-                if key in r.payload:
-                    add(f"     {key}: {r.payload[key]}")
-            add("")
-
-        # -- Blocks --------------------------------------------------------
-        assembled = self.of("assembled")
-        if assembled:
-            step += 1
-            head = next((e for e in assembled if e.subject is None), None)
-            add(f"{step}  Blocks         "
-                + (head.payload.get("description", head.message).split("\n")[0]
-                   if head else f"{len(assembled)} block(s)"))
-            for e in assembled:
-                if e.subject is None:
-                    continue
-                d = e.payload.get("dimension", "?")
-                add(f"     {e.subject:<44s} {d}x{d}  union={e.payload.get('union', '?')}")
-            add("")
-
-        # -- Pre-flight and conditioning -------------------------------------
-        inspected = self.of("inspected")
-        conditioned = self.of("conditioned")
-        if inspected or conditioned:
-            step += 1
-            head = next((e for e in inspected if e.subject is None), None)
-            mode = next((e.payload.get("mode") for e in conditioned + inspected
-                         if e.payload.get("mode")), "?")
-            add(f"{step}  Pre-flight     ({mode}) "
-                + (head.payload.get("summary", head.message) if head else ""))
-            remedies = {e.subject: e for e in conditioned if e.subject}
-            findings = [e for e in inspected if e.subject]
-            seen = set()
-            for e in findings:
-                mark = "!" if e.level != "info" else " "
-                line = f"   {mark} {e.subject}: {e.message}"
-                if e.payload.get("check") == "definiteness" and e.subject in remedies:
-                    rem = remedies[e.subject]
-                    moved = rem.payload.get("stated_diagonal_max_relative_change")
-                    line += f"  -> {rem.payload.get('remedy')}"
-                    if moved:
-                        line += f" (stated variances moved up to {moved:.1%})"
-                    seen.add(e.subject)
-                add(line)
-            for subject, rem in remedies.items():
-                if subject not in seen:
-                    add(f"     {subject}: {rem.message}")
-            add("")
-
-        # -- Draw ----------------------------------------------------------
-        drawn = self.of("drawn")
-        if drawn:
-            step += 1
-            head = next((e for e in drawn if e.subject is None), None)
-            add(f"{step}  Draw           {_secs(head.seconds) if head else ''}")
-            for e in drawn:
-                if e.subject:
-                    add(f"     {e.subject:<44s} {e.message}")
-            add("")
-
-        # -- Samples ---------------------------------------------------------
-        applied = self.of("applied")
-        if applied:
-            step += 1
-            samples = sorted({e.sample for e in applied if e.sample is not None})
-            checks = self.of("checked")
-            emitted = self.of("emitted")
-            flagged = {e.sample for e in self.problems() if e.sample is not None}
-            add(f"{step}  Samples        {len(samples)} applied"
-                + (f", {len(flagged)} with warnings" if flagged else ""))
-            listed = samples if len(samples) <= sampleLines else sorted(flagged)
-            if len(samples) > sampleLines:
-                add(f"     (listing only the {len(listed)} sample(s) with warnings; "
-                    f"see run.log.jsonl for all {len(samples)})")
-                # A range over the whole run per component, so the reader sees
-                # the ensemble even when the lines are not listed.
-                byComponent: Dict[str, List[float]] = {}
-                for e in checks:
-                    if e.subject and "min" in e.payload:
-                        lo, hi = byComponent.setdefault(e.subject, [float("inf"), float("-inf")])
-                        byComponent[e.subject] = [min(lo, e.payload["min"]), max(hi, e.payload["max"])]
-                for subject, (lo, hi) in byComponent.items():
-                    add(f"     {subject:<44s} over all samples: {lo:.3f} .. {hi:.3f}")
-            for n in listed:
-                parts = []
-                for e in checks:
-                    if e.sample == n and e.subject and "min" in e.payload:
-                        parts.append(f"{_short(e.subject)} {e.payload['min']:.3f}..{e.payload['max']:.3f}")
-                files = []
-                for e in emitted:
-                    if e.sample == n:
-                        size = e.payload.get("bytes")
-                        files.append(f"{e.subject} {_size(size)}" if size else str(e.subject))
-                mark = "!" if n in flagged else " "
-                line = f"   {mark} #{n:04d}  " + " | ".join(parts[:8]) + (" | ..." if len(parts) > 8 else "")
-                if files:
-                    line += "   -> " + ", ".join(files)
-                add(line)
-                for e in self.problems():
-                    if e.sample == n:
-                        add(f"           ! {e.message}")
-            add("")
-
-        # -- Files -----------------------------------------------------------
-        written = self.of("written")
-        if written or (s0.get("outputDir") and finished):
-            step += 1
-            names = [f"{e.subject} {_size(e.payload['bytes'])}" if e.payload.get("bytes")
-                     else str(e.subject) for e in written]
-            if s0.get("outputDir"):
-                # Written after the log itself, so they are not events.
-                names += ["run_metadata.json", "run.log", "run.log.jsonl"]
-            add(f"{step}  Files          " + ", ".join(names))
-            add("")
-
-        # -- Warnings, again ---------------------------------------------------
-        problems = self.problems()
-        if problems:
-            add(f"WARNINGS AND ERRORS ({len(problems)})")
-            for e in problems:
-                where = f"[sample {e.sample:04d}] " if e.sample is not None else ""
-                where += f"{e.subject}: " if e.subject else ""
-                add(f"  {'E' if e.level == 'error' else '!'} {where}{e.message}")
-        else:
-            add("No warnings.")
-        add("")
-        add(self.verdict().replace(" -- read them below", " (listed above)"))
-        return "\n".join(L) + "\n"
+        return PerturbationReport.from_log(self)
 
     def write(self, directory, *, stem: str = "run") -> Tuple[Path, Path]:
-        """``<stem>.log.jsonl`` for a program and ``<stem>.log`` for a person.
+        """``<stem>.log.jsonl`` for a program and ``report.html`` for a person.
 
-        The text file is the report followed by the full timeline, so a reader
-        gets the verdict and the story first and the raw events only if they
-        keep scrolling.
+        The events are written first: a report that cannot be rendered must not
+        cost the run its log, so a rendering failure leaves a page that says so.
         """
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
         jsonl = directory / f"{stem}.log.jsonl"
-        text = directory / f"{stem}.log"
+        page = directory / "report.html"
         with jsonl.open("w", encoding="utf-8") as handle:
             for record in self.to_dicts():
                 handle.write(json.dumps(record) + "\n")
-        text.write_text(
-            self.report() + "\n" + "-" * 72 + "\ntimeline (every event; the "
-            "same data as run.log.jsonl)\n" + "-" * 72 + "\n" + self.render(),
-            encoding="utf-8")
-        return jsonl, text
+        try:
+            body = self.report().to_html()
+        except Exception:  # pragma: no cover - a renderer bug
+            import html
+            import traceback
+
+            body = ("<!doctype html><meta charset=\"utf-8\"><title>kika run report</title>"
+                    f"<h1>{html.escape(self.verdict())}</h1><p>The report could not be "
+                    f"rendered; the events are in {html.escape(jsonl.name)}.</p><pre>"
+                    f"{html.escape(traceback.format_exc())}</pre>")
+        page.write_text(body, encoding="utf-8")
+        return jsonl, page
 
     @classmethod
     def read(cls, path) -> "RunLog":
