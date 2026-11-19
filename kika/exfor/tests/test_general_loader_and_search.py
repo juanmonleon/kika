@@ -217,7 +217,7 @@ def _ids(results):
 
 
 def test_search_matches_like_query_dataset_ids(tiny_db):
-    # Substring target, substring quantity (CS also finds CSP), neutron in either case.
+    # Whole-component target, substring quantity (CS also finds CSP), neutron in either case.
     hits = tiny_db.search_datasets(targets=["Fe-56"], projectile="n", quantities=["CS"])
     assert _ids(hits) == ["30001002"]
     hits = tiny_db.search_datasets(targets=["Fe-56"], projectile="N")
@@ -277,3 +277,38 @@ def test_statistics_and_targets_come_from_the_catalogue_once_loaded(tiny_db):
     assert stats["cross_sections"] == 5
     assert stats["unique_targets"] == 3
     assert tiny_db.list_targets("n") == ["Fe-54", "Fe-56"]
+
+
+@pytest.fixture
+def oxygen_db(tmp_path):
+    """Targets whose symbols share letters: a substring match mixes them up."""
+    path = tmp_path / "x4o.db"
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE TABLE x4pro_ds (DatasetID TEXT, year1 INT, author1 TEXT, Targ1 TEXT, Proj TEXT, "
+        "MF INT, MT INT, ndat INT, quant1 TEXT, reacode TEXT)"
+    )
+    conn.execute("CREATE TABLE x4pro_x5z (DatasetID TEXT, Subent TEXT, updated TEXT, jx5z TEXT)")
+    for i, targ in enumerate(["O-16", "O-0", "Mo-0", "Ho-165", "Am-242", "Am-242-m", "Fe-cmp"]):
+        conn.execute("INSERT INTO x4pro_ds VALUES (?,?,?,?,?,?,?,?,?,?)",
+                     (f"4000{i}002", 2000, "A", targ, "n", 3, 1, 1, "CS", f"{targ}(N,TOT),,SIG"))
+    conn.commit()
+    conn.close()
+    db = X4ProDatabase(str(path))
+    yield db
+    db.close()
+
+
+@pytest.mark.parametrize("wanted, expected", [
+    (["O-16", "O-0"], {"O-16", "O-0"}),
+    (["o-16"], {"O-16"}),
+    (["O"], {"O-16", "O-0"}),
+    (["Am-242"], {"Am-242", "Am-242-m"}),
+    (["Fe"], {"Fe-cmp"}),
+])
+def test_targets_match_whole_components_in_both_searches(oxygen_db, wanted, expected):
+    found = {r["target"] for r in oxygen_db.search_datasets(targets=wanted)}
+    assert found == expected
+    ids = oxygen_db.query_dataset_ids(target=wanted, quantity="CS")
+    catalogue = oxygen_db.load_catalogue().set_index("dataset_id")
+    assert {str(catalogue.loc[i, "target"]) for i in ids} == expected

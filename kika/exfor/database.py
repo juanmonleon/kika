@@ -933,6 +933,15 @@ def canonical_unit_factor(unit: Optional[str]) -> Tuple[Optional[float], Optiona
     return factor, "/".join(label)
 
 
+def target_matches(target: str, wanted: str) -> bool:
+    """Whether catalogue target ``target`` is ``wanted`` or one of its states or compounds, by whole ``-`` components.
+
+    ``Fe`` matches ``Fe-56`` and ``Fe-cmp``; ``Am-242`` matches ``Am-242-m``; ``O-16`` never matches ``Ho-165``.
+    """
+    t, w = target.upper(), wanted.upper()
+    return t == w or t.startswith(w + "-")
+
+
 class X4ProDatabase:
     """
     Interface to X4Pro SQLite database (full 2025 version).
@@ -1078,14 +1087,11 @@ class X4ProDatabase:
         if target:
             # Convert single value to list for uniform handling
             target_list = [target] if isinstance(target, str) else target
-            if len(target_list) == 1:
-                conditions.append("Targ1 LIKE ?")
-                params.append(f"%{target_list[0]}%")
-            else:
-                # Multiple targets: use OR condition
-                target_conditions = ["Targ1 LIKE ?" for _ in target_list]
-                conditions.append(f"({' OR '.join(target_conditions)})")
-                params.extend([f"%{t}%" for t in target_list])
+            # Whole components, as target_matches: "O-16" must not find "Ho-165".
+            target_conditions = ["(Targ1 = ? COLLATE NOCASE OR Targ1 LIKE ?)" for _ in target_list]
+            conditions.append(f"({' OR '.join(target_conditions)})")
+            for t in target_list:
+                params.extend([t, f"{t}-%"])
         elif target_zaid:
             # Convert ZAID(s) to database target format(s)
             zaid_list = [target_zaid] if isinstance(target_zaid, int) else target_zaid
@@ -1216,9 +1222,10 @@ class X4ProDatabase:
         """
         Every dataset matching the filters, with metadata, in one call.
 
-        Matching follows ``query_dataset_ids``: targets and quantities are
-        case-insensitive substrings of ``Targ1``/``quant1`` (so ``CS`` also
-        matches ``CSP``), the projectile is compared in both cases, the author
+        Matching follows ``query_dataset_ids``: a target matches by whole
+        ``-``-separated components (see ``target_matches``), quantities are
+        case-insensitive substrings of ``quant1`` (so ``CS`` also matches
+        ``CSP``), the projectile is compared in both cases, the author
         is a substring, MTs are exact. Lists are ORed within a filter and
         ANDed across filters.
 
@@ -1238,8 +1245,7 @@ class X4ProDatabase:
 
         target_list = [t for t in (targets or []) if t]
         if target_list:
-            needles = [t.upper() for t in target_list]
-            mask &= self._category_mask(df["target"], lambda v: any(n in v.upper() for n in needles))
+            mask &= self._category_mask(df["target"], lambda v: any(target_matches(v, t) for t in target_list))
 
         if projectile:
             wanted = {projectile.lower(), projectile.upper()}
