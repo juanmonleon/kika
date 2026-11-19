@@ -348,13 +348,14 @@ class ConditioningReport:
         of the whole run rather than of its exceptions. What was deliberately
         left out is carried on :attr:`ConditioningPlan.notes`.
 
-        The PSD choice follows ``psd_method="auto"`` — clip below the module
-        threshold, Higham above it — because the plan's job here is to make the
-        current behaviour visible, not to change it. The one override is a
-        block carrying a sum rule: ``C·1 ≈ 0`` is destroyed by any congruence
-        (~500x on the Cf-252 MF35 bands with ``clip_rescale``) and degraded
-        ~40x by Higham, so those get ``clip`` with the reason
-        recorded.
+        The PSD repair is always ``clip``, whatever ``psd_method="auto"`` would
+        pick (Juan, 2026-11-19): it keeps the eigenvectors and moves only the
+        negative directions, it preserves a sum rule's ``C·1 ≈ 0`` (which any
+        congruence destroys, ~500x on the Cf-252 MF35 bands with
+        ``clip_rescale``, and Higham degrades ~40x), and it costs one
+        decomposition where Higham iterates them (tens of minutes on
+        ENDF/B-VIII.1 Fe-56 MF33 MT2). Higham stays available to a plan that
+        names it.
         """
         steps: List[PlanStep] = []
         notes: List[str] = []
@@ -377,19 +378,11 @@ class ConditioningReport:
                     reason="no PSD repair needed or none applies",
                 ))
             else:
-                choice = definiteness.evidence["auto_would_choose"]
-                reason = (
-                    f"{definiteness.summary}; psd_method='auto' resolves to "
-                    f"{choice!r}"
-                )
-                if has_sum_rule and choice != "clip":
-                    reason = (
-                        f"{definiteness.summary}; auto would pick {choice!r}, "
-                        "overridden because this block carries a sum rule and "
-                        "clip is the only candidate that preserves C·1"
-                    )
-                    choice = "clip"
-                steps.append(PlanStep(key=block.key, remedy=choice, reason=reason))
+                reason = (f"{definiteness.summary}; repaired by clip, the "
+                          f"default (Higham only when a plan names it)")
+                if has_sum_rule:
+                    reason += "; this block carries a sum rule, which clip preserves"
+                steps.append(PlanStep(key=block.key, remedy="clip", reason=reason))
 
             for finding in block.findings:
                 if finding.check in ("definiteness", "sum_rule") or not finding.remedies:
@@ -1095,8 +1088,7 @@ def _check_definiteness(
         check="definiteness",
         severity=DISTORTS,
         summary=(
-            f"not PSD: λ_min/λ_max = -{ratio:.3e} "
-            f"(psd_method='auto' would pick '{would_auto}')" + skipped + located
+            f"not PSD: λ_min/λ_max = -{ratio:.3e}" + skipped + located
         ),
         evidence={
             "min_eigenvalue": smallest,

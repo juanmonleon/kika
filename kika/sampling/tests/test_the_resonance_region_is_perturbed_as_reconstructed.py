@@ -9,7 +9,9 @@ day. See :mod:`kika.sampling.resonance_region` for the fix: RECONR once, the
 model decoded from the tape with RECONR's MF3 and LRP=2, ACE from the
 perturbed PENDF.
 
-These need NJOY and the full tape; the section-sliced micro-tapes cannot be
+These take the NJOY route (``reconstructionEngine="njoy"``; kika's own engine is
+tested in test_the_reconstruction_engine_is_a_choice.py) and need NJOY and the
+full tape; the section-sliced micro-tapes cannot be
 reconstructed (RECONR stops at their orphan FEND records).
 """
 from __future__ import annotations
@@ -62,7 +64,8 @@ def elasticRun(fe56_b81_tape, tmp_path_factory):
     _njoy()
     out = tmp_path_factory.mktemp("recon")
     run = perturbFromModel(str(fe56_b81_tape), {33: [2]}, 1, seed=3,
-                           outputDir=out, formats=("endf-delta",))
+                           outputDir=out, formats=("endf-delta",),
+                           reconstructionEngine="njoy")
     meta = json.loads((out / "run_metadata.json").read_text(encoding="utf-8"))
     return run, meta, Path(meta["resonanceRegion"]["base"])
 

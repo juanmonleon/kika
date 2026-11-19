@@ -64,6 +64,7 @@ TITLES = {
     "factor_not_positive": "Some factors are zero or negative",
     "covariance_from_another_file": "The covariance comes from another file",
     "mat_from_table": "The MAT number was taken from kika's table",
+    "njoy_fallback": "NJOY was replaced by kika",
 }
 #: Codes about how the run was executed, not about the samples: details only.
 _MECHANICS = {"workers"}
@@ -311,6 +312,13 @@ class _Events:
         return any(e["kind"] == kind for e in self.events)
 
 
+def _engine(ev) -> str:
+    """Who rebuilt the resonance region, as a person names it."""
+    done = ev.first("reconstructed")
+    engine = ((done or {}).get("payload") or {}).get("engine")
+    return {"njoy": "NJOY RECONR", "kika": "kika"}.get(engine, "kika")
+
+
 def _stage_title(stage_id: Optional[str]) -> str:
     return next((title for sid, title, _ in STAGES if sid == stage_id), "the start")
 
@@ -397,7 +405,8 @@ def _stages(ev, options, failed_stage, cancelled, finished=False) -> List[Dict[s
             status, after_failure = "fail", not finished
         elif sid == "reconstructed":
             status = "pass" if ev.has("reconstructed") else "warn"
-            detail = "rebuilt by NJOY" if ev.has("reconstructed") else "background only"
+            detail = (f"rebuilt by {_engine(ev)}" if ev.has("reconstructed")
+                      else "background only")
         elif sid == "files" and dry:
             status, detail = "skip", "rehearsal"
         elif not reached:
@@ -719,8 +728,8 @@ def _drawing(ev, options) -> List[str]:
         out.append("Totals not rebuilt: each reaction moves by its own block only.")
     region = options.get("resonanceRegion")
     if ev.has("reconstructed"):
-        out.append("Resonance region rebuilt by NJOY RECONR at 0 K before the factors were applied, "
-                   "so the cross sections a code sees there are perturbed.")
+        out.append(f"Resonance region rebuilt by {_engine(ev)} at 0 K before the factors were "
+                   f"applied, so the cross sections a code sees there are perturbed.")
     elif region == "evaluated" and any((e["payload"] or {}).get("code") == "resonance_background_only"
                                        for e in ev.of("warning")):
         out.append("Resonance region: the tabulated MF3 background only (see the warning).")
@@ -806,7 +815,7 @@ def _steps(ev, options, failed_stage) -> List[str]:
         out.append(f"Read {read.get('subject') or 'the evaluation'}"
                    + (f" ({_SOURCE_FORMAT.get(fmt, fmt)})" if fmt else "") + " and its covariances.")
     if ev.has("reconstructed"):
-        out.append("Rebuilt the cross sections of the resonance region with NJOY RECONR at 0 K.")
+        out.append(f"Rebuilt the cross sections of the resonance region with {_engine(ev)} at 0 K.")
     request = ev.first("request")
     if request:
         out.append(f"Turned the request into what the file states: {request['message']}.")

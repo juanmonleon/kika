@@ -121,10 +121,13 @@ def test_a_dry_run_validates_the_options_and_runs_no_njoy(fakeNjoy, tmp_path):
     assert run.aceOptions is options
     metadata = json.loads(run.files["metadata"].read_text("utf-8"))
     assert metadata["ace"]["options"]["temperatures"] == [293.6]
-    with pytest.raises(FileNotFoundError):
-        perturbFromModel(TAPE, REQUEST, 1, formats=("ace",), dryRun=True,
-                         ace=AceOptions(temperatures=[293.6],
-                                        njoyExe=str(tmp_path / "missing")))
+    # A missing NJOY is not a refusal: kika writes the ACE, and the run says so.
+    missing = perturbFromModel(TAPE, REQUEST, 1, formats=("ace",), dryRun=True,
+                               ace=AceOptions(temperatures=[293.6],
+                                              njoyExe=str(tmp_path / "missing")))
+    assert missing.aceOptions.engine == "kika"
+    assert [e for e in missing.log.of("warning")
+            if e.payload.get("code") == "njoy_fallback" and e.subject == "ace"]
 
 
 # ----------------------------------------------------------------------

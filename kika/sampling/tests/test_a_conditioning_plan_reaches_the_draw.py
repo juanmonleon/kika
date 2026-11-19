@@ -250,4 +250,5 @@ def test_a_plan_for_other_blocks_is_refused_before_anything_is_drawn(tmp_path):
     with pytest.raises(ValueError, match="not in this set"):
         perturbFromModel(TAPE, REQUEST, 1, seed=SEED, outputDir=tmp_path,
                          conditioningPlan=plan)
-    assert not list(tmp_path.iterdir()), "nothing was written"
+    # Nothing drawn, so nothing but the run's own account of why.
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["report.html", "run.log.jsonl"]
