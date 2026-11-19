@@ -13,8 +13,8 @@ never had the problem, because they perturb NJOY RECONR's output.
 
 The fix is the same idea, put where the model can use it:
 
-1. **RECONR once**, at 0 K, through the PENDF cache
-   (:func:`~kika.processing.njoy_pendf_cache.get_or_create_pendf`).
+1. **σ(E) at 0 K once**, by kika or NJOY RECONR (:func:`reconstructPendf`),
+   through a cache keyed by the tape's bytes, the engine and the tolerance.
 2. **A base tape** (:func:`reconstructedBase`): the original ENDF with its MF3
    replaced by RECONR's and MF1/451's LRP set to 2. ENDF-6 defines LRP=2 as
    exactly this -- "resonance parameters are given in File 2 for information;
@@ -50,8 +50,47 @@ import shutil
 from pathlib import Path
 from typing import Iterable, List, Optional, Tuple
 
-__all__ = ["needsReconstruction", "reconstructedBase", "resonanceRanges",
-           "setLRP", "spliceMF3"]
+__all__ = ["needsReconstruction", "reconstructPendf", "reconstructedBase",
+           "resonanceRanges", "setLRP", "spliceMF3", "RECONSTRUCTION_ENGINES"]
+
+#: Who rebuilds σ(E) at 0 K: kika's own engine or NJOY RECONR.
+RECONSTRUCTION_ENGINES = ("kika", "njoy")
+
+
+def reconstructPendf(source, *, engine: str, tolerance: float, njoyExe=None,
+                     cacheDir=None) -> Path:
+    """The PENDF of *source* at 0 K by *engine*, cached by the tape's bytes.
+
+    ``"njoy"`` is RECONR through :func:`~kika.processing.njoy_pendf_cache.get_or_create_pendf`
+    (raises :class:`~kika.processing.njoy_pendf_cache.NjoyNotFoundError` without
+    NJOY). ``"kika"`` is :func:`kika.endf.reconstruct_endf` at the same fractional
+    tolerance, written and verified by ``write_pendf``; its cache name carries the
+    engine version, so a new engine never reads an old table.
+    """
+    from kika.processing.njoy_pendf_cache import (DEFAULT_PENDF_CACHE_DIR, _is_complete_tape,
+                                                  _sha256_of_file, find_njoy_executable,
+                                                  get_or_create_pendf)
+
+    source = Path(source)
+    if engine == "njoy":
+        exe = find_njoy_executable(njoyExe, why="this reconstruction")
+        return get_or_create_pendf(source, tolerance=tolerance, njoy_exe=exe, cache_dir=cacheDir)
+    if engine != "kika":
+        raise ValueError(f"reconstruction engine is one of {RECONSTRUCTION_ENGINES}, not {engine!r}")
+
+    from kika.endf.reconstruction import DEFAULT_MAX_POINTS, reconstruct_endf
+    from kika.processing.resonances import ENGINE_VERSION, ReconstructionOptions
+
+    cache = Path(cacheDir) if cacheDir is not None else DEFAULT_PENDF_CACHE_DIR
+    cache.mkdir(parents=True, exist_ok=True)
+    target = cache / f"{_sha256_of_file(source)}_kika-{ENGINE_VERSION}_{tolerance}.pendf"
+    if target.is_file() and _is_complete_tape(target):
+        return target
+    tmp = target.with_name(target.name + ".tmp")
+    options = ReconstructionOptions(rtol=tolerance, max_points=DEFAULT_MAX_POINTS)
+    reconstruct_endf(source, options=options).write_pendf(tmp)
+    shutil.move(str(tmp), str(target))
+    return target
 
 
 def resonanceRanges(endfObj) -> List[Tuple[int, float, float]]:

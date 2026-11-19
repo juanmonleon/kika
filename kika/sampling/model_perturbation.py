@@ -53,6 +53,7 @@ Three things it does differently, each of them deliberate:
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 import time
 from dataclasses import dataclass, field
@@ -1733,15 +1734,15 @@ def _readCovarianceFrom(path, expectedZaid, log):
 RESONANCE_REGION_MODES = ("reconstructed", "evaluated")
 
 
-def _centralValuesForConversion(endfObj, sourcePath, mfs, tolerance, njoyExe):
+def _centralValuesForConversion(endfObj, sourcePath, mfs, pendfSource):
     """``{mf: {mt: section}}``: what an absolute MF31/MF33 section is relative to.
 
     MF33 is a covariance of the cross section itself, resonances included, so
     its central value is the full σ(E). A tape whose MF3 already is that (no
     resonance region, or the LRP=2 base the reconstructed route writes) gives
     it directly. One whose MF3 is only a background (LRP=1 with resonance
-    ranges, i.e. ``resonanceRegion="evaluated"``) gives it through NJOY RECONR
-    at the run's tolerance: the reconstruction the ``reconstructed`` route and
+    ranges, i.e. ``resonanceRegion="evaluated"``) gives it through the run's
+    reconstruction engine at its tolerance: the one the ``reconstructed`` route and
     the decoder's mixed-block conversion use, so a block converts to the same
     relative matrix whichever route is taken. A summation reaction absent from
     MF3 is the sum of its partials (``cross_section_or_sum``).
@@ -1757,13 +1758,8 @@ def _centralValuesForConversion(endfObj, sourcePath, mfs, tolerance, njoyExe):
         from kika.sampling.resonance_region import needsReconstruction
 
         if needsReconstruction(endfObj):
-            from kika.processing.njoy_pendf_cache import attach_pendf
-
-            xs = attach_pendf(
-                endfObj, endf_path=sourcePath, njoy_executable=njoyExe,
-                tolerance=tolerance,
-                why="making an absolute MF33 section relative to the cross "
-                    "section of a resonance region")
+            pendfSource.attach(endfObj, sourcePath)
+            xs = endfObj.pendf
         else:
             mf3 = endfObj.get_file(3) if hasattr(endfObj, "get_file") else None
             xs = dict(getattr(mf3, "sections", None) or {})
@@ -1790,7 +1786,7 @@ def _mtsOfCovariances(endfObj, mf):
 
 
 def _relativiseAbsoluteSections(covariances, request, endfObj, sourcePath, *,
-                                grouping, onMissing, tolerance, njoyExe,
+                                grouping, onMissing, pendfSource,
                                 skipped, log):
     """*covariances* with its requested absolute MF31/MF33 sections made relative.
 
@@ -1848,7 +1844,7 @@ def _relativiseAbsoluteSections(covariances, request, endfObj, sourcePath, *,
     def gridOf(za, mf, mt):
         return np.asarray(grids[_crossSectionKey((za, mt), mf)], dtype=float)
 
-    central = _centralValuesForConversion(endfObj, sourcePath, mfs, tolerance, njoyExe)
+    central = _centralValuesForConversion(endfObj, sourcePath, mfs, pendfSource)
     sections, converted, unresolved, inertBins = relativiseOnAssemblyGrids(
         covariances, central, gridOf, mfs=tuple(mfs), mts=mts)
 
@@ -1888,28 +1884,98 @@ def _relativiseAbsoluteSections(covariances, request, endfObj, sourcePath, *,
     return covariances, notes
 
 
-def _reconstructResonanceRegion(sourcePath: Path, endfObj, njoyExe, tolerance: float,
-                                log):
+_ENGINE_NAME = {"kika": "kika", "njoy": "NJOY RECONR"}
+
+
+class _PendfSource:
+    """σ(E) at 0 K for this run, by the engine asked for, once per tape.
+
+    NJOY that is missing or fails is replaced by kika for the whole run, with a
+    warning: the reconstruction happens before the draw, so every sample of the
+    ensemble sees one engine.
+    """
+
+    def __init__(self, engine: str, njoyExe, tolerance: float, log):
+        self.engine, self.njoyExe, self.tolerance, self.log = engine, njoyExe, tolerance, log
+        self.used: Optional[str] = None
+        self._paths: Dict[str, Path] = {}
+
+    def path(self, source) -> Path:
+        from kika.sampling.resonance_region import reconstructPendf
+        from kika.sampling.run_log import RunCancelled
+
+        key = str(Path(source).resolve())
+        if key in self._paths:
+            return self._paths[key]
+        engine = self.used or self.engine
+        if engine == "njoy":
+            try:
+                pendf = reconstructPendf(source, engine="njoy", tolerance=self.tolerance,
+                                         njoyExe=self.njoyExe)
+            except RunCancelled:
+                raise
+            except Exception as failure:
+                self.log.warning(
+                    f"NJOY could not reconstruct {Path(source).name} "
+                    f"({type(failure).__name__}: {_firstLine(failure)}); kika "
+                    f"reconstructed it instead, for the whole run",
+                    subject="reconstruction", code="njoy_fallback",
+                    exception=type(failure).__name__)
+                engine = "kika"
+            else:
+                self.used = "njoy"
+                self._paths[key] = pendf
+                return pendf
+        pendf = reconstructPendf(source, engine="kika", tolerance=self.tolerance)
+        self.used = "kika"
+        self._paths[key] = pendf
+        return pendf
+
+    def attach(self, endfObj, source) -> None:
+        """Set ``endfObj.pendf`` from this run's engine, unless the caller already did."""
+        if getattr(endfObj, "pendf", None) or source is None:
+            return
+        from kika.processing.njoy_pendf_cache import read_pendf_mf3_sections
+
+        endfObj.pendf = read_pendf_mf3_sections(self.path(source))
+
+
+def _firstLine(failure) -> str:
+    text = str(failure).strip().splitlines()
+    return text[0] if text else ""
+
+
+def _mixesAbsoluteAndRelative(endfObj) -> bool:
+    """True when some MF33 block of the tape sums absolute and relative parts."""
+    from kika.endf.classes.mf33 import mixesAbsoluteAndRelative
+
+    mf33 = endfObj.get_file(33) if hasattr(endfObj, "get_file") else None
+    sections = getattr(mf33, "mt", None) or getattr(mf33, "sections", None) or {}
+    return any(mixesAbsoluteAndRelative(getattr(sub, "ni_records", None) or [])
+               for section in sections.values()
+               for sub in getattr(section, "subsections", ()) or ())
+
+
+def _reconstructResonanceRegion(sourcePath: Path, endfObj, pendfSource: "_PendfSource",
+                                tolerance: float, log):
     """``(suite, endfObj, basePath, pendfPath)`` for a tape whose MF3 is a background.
 
-    See :mod:`kika.sampling.resonance_region`. RECONR runs once per tape and
-    tolerance (cached by the bytes of the tape); the LRP=2 base tape is cached
+    See :mod:`kika.sampling.resonance_region`. The reconstruction runs once per
+    tape, engine and tolerance (cached by the bytes of the tape); the LRP=2 base
+    tape is cached
     beside its PENDF, so a second run -- and every worker process, which
     re-reads the base -- costs a parse and nothing else.
     """
     from kika.endf import read_endf
     from kika.endf.model_adapter import decodeReactionSuite
-    from kika.processing.njoy_pendf_cache import (find_njoy_executable,
-                                                  get_or_create_pendf)
     from kika.sampling.resonance_region import reconstructedBase, resonanceRanges
 
     ranges = resonanceRanges(endfObj)
     with log.timed("reconstructed",
-                   f"resonance region reconstructed by RECONR at 0 K, tolerance "
-                   f"{tolerance:g}", subject=sourcePath.name) as info:
-        exe = find_njoy_executable(
-            njoyExe, why="perturbing the cross sections of a resonance region")
-        pendf = get_or_create_pendf(sourcePath, tolerance=tolerance, njoy_exe=exe)
+                   f"resonance region reconstructed at 0 K, tolerance {tolerance:g}",
+                   subject=sourcePath.name) as info:
+        pendf = pendfSource.path(sourcePath)
+        info["engine"] = pendfSource.used
         base = pendf.with_name(pendf.stem + ".lrp2.endf")
         if not base.is_file():
             reconstructedBase(sourcePath, pendf, base)
@@ -1951,7 +2017,7 @@ def _evaluationInfo(endfObj, path) -> Dict[str, Any]:
             "nuclide": _nuclideName(zsymam=summary.get("zsymam"))}
 
 
-def _readSource(source, log, covarianceSource=None):
+def _readSource(source, log, covarianceSource=None, pendfSource=None):
     """*source* as ``(suite, covariances, endfObj, path, format, report)``.
 
     An ENDF tape is parsed once and decoded twice -- the model and the
@@ -2017,6 +2083,11 @@ def _readSource(source, log, covarianceSource=None):
 
     with log.timed("read", "read as endf", subject=path.name) as info:
         endfObj = read_endf(str(path))
+        if pendfSource is not None:
+            from kika.sampling.resonance_region import needsReconstruction
+
+            if needsReconstruction(endfObj) and _mixesAbsoluteAndRelative(endfObj):
+                pendfSource.attach(endfObj, path)
         covariances, covReport = decodeCovarianceSuite(endfObj)
         suite, suiteReport = decodeReactionSuite(endfObj)
         info["covarianceDecode"] = covReport.summary()
@@ -2551,6 +2622,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                      sumBlocks: str = "undecomposed",
                      resonanceRegion: str = "reconstructed",
                      reconstructionTolerance: float = 0.001,
+                     reconstructionEngine: str = "kika",
                      njoyExe=None,
                      angularPositivity: str = "report",
                      runLog=None, logger=None) -> RunResult:
@@ -2649,17 +2721,23 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         states a resolved or unresolved range, MF3 there is only a background
         the resonance cross section is added to, and a factor on it perturbs
         almost nothing (ENDF/B-VIII.1 Fe-56 MT2 is 5e-4 b at 1 keV in MF3 and
-        9.3 b reconstructed). So NJOY RECONR reconstructs the region once, at
-        0 K, the model is decoded from the tape with that MF3 and LRP=2, and
-        ACE is made from the perturbed PENDF -- see
-        :mod:`kika.sampling.resonance_region`. Needs NJOY (*njoyExe*, else
-        ``AceOptions.njoyExe``, else ``$NJOY_EXECUTABLE``, else ``njoy`` on
-        PATH) and a path as *source*. ``"evaluated"`` perturbs MF3 as the tape
+        9.3 b reconstructed). So the region is reconstructed once, at 0 K, by
+        *reconstructionEngine*, the model is decoded from the tape with that MF3
+        and LRP=2, and ACE is made from the perturbed PENDF -- see
+        :mod:`kika.sampling.resonance_region`. Needs a path as *source*; NJOY
+        is looked for in *njoyExe*, else ``AceOptions.njoyExe``, else
+        ``$NJOY_EXECUTABLE``, else ``njoy`` on PATH. ``"evaluated"`` perturbs MF3 as the tape
         states it, background and all, and says so in a warning; it exists for
         tapes NJOY cannot process, such as the section-sliced micro-tapes the
         tests use.
     reconstructionTolerance
-        RECONR's fractional tolerance; 0.001 is what the ACE chain uses.
+        The fractional tolerance of the reconstruction; 0.001 is what the ACE
+        chain uses.
+    reconstructionEngine
+        Who rebuilds σ(E) at 0 K wherever the run needs it (the resonance
+        region, and absolute MF33 sections made relative): ``"kika"`` (the
+        default) or ``"njoy"`` (RECONR). NJOY that is missing or fails is
+        replaced by kika for the whole run, with a warning.
     njoyExe
         The NJOY executable for the reconstruction.
     formats
@@ -2752,11 +2830,15 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
     unknown = [fmt for fmt in formats if fmt not in EMITTERS]
     if unknown:
         raise ValueError(f"unknown emitter(s) {unknown}; known: {list(EMITTERS)}")
+    aceFallback = None
     if "ace" in formats:
         if ace is None:
             raise ValueError(
                 "formats includes 'ace' and no AceOptions were given: NJOY, "
                 "the temperatures and the library have to be named")
+        if ace.engine == "njoy" and not (ace.njoyExe and Path(ace.njoyExe).is_file()):
+            aceFallback = ace.njoyExe or "no NJOY_EXECUTABLE and no njoy on PATH"
+            ace = dataclasses.replace(ace, engine="kika")
         ace.validate()
     if "hdf5" in formats:
         if hdf5 is None:
@@ -2775,6 +2857,11 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
     if resonanceRegion not in RESONANCE_REGION_MODES:
         raise ValueError(f"resonanceRegion must be one of {RESONANCE_REGION_MODES}, "
                          f"got {resonanceRegion!r}")
+    from kika.sampling.resonance_region import RECONSTRUCTION_ENGINES
+
+    if reconstructionEngine not in RECONSTRUCTION_ENGINES:
+        raise ValueError(f"reconstructionEngine must be one of {RECONSTRUCTION_ENGINES}, "
+                         f"got {reconstructionEngine!r}")
 
     log = runLog if runLog is not None else RunLog(logger=logger, label=labelPrefix)
     log.event("started", f"perturbFromModel: {nSamples} sample(s), seed {seed}",
@@ -2785,6 +2872,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
               crossSectionSums=crossSectionSums, sumBlocks=sumBlocks,
               resonanceRegion=resonanceRegion,
               reconstructionTolerance=reconstructionTolerance,
+              reconstructionEngine=reconstructionEngine,
               angularPositivity=angularPositivity,
               source=str(source) if isinstance(source, (str, Path)) else "<parsed>",
               covarianceSource=(str(covarianceSource)
@@ -2793,8 +2881,14 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
               ace=ace.to_dict() if ace is not None else None,
               kikaVersion=_kikaVersion())
 
+    if aceFallback is not None:
+        log.warning(f"NJOY not found ({aceFallback}): ACE is written by kika, for "
+                    f"every sample", subject="ace", code="njoy_fallback")
+    pendfSource = _PendfSource(reconstructionEngine,
+                               njoyExe or (ace.njoyExe if ace is not None else None),
+                               reconstructionTolerance, log)
     suite, covariances, endfObj, sourcePath, sourceFormat, reports = \
-        _readSource(source, log, covarianceSource)
+        _readSource(source, log, covarianceSource, pendfSource)
     covReport, suiteReport = reports
 
     originalSourcePath = sourcePath
@@ -2859,19 +2953,20 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
             if sourcePath is None:
                 raise ValueError(
                     "this tape states a resonance region (MF2, LRP=1), where MF3 "
-                    "is only a background, and reconstructing it needs NJOY to "
+                    "is only a background, and reconstructing it needs to "
                     "read the tape from a path. Pass the path rather than a "
                     "parsed object, or resonanceRegion='evaluated' to perturb "
                     "the background as stated")
             suite, endfObj, sourcePath, pendfPath = _reconstructResonanceRegion(
-                originalSourcePath, endfObj,
-                njoyExe or (ace.njoyExe if ace is not None else None),
+                originalSourcePath, endfObj, pendfSource,
                 reconstructionTolerance, log)
             resonanceRecord.update(reconstructed=True, pendf=str(pendfPath),
                                    base=str(sourcePath),
-                                   tolerance=reconstructionTolerance)
+                                   tolerance=reconstructionTolerance,
+                                   engine=pendfSource.used)
             resonanceNotes.append(
-                f"the resonance region ({span}) was reconstructed by NJOY RECONR "
+                f"the resonance region ({span}) was reconstructed by "
+                f"{_ENGINE_NAME[pendfSource.used]} "
                 f"at 0 K (tolerance {reconstructionTolerance:g}) and the "
                 f"perturbation applied to the cross sections, not to MF3's "
                 f"background: the ENDF outputs carry the reconstructed MF3 with "
@@ -2919,8 +3014,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         log.warning(note, subject="MF34")
     covariances, conversionNotes = _relativiseAbsoluteSections(
         covariances, request, endfObj, originalSourcePath, grouping=grouping,
-        onMissing=onMissing, tolerance=reconstructionTolerance,
-        njoyExe=njoyExe or (ace.njoyExe if ace is not None else None),
+        onMissing=onMissing, pendfSource=pendfSource,
         skipped=skipped, log=log)
     from kika.sampling.joint_blocks import absoluteSectionsLeftOut
 
