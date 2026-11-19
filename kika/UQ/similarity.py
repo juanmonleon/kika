@@ -65,8 +65,7 @@ class SimilarityResult:
         (also the property ``ck``).
     variance_a, variance_b
         ``S.T @ C @ S`` of each profile with the relative covariance: the relative
-        variance (dimensionless, fraction squared) of its response due to the
-        covariance.
+        variance (dimensionless) of its response due to the covariance.
     cross_covariance
         ``S_a.T @ C @ S_b``, the relative covariance between the two responses.
     reaction_similarity
@@ -78,8 +77,8 @@ class SimilarityResult:
     parameter_keys
         The aligned parameters.
     alignment_report
-        The :class:`AlignmentReport` of the alignment, with the filters of
-        :func:`similarity_ck` added to its exclusions and assumptions.
+        The :class:`~kika.UQ.alignment.AlignmentReport` of the alignment, with the
+        filters of :func:`similarity_ck` added to its exclusions and assumptions.
     """
 
     value: float
@@ -196,10 +195,11 @@ def similarity_ck(
     """Calculate covariance-weighted c-k between two sensitivity profiles.
 
     Both profiles are filtered, aligned with the covariance by
-    :func:`align_sensitivity_covariance` (a parameter in only one profile has zero
-    sensitivity in the other), and compared as ``S_a.T @ C @ S_b`` over the
-    relative covariance, normalised by the two variances. The sensitivities are
-    relative coefficients and the covariance is relative, so the result is
+    :func:`~kika.UQ.alignment.align_sensitivity_covariance` (a parameter in only one
+    profile has zero sensitivity in the other), and compared as ``S_a.T @ C @ S_b``
+    over the relative covariance, normalised by the two variances. The sensitivities
+    are relative coefficients and the covariance is read as relative (see *covariance*
+    in :func:`~kika.UQ.alignment.prepare_covariance`), so the result is
     dimensionless.
 
     Parameters
@@ -208,15 +208,17 @@ def similarity_ck(
         Sensitivity profiles on the same energy grid as the covariance.
     covariance, legendre_covariance
         Cross-section and Legendre covariances, as in
-        :func:`align_sensitivity_covariance`.
+        :func:`~kika.UQ.alignment.align_sensitivity_covariance`.
     alias_policy : {"exact", "tsurfer"}
-        As in :func:`align_sensitivity_covariance`.
+        As in :func:`~kika.UQ.alignment.align_sensitivity_covariance`.
     missing : {"error", "drop"}
-        As in :func:`align_sensitivity_covariance`.
+        As in :func:`~kika.UQ.alignment.align_sensitivity_covariance`.
     include
-        Pairs ``(zaid, mt)`` to keep; every other reaction is removed. None keeps all.
-        A reaction with MT 0 (pseudo-total) is kept only when ``(zaid, 0)`` is listed.
-        Legendre reactions are matched by their sensitivity MT (4000 plus the order).
+        Pairs ``(zaid, mt)`` to keep; every reaction not listed is removed. None
+        applies no restriction of this kind. Whatever *include* is, a reaction with
+        MT 0 (pseudo-total) is kept only when ``(zaid, 0)`` is listed (so never with
+        None), and MT 1 follows *include_mt1*. Legendre reactions are matched by
+        their sensitivity MT (4000 plus the order).
     exclude
         Pairs ``(zaid, mt)`` to remove, applied after *include*.
     include_mt1
@@ -224,16 +226,16 @@ def similarity_ck(
         together with its partial reactions.
     nubar_mode : {"total", "components"} or dict
         For a nuclide with MT 452 and at least one of MT 455 and 456, which view of
-        nu-bar to keep. ``"components"`` keeps MT 455 and 456 and drops MT 452, only when
-        both components are present; otherwise (and for ``"total"``) MT 452 is kept and
-        the components are dropped. A dict maps ZAID to a mode; a nuclide not in it uses
-        ``"total"``.
+        nu-bar to keep. ``"components"`` keeps MT 455 and 456 and drops MT 452, only
+        when both components are present; otherwise (and for ``"total"``) MT 452 is
+        kept and the components are dropped. A dict maps ZAID to a mode; a nuclide
+        not in it uses ``"total"``.
     energy_tolerance
         Relative tolerance of the grid comparisons (``energy_rtol`` of
-        :func:`align_sensitivity_covariance`).
+        :func:`~kika.UQ.alignment.align_sensitivity_covariance`).
     prepared_covariance
-        Normalised covariance from :func:`prepare_covariance`, used in place of
-        *covariance* and *legendre_covariance*.
+        Normalised covariance from :func:`~kika.UQ.alignment.prepare_covariance`, used
+        in place of *covariance* and *legendre_covariance*.
 
     Returns
     -------
@@ -245,18 +247,19 @@ def similarity_ck(
     ------
     ValueError
         If no reaction of a profile remains after the filters, or the computed c-k lies
-        outside [-1, 1] by more than 1e-10 (the covariance is then not symmetric or not
-        positive semi-definite). Values within the tolerance are clipped. Errors of
-        :func:`align_sensitivity_covariance` also propagate.
+        outside [-1, 1] by more than 1e-10 (the covariance is then not positive
+        semi-definite). Values within the tolerance are clipped. Errors of
+        :func:`~kika.UQ.alignment.align_sensitivity_covariance` also propagate.
     ZeroSimilarityVarianceError
         If either variance is not finite or is zero or negative, so that c-k is
         undefined.
     AlignmentError
-        As in :func:`align_sensitivity_covariance`, including
-        :class:`MissingCovarianceError` when ``missing="error"``.
+        As in :func:`~kika.UQ.alignment.align_sensitivity_covariance`, including
+        :class:`~kika.UQ.alignment.MissingCovarianceError` when ``missing="error"``.
     TypeError
-        If a profile is neither a :class:`~kika.sensitivities.profile.SensitivityProfile`
-        nor an :class:`~kika.sensitivities.sdf.SDFData`.
+        If a profile is neither a
+        :class:`~kika.sensitivities.profile.SensitivityProfile` nor an
+        :class:`~kika.sensitivities.sdf.SDFData`.
     """
     raw_a = _as_profile(profile_a)
     raw_b = _as_profile(profile_b)

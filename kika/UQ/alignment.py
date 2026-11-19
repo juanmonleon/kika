@@ -96,7 +96,7 @@ class ParameterIndex:
 
 @dataclass(frozen=True)
 class AliasMapping:
-    """One sensitivity parameter that was matched to a covariance parameter under another key.
+    """A sensitivity parameter matched to a covariance parameter under another key.
 
     Attributes
     ----------
@@ -121,20 +121,25 @@ class AliasMapping:
 class AlignmentReport:
     """Complete record of non-exact decisions made while aligning data.
 
-    Every field is empty when the alignment was exact. It is found on
-    ``AlignmentResult.report``, on ``MissingCovarianceError.report`` and, for the
-    propagation functions, on the ``alignment_report`` of their result.
+    It is found on ``AlignmentResult.report``, on ``MissingCovarianceError.report`` and,
+    for the propagation functions, on the ``alignment_report`` of their result.
+
+    An exact alignment has empty ``aliases``, ``zeros_inserted``,
+    ``zero_covariance_blocks``, ``missing_covariance``, ``dropped`` and
+    ``policy_exclusions``, and coverages of 1.0. ``assumptions`` can still hold
+    entries (an energy grid in eV, a covariance without ``is_relative`` flags).
 
     Attributes
     ----------
     aliases
         Parameters matched under another key (``alias_policy="tsurfer"`` only).
     zeros_inserted
-        Per profile (zero-based position), the aligned keys the profile does not have and
-        for which a zero sensitivity was used.
+        Per profile (zero-based position), the aligned keys the profile does not have
+        and for which a zero sensitivity was used.
     zero_covariance_blocks
-        Pairs ``(row, col)`` of aligned keys with no covariance block, taken as zero. Each
-        pair is listed once, with ``row`` at or before ``col`` in the aligned order.
+        Pairs ``(row, col)`` of aligned keys with no covariance block, taken as zero.
+        Each pair is listed once, with ``row`` at or before ``col`` in the aligned
+        order.
     missing_covariance
         Sensitivity keys with no diagonal covariance block.
     dropped
@@ -143,15 +148,20 @@ class AlignmentReport:
         Per profile, keys removed by a filter of the calling function (or by an alias
         collision resolved in favour of the closer key).
     assumptions
-        One sentence per assumption made: unit conversions of an energy grid, covariance
-        blocks treated as relative or converted from absolute, symmetrisation of
-        single-precision blocks, and the filters of the calling function.
+        One sentence per assumption made: unit conversions of an energy grid,
+        covariance blocks treated as relative or converted from absolute,
+        symmetrisation of single-precision blocks, and the filters of the calling
+        function.
     parameter_coverage
-        Per profile, the fraction of its reactions that were kept (1.0 for an empty
-        profile).
+        One value per profile: the fraction of the profile's reactions, as passed to
+        the alignment, that were kept (1.0 for an empty profile). Only covariance and
+        alias losses lower it; removals made beforehand by a calling function (filters
+        of :func:`~kika.UQ.sandwich.sandwich_uncertainty_propagation` or
+        :func:`~kika.UQ.similarity.similarity_ck`) are not counted.
     sensitivity_coverage
-        Per profile, the fraction of the sum of ``|S|`` over all its groups and reactions
-        that was kept (1.0 when that sum is zero).
+        One value per profile: the fraction of the sum of ``|S|`` over all its groups
+        and reactions, as passed to the alignment, that was kept (1.0 when that sum
+        is zero). The same removals are not counted.
     """
 
     aliases: List[AliasMapping] = field(default_factory=list)
@@ -181,9 +191,10 @@ class MissingCovarianceError(AlignmentError):
 class AlignmentResult:
     """Aligned sensitivity vectors, absolute sigmas, relative covariance and index.
 
-    Returned by :func:`align_sensitivity_covariance`. All arrays share one flat parameter
-    axis of ``n_parameters = len(parameter_keys) * n_groups`` elements: the parameters in
-    ``parameter_keys`` order, each with its ``n_groups`` groups in ascending energy.
+    Returned by :func:`align_sensitivity_covariance`. All arrays share one flat
+    parameter axis of ``n_parameters = len(parameter_keys) * n_groups`` elements: the
+    parameters in ``parameter_keys`` order, each with its ``n_groups`` groups in
+    ascending energy.
 
     Attributes
     ----------
@@ -196,8 +207,9 @@ class AlignmentResult:
         uncertainty, zero where a zero sensitivity was inserted.
     covariance : numpy.ndarray
         Shape ``(n_parameters, n_parameters)``, symmetric. Relative covariance of the
-        multigroup cross sections (fractions squared, not percent), zero for pairs with
-        no block.
+        cross-section and Legendre-moment parameters, zero for pairs with no block
+        (see *covariance* in :func:`prepare_covariance` for how blocks are read as
+        relative).
     index : tuple of ParameterIndex
         One entry per element of the flat axis.
     parameter_keys : tuple of ParameterKey
@@ -227,8 +239,9 @@ class PreparedCovariance:
     """Normalized covariance blocks reusable for profiles on one exact grid.
 
     Returned by :func:`prepare_covariance` and accepted as *prepared_covariance* by
-    :func:`align_sensitivity_covariance` and :func:`similarity_ck`, to avoid
-    normalising the same covariance again for each call.
+    :func:`align_sensitivity_covariance` and
+    :func:`~kika.UQ.similarity.similarity_ck`, to avoid normalising the same
+    covariance again for each call.
 
     Attributes
     ----------
@@ -508,25 +521,31 @@ def prepare_covariance(
 ) -> PreparedCovariance:
     """Normalise covariance blocks once for repeated calculations on one grid.
 
-    Every block is converted to a relative covariance. A cross-section block marked
-    absolute is divided by the outer product of the row and column cross sections of
-    the covariance object; a block of a covariance with no ``is_relative`` flags is
-    taken as relative; Legendre blocks are taken as relative. Both orientations of
-    each block are stored, and a slightly asymmetric diagonal block (single-precision
-    rounding) is symmetrised.
+    Both orientations of each block are stored, and a slightly asymmetric diagonal
+    block (single-precision rounding) is symmetrised.
 
     Parameters
     ----------
     profile
         Gives the energy grid the covariance must match (converted to MeV).
     covariance
-        One cross-section covariance or a sequence of them.
+        One cross-section covariance or a sequence of them. The result is read as a
+        relative covariance in the unit the covariance object stores; nothing checks
+        or converts percent versus fraction. Each block follows the ``is_relative``
+        flags of the object: a block flagged absolute is divided by the outer product
+        of the cross sections of its row and column parameters (per group); a block
+        flagged relative is used as it is; a covariance with no flags is taken as
+        relative, which is recorded in the report's ``assumptions``. A flag list that
+        is non-empty and has a different length from the list of blocks raises
+        ``AlignmentError``, as does a cross section that is missing, of the wrong
+        shape or zero.
     legendre_covariance
-        One multigroup Legendre covariance or a sequence of them.
+        One multigroup Legendre covariance or a sequence of them. Its blocks are read
+        from ``relative_matrices`` and are relative by construction.
     energy_rtol
-        Relative tolerance of the element-wise comparison between the covariance grids
-        and the grid of *profile*. The grids must have the same number of boundaries;
-        no condensation or partial alignment is done.
+        Relative tolerance of the element-wise comparison between the covariance
+        grids and the grid of *profile*. The grids must have the same number of
+        boundaries; no condensation or partial alignment is done.
 
     Returns
     -------
@@ -537,14 +556,17 @@ def prepare_covariance(
     ------
     AlignmentError
         If a covariance has no shared energy grid, its grid (after conversion to MeV)
-        is not strictly increasing or does not match that of *profile*, a block is
-        non-square, not finite, of the wrong shape, materially asymmetric on the
-        diagonal or inconsistent with a duplicate of itself, an absolute block lacks a
-        row or column cross section or has a zero one, the same block is given by a
-        cross-section and a Legendre covariance, or no block is given at all.
+        is not strictly increasing or does not match that of *profile*, an energy
+        unit is not eV or MeV, the metadata of a Legendre covariance has inconsistent
+        lengths, a block is non-square, not finite, of the wrong shape, materially
+        asymmetric on the diagonal or inconsistent with a duplicate of itself, the
+        ``is_relative`` flags are of the wrong length, an absolute block lacks a
+        cross section, has one of the wrong shape or a zero one, or no block is
+        given at all.
     TypeError
-        If *profile* is neither a :class:`~kika.sensitivities.profile.SensitivityProfile` nor
-        an :class:`~kika.sensitivities.sdf.SDFData`.
+        If *profile* is neither a
+        :class:`~kika.sensitivities.profile.SensitivityProfile` nor an
+        :class:`~kika.sensitivities.sdf.SDFData`.
     """
     neutral = _as_profile(profile)
     expected_grid = neutral.grid_in("MeV")
@@ -578,8 +600,8 @@ def align_sensitivity_covariance(
     ``missing="drop"`` is requested.
 
     The result puts every profile and the covariance on one flat axis: the selected
-    parameters (a :class:`ParameterKey` each: nuclide, MT, and Legendre order where it
-    applies) in sorted order, each with its energy groups in ascending energy. The
+    parameters (a :class:`ParameterKey` each: nuclide, MT, and Legendre order where
+    it applies) in sorted order, each with its energy groups in ascending energy. The
     sandwich rule ``S @ C @ S`` can then be applied directly to the rows of
     ``sensitivity_vectors``. The covariance of a pair of parameters with no block is
     zero and is listed in the report. A covariance block for a parameter that no
@@ -593,18 +615,20 @@ def align_sensitivity_covariance(
         are relative coefficients and whose uncertainties are absolute. A profile
         reaction with MT 4000 or more is Legendre order ``MT - 4000`` of MT 2.
     covariance
-        One cross-section covariance or a sequence of them. Blocks flagged absolute are
-        converted to relative (see :func:`prepare_covariance`).
+        One cross-section covariance or a sequence of them. How its blocks are read
+        as relative (the ``is_relative`` flags) is described under *covariance* in
+        :func:`prepare_covariance`.
     legendre_covariance
-        One multigroup Legendre covariance or a sequence of them (taken as relative).
+        One multigroup Legendre covariance or a sequence of them (relative; see
+        :func:`prepare_covariance`).
     alias_policy : {"exact", "tsurfer"}
         ``"exact"`` matches a sensitivity key only to the identical covariance key.
         ``"tsurfer"`` also accepts, for a key with no block: the natural or bound ZAID
         for ZAIDs 4309 and 4509 (to 4009), 1801 and 1901 (to 1001) and 6312 (to 6000);
         MT 101 for MT 102 and the reverse; MT 101 for MCNP MT -2. Each use is
-        recorded in ``report.aliases``. When two sensitivity keys of one profile map to
-        the same key, the one needing fewer substitutions is kept (the other goes to
-        ``report.policy_exclusions``).
+        recorded in ``report.aliases``. When two sensitivity keys of one profile map
+        to the same key, the one needing fewer substitutions is kept (the other goes
+        to ``report.policy_exclusions``).
     missing : {"error", "drop"}
         What to do with a sensitivity key that has no diagonal covariance block (after
         aliasing). ``"error"`` raises; ``"drop"`` removes it from every profile and
@@ -614,7 +638,8 @@ def align_sensitivity_covariance(
         other and with the covariance). Energies in eV are converted to MeV first.
     prepared_covariance
         Normalised covariance from :func:`prepare_covariance`, used in place of
-        *covariance* and *legendre_covariance*. Its grid must match that of the profiles.
+        *covariance* and *legendre_covariance*. Its grid must match that of the
+        profiles.
 
     Returns
     -------
@@ -631,11 +656,11 @@ def align_sensitivity_covariance(
         If a sensitivity key has no covariance and ``missing="error"``. Its ``report``
         carries the keys.
     AlignmentError
-        If a grid does not match, an energy unit is not eV or MeV, a covariance block is
-        invalid (see :func:`prepare_covariance`), a sensitivity MT is negative and not
-        -2 (and not itself in the covariance), an alias is ambiguous or collides with an
-        equally close key, no parameter remains after dropping, or the assembled
-        covariance is not symmetric.
+        If a grid does not match, an energy unit is not eV or MeV, a covariance block
+        is invalid (see :func:`prepare_covariance`), a sensitivity MT is negative and
+        not -2 (and not itself in the covariance), an alias is ambiguous or collides
+        with an equally close key, no parameter remains after dropping, or the
+        assembled covariance is not symmetric.
     TypeError
         If an element of *profiles* is neither a
         :class:`~kika.sensitivities.profile.SensitivityProfile` nor an

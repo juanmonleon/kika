@@ -153,7 +153,11 @@ class UncertaintyResult:
 
     @property
     def response_relative_error(self) -> float:
-        """Relative one-sigma uncertainty of the response (a fraction): ``response_error / abs(response_value)``; 0.0 for a zero response with zero error, inf for a zero response otherwise."""
+        """Relative one-sigma uncertainty of the response, as a fraction.
+
+        ``response_error / abs(response_value)``; 0.0 for a zero response with zero
+        error, inf for a zero response with a non-zero error.
+        """
         if self.response_value == 0:
             return 0.0 if self.response_error == 0 else float("inf")
         return self.response_error / abs(self.response_value)
@@ -386,18 +390,20 @@ def sandwich_uncertainty_propagation(
     """Propagate nuclear-data uncertainty with ``S.T @ C @ S``.
 
     *sdf_data* may be an :class:`~kika.sensitivities.sdf.SDFData` or a format-neutral
-    :class:`~kika.sensitivities.profile.SensitivityProfile`. Alignment is strict by default. Use
-    ``missing="drop"`` only when excluding uncovered parameters is intended;
-    the returned ``alignment_report`` records every exclusion and alias.
+    :class:`~kika.sensitivities.profile.SensitivityProfile`. Alignment is strict by
+    default. Use ``missing="drop"`` only when excluding uncovered parameters is
+    intended; the returned ``alignment_report`` records every exclusion and alias.
 
-    The sum runs over the flat axis built by :func:`align_sensitivity_covariance`:
-    parameters (nuclide, MT, and Legendre order for MT 4000 and above) in sorted
-    order, each with its groups in ascending energy. The sensitivities are relative
-    coefficients and the covariance is relative, so the variance is a relative variance
-    (fraction squared, not percent) and ``total_uncertainty`` a relative sigma. A
-    sensitivity with no covariance is an error, or is dropped with ``missing="drop"``;
-    a covariance with no sensitivity is ignored; a pair of parameters with no
-    cross block counts as zero covariance.
+    The sum runs over the flat axis built by
+    :func:`~kika.UQ.alignment.align_sensitivity_covariance`: parameters (nuclide, MT,
+    and Legendre order for MT 4000 and above) in sorted order, each with its groups in
+    ascending energy. The sensitivities are relative coefficients and the covariance
+    is read as relative (how the covariance is read is described under *covariance*
+    in :func:`~kika.UQ.alignment.prepare_covariance`), so the variance is a relative
+    variance and ``total_uncertainty`` a relative sigma. A sensitivity with no
+    covariance is an error, or is dropped with ``missing="drop"``; a covariance with
+    no sensitivity is ignored; a pair of parameters with no cross block counts as zero
+    covariance.
 
     Parameters
     ----------
@@ -410,21 +416,25 @@ def sandwich_uncertainty_propagation(
         One multigroup Legendre covariance or a sequence of them.
     reaction_filter : dict, optional
         Which reactions to keep, as built by :func:`filter_reactions_by_nuclide` or
-        :func:`filter_reactions_by_type`. A key ``"ALL_NUCLIDES"`` maps to a list of MTs kept
-        for every nuclide (other keys are then ignored); otherwise a ZAID key maps to the
-        MTs kept for that nuclide, an empty list meaning all of them, and a nuclide with
-        no key is removed. None keeps everything. MT 1 is always removed and MT 0 is kept
-        only when listed explicitly. Legendre reactions are matched by their
-        sensitivity MT (4000 plus the order).
+        :func:`filter_reactions_by_type`. A key ``"ALL_NUCLIDES"`` maps to a list of
+        MTs kept for every nuclide (other keys are then ignored); otherwise a ZAID key
+        maps to the MTs kept for that nuclide, an empty list meaning all of them, and
+        a nuclide with no key is removed. None keeps everything. MT 1 is always
+        removed and MT 0 is kept only when listed explicitly. Legendre reactions are
+        matched by their sensitivity MT (4000 plus the order). These removals are
+        made before the alignment.
     nubar_mode : {"total", "components"} or dict
         For a nuclide with MT 452 and at least one of MT 455 and 456, which view of
         nu-bar to keep so that it is not counted twice. ``"components"`` keeps MT 455
         and 456 and drops MT 452 only when both are present; otherwise (and for
         ``"total"``) MT 452 is kept and the components dropped. A dict maps ZAID to a
-        mode; a nuclide not in it uses ``"total"``. A warning is issued for each drop.
+        mode; a nuclide not in it uses ``"total"``. One warning, listing the nuclides,
+        is issued when components are dropped and another when a total is dropped; a
+        third is issued when ``"components"`` was asked for a nuclide whose components
+        are incomplete.
     energy_tolerance
         Relative tolerance of the grid comparisons (``energy_rtol`` of
-        :func:`align_sensitivity_covariance`).
+        :func:`~kika.UQ.alignment.align_sensitivity_covariance`).
     verbose
         Log the nu-bar decisions and the largest contributions.
     bootstrap
@@ -441,9 +451,9 @@ def sandwich_uncertainty_propagation(
     bootstrap_seed
         Seed of the random generator; None draws a fresh one.
     alias_policy : {"exact", "tsurfer"}
-        As in :func:`align_sensitivity_covariance`.
+        As in :func:`~kika.UQ.alignment.align_sensitivity_covariance`.
     missing : {"error", "drop"}
-        As in :func:`align_sensitivity_covariance`.
+        As in :func:`~kika.UQ.alignment.align_sensitivity_covariance`.
 
     Returns
     -------
@@ -457,10 +467,11 @@ def sandwich_uncertainty_propagation(
         If neither covariance is given, *ci_level* is not in (0, 1), *n_bootstrap* is
         below 2 with *bootstrap*, the bootstrap lacks finite sensitivity uncertainties,
         the profile's response is None or zero, no reaction remains after the filters,
-        or an input of :func:`align_sensitivity_covariance` is invalid.
+        or an input of :func:`~kika.UQ.alignment.align_sensitivity_covariance` is
+        invalid.
     AlignmentError
-        As in :func:`align_sensitivity_covariance`, including
-        :class:`MissingCovarianceError` when ``missing="error"``.
+        As in :func:`~kika.UQ.alignment.align_sensitivity_covariance`, including
+        :class:`~kika.UQ.alignment.MissingCovarianceError` when ``missing="error"``.
     TypeError
         If *sdf_data* is neither of the types above.
     """
