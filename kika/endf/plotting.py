@@ -91,6 +91,12 @@ def endf_to_plot_data(endf: 'ENDF', mf: int, mt: int, uncertainty: bool = None,
         return _mf3_plot_data(endf, mt, uncertainty, sigma, reconstructed,
                               tolerance, **kwargs)
 
+    if mf == 34:
+        # Without MF4 an absolute (LB=0) block has no a_L to be a fraction of.
+        covmat = endf.files[34].mt[mt].to_ang_covmat(mf4_data=endf.files.get(4))
+        isotope = int(endf.files[34].mt[mt]._za)
+        return covmat.to_plot_data(nuclide=isotope, mt=mt, **kwargs)
+
     # Get the main plot data
     plot_data = endf.files[mf].to_plot_data(mt=mt, **kwargs)
 

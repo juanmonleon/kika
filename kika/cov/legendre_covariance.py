@@ -1479,9 +1479,11 @@ class LegendreCovariance:
                 energy_bins = np.array(self.energy_grids[i], dtype=float)  # Keep in original units
                 break
         
-        # Convert to percentage if relative and apply sigma multiplier
         if uncertainty_type.lower() == 'relative':
-            uncertainties = uncertainties * 100.0 * sigma  # Convert to percentage with sigma
+            if not unc_data.get('is_relative', True):
+                uncertainties = self._absolute_over_coefficient(
+                    isotope, mt, order, uncertainties)
+            uncertainties = uncertainties * 100.0 * sigma
         else:
             uncertainties = uncertainties * sigma  # Apply sigma to absolute values
         
@@ -2098,6 +2100,18 @@ class LegendreCovariance:
             "ne": int(src_grid.size),
         }
         return out
+
+    def _absolute_over_coefficient(self, isotope, mt, order, uncertainties):
+        """An LB=0 σ(a_L) as a fraction of the cell-averaged a_L (zero where a_L is zero)."""
+        coeffs = self.legendre_coefficients.get((isotope, mt, order))
+        if coeffs is None or np.size(coeffs) != np.size(uncertainties):
+            raise ValueError(
+                f"MT={mt} L={order}: the covariance is absolute (LB=0), and a "
+                f"relative uncertainty needs a_L on its grid; build the "
+                f"covariance with to_ang_covmat(mf4_data=...)"
+            )
+        coeffs = np.abs(np.asarray(coeffs, dtype=float))
+        return np.divide(uncertainties, coeffs, out=np.zeros_like(coeffs), where=coeffs > 0)
 
     def get_uncertainties_for_legendre_coefficient(
         self,
