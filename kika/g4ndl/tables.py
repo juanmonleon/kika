@@ -99,7 +99,23 @@ def _repFlag(blocks) -> int:
 
 def angularMTs(suite) -> List[int]:
     """MTs whose outgoing neutron has an angular distribution of its own (see
-    the module docstring): what :func:`angularBulk` serves."""
+    the module docstring): what :func:`angularBulk` serves.
+
+    A reaction qualifies when its neutron product is a two-body emission, an
+    ``uncorrelated`` pair or an isotropic distribution. Reactions without an
+    ENDF MT, without a neutron product, or with a correlated energy-angle law
+    (MF6) are left out.
+
+    Parameters
+    ----------
+    suite
+        A reaction suite, normally one read from G4NDL.
+
+    Returns
+    -------
+    list of int
+        The MTs in increasing order.
+    """
     out = []
     for reaction in suite.reactions:
         mt = reaction.ENDF_MT
@@ -132,9 +148,26 @@ def pointwiseCrossSection(suite, mt: int):
 
 
 def crossSections(suite) -> Dict[int, Any]:
-    """MT → ``(E, sigma)`` (eV, b, 0 K, :func:`pointwiseCrossSection`) for every
+    """MT → ``(E, sigma)`` (eV, b, 0 K, ``pointwiseCrossSection``) for every
     reaction and every sum with an ENDF MT; the process total is
-    :func:`inelasticTotal`."""
+    :func:`inelasticTotal`.
+
+    The pair of an MT is its ``recon`` form when the suite has one, else its
+    ``eval`` form when that is pointwise. An MT with neither is left out
+    without a message.
+
+    Parameters
+    ----------
+    suite
+        A reaction suite, normally one read from G4NDL.
+
+    Returns
+    -------
+    dict of int to tuple of numpy.ndarray
+        Keys in increasing MT order. Each value is ``(energy, sigma)``, two
+        arrays of equal length: incident energies in eV and cross-sections in
+        barn, as the model holds them and in grid order.
+    """
     out: Dict[int, Any] = {}
     for node in list(suite.reactions) + list(suite.sums):
         mt = node.ENDF_MT
@@ -148,7 +181,21 @@ def crossSections(suite) -> Dict[int, Any]:
 
 
 def inelasticTotal(suite):
-    """``(E, sigma)`` of ``Inelastic/CrossSection``, or ``None``."""
+    """``(E, sigma)`` of ``Inelastic/CrossSection``, or ``None``.
+
+    Parameters
+    ----------
+    suite
+        A reaction suite, normally one read from G4NDL.
+
+    Returns
+    -------
+    tuple of numpy.ndarray or None
+        ``(energy, sigma)`` of the ``recon`` form of the sum labelled
+        ``"inelastic"``, as float arrays of equal length: energies in eV and
+        cross-sections in barn, as G4NDL stores them (kika does not convert).
+        ``None`` when the suite has no such sum.
+    """
     for node in suite.sums:
         if node.label == INELASTIC_TOTAL:
             form = node.crossSection["recon"]
@@ -208,14 +255,63 @@ def angularBulk(suite, maxOrder: Optional[int] = None, mt: int = 2) -> Dict[str,
     """Reaction ``mt``'s angular distribution (default the elastic) in the
     shape of an MF4 bulk response. ``mt`` is one of :func:`angularMTs`.
 
-    Returns a dict with ``energies`` (eV, the Legendre block then the tables
-    above it), ``max_order``, ``coefficients_by_order`` (``str(l)`` → one value
-    per energy, ``a_0 = 1`` included), ``energy_interpolation`` (the Legendre
-    block's ``[NBT, INT]``), ``representation`` (``repFlag``), ``frame``
-    (``"CM"``/``"LAB"``), ``pdf_mu_by_energy``/``pdf_by_energy`` (``None`` on a
-    Legendre row), ``pdf_angular_linlin`` and the ``pdf_boundary*`` table a
-    ``repFlag=3`` isotope stores at its transition energy. For an inelastic
-    ``mt`` ``representation`` is the same code, read off the blocks.
+    Parameters
+    ----------
+    suite
+        A reaction suite, normally one read from G4NDL.
+    maxOrder
+        Highest Legendre order of ``coefficients_by_order``. ``None`` takes the
+        highest order of the Legendre block, or ``PROJECTION_ORDER`` (20) when
+        there is none or its highest order is 0. Legendre rows longer than this
+        are cut and shorter ones padded with zeros. It does nothing for an
+        isotropic distribution.
+    mt
+        The reaction. For anything but 2 it must be one of :func:`angularMTs`.
+
+    Returns
+    -------
+    dict
+        The keys, all always present:
+
+        * ``energies``: list of incident energies in eV: the Legendre
+          energies in file order, then the energies of the tables above them
+          (the table at the transition energy is not repeated here). For an
+          isotropic distribution, two values: the first and last energy of the
+          cross-section grid.
+        * ``max_order``: the highest order in ``coefficients_by_order`` (0 for
+          an isotropic distribution).
+        * ``coefficients_by_order``: ``str(l)`` for ``l = 0 ... max_order``,
+          each a list with one coefficient ``a_l`` per energy. A Legendre row
+          holds the model's coefficients with ``a_0 = 1`` in front. A table row
+          holds the projection ``a_l = int p(mu) P_l(mu) dmu`` of the table,
+          from a 16-point Gauss rule on each segment under its own
+          interpolation law (not exact for the logarithmic laws). An isotropic
+          distribution gives ``{"0": [1.0, 1.0]}``.
+        * ``energy_interpolation``: the Legendre block's interpolation in
+          incident energy as ENDF ``[NBT, INT]`` pairs (``NBT`` 1-based);
+          ``None`` without a Legendre block.
+        * ``representation``: ``repFlag`` (0 isotropic, 1 Legendre, 2
+          tabulated, 3 Legendre then tabulated). For ``mt=2`` of a suite read
+          from G4NDL it is the file's own flag; otherwise it is read off the
+          blocks.
+        * ``frame``: ``"CM"`` or ``"LAB"``, or ``None`` when the distribution
+          states no frame.
+        * ``pdf_mu_by_energy``, ``pdf_by_energy``: one list per entry of
+          ``energies``, holding ``mu`` and ``p(mu)`` of the table, lin-lin in
+          ``mu`` (a segment on another law is cut into 16 points and evaluated
+          on its own law); the entry of a Legendre energy is ``None``. Both are
+          ``None`` when there is no tabulated block.
+        * ``pdf_angular_linlin``: always ``True``.
+        * ``pdf_boundary_energy``, ``pdf_boundary_mu``, ``pdf_boundary``: the
+          table stored at the transition energy of a Legendre-then-tabulated
+          distribution (energy in eV, then ``mu`` and ``p(mu)`` lin-lin); all
+          ``None`` otherwise.
+
+    Raises
+    ------
+    ValueError
+        If ``mt`` is not 2 and its outgoing neutron has no angular distribution
+        of its own (or the reaction emits no neutron).
     """
     if mt == 2:
         distribution = _distribution(suite)
@@ -303,7 +399,65 @@ def angularBulk(suite, maxOrder: Optional[int] = None, mt: int = 2) -> Dict[str,
 
 def isotopeSummary(suite) -> Dict[str, Any]:
     """What a viewer shows above an isotope's plots: the file's header, the
-    ranges of its two halves, and what the read lost or warned about."""
+    ranges of its two halves, and what the read lost or warned about.
+
+    The elastic quantities (``cross_section``, ``legendre``, ``tabulated``,
+    ``frame``, ``transition_energy``) are those of MT2.
+
+    Parameters
+    ----------
+    suite
+        A suite read from G4NDL. The file-level entries come from its
+        provenance and are ``None`` when the suite has none.
+
+    Returns
+    -------
+    dict
+        Not a table: one dict, with these keys, all always present.
+
+        * ``target``, ``library``, ``library_name``, ``target_mass`` (the mass
+          ratio AWR), ``cross_section_path``, ``final_state_path``: from the
+          suite and its provenance.
+        * ``compressed``: whether the final-state path ends in ``.z``.
+        * ``frame``: ``"CM"``, ``"LAB"`` or ``None``.
+        * ``rep_flag`` (the file's ``repFlag``, or ``None``) and
+          ``representation`` (its name, ``"unknown"`` for no flag).
+        * ``transition_energy``: the last Legendre energy in eV when there is
+          both a Legendre and a tabulated block, else ``None``.
+        * ``cross_section``: dict with ``count`` (points), ``energy_min`` and
+          ``energy_max`` (eV), ``sigma_min`` and ``sigma_max`` (barn) and
+          ``repeated_energies`` (number of consecutive equal energies).
+        * ``legendre``, ``tabulated``: ``None`` without that block, else a dict
+          with ``count`` (incident energies), ``energy_min`` and ``energy_max``
+          (eV), ``repeated_energies``, ``energy_laws`` (the sorted
+          interpolation codes between the energies) and ``max_order`` (the
+          highest Legendre order) or ``max_points`` (the most mu points of a
+          table).
+        * ``nonzero_temperatures``, ``nonzero_tempdeps``: how many of the
+          file's temperatures and ``tempdep`` flags are not zero.
+        * ``report``: dict of the lists ``warnings``, ``losses``,
+          ``approximations`` and ``unsupported`` of the suite's conversion
+          report, or ``None`` without one.
+        * ``reactions``: a list with one row per MT that has a pointwise
+          cross-section (the MTs of :func:`crossSections`), in MT order. A row
+          is a dict: ``mt``; ``q_value`` (the reaction's QI as the model holds
+          it, eV for a G4NDL suite; ``None`` for a sum or when no Q is
+          stated); ``threshold`` (the first energy in eV where the
+          cross-section is positive, ``None`` if it never is); ``count``,
+          ``energy_min``, ``energy_max`` (eV) and ``sigma_max`` (barn) of the
+          grid; ``sum`` (whether the MT is a sum such as MT4 or MT103-107);
+          ``angular`` (whether :func:`angularBulk` serves it); and, only for an
+          angular MT, ``rep_flag``, ``max_order`` (highest native Legendre
+          order, 0 when isotropic or tabulated only) and
+          ``transition_energy`` (eV or ``None``).
+        * ``angular_mts``: the list :func:`angularMTs` returns.
+        * ``inelastic_total``: ``None`` or a dict with ``count``,
+          ``energy_min``, ``energy_max`` (eV) and ``sigma_max`` (barn) of
+          ``Inelastic/CrossSection``.
+        * ``capture``: the summary of MT102, a dict, or ``None`` without
+          capture.
+        * ``fission``: the result of :func:`fissionSummary`.
+    """
     prov = getattr(suite, "provenance", None)
     energies, sigma = _crossSection(suite)
     distribution = _distribution(suite)
@@ -430,11 +584,53 @@ def fissionSummary(suite) -> Optional[Dict[str, Any]]:
     ν̄ total, prompt and delayed at thermal (``None`` for one the file does not
     state); the delayed families and their spectra's law; the prompt
     spectrum's law and where the neutron's angle is stated; the energy release
-    at thermal (``ET``, ``ER``, the fragments' kinetic energy); the chances
-    (MT19, 20, 21, 38) with their σ range, Q and whether they carry a final
-    state of their own; where the photons live (``"model"`` when they reached
-    it; ``"verbatim"`` when any travels as G4NDL text; ``None``
-    without) and whether the fragment yields (``Fission/FF``) are kept."""
+    at thermal; the chances (MT19, 20, 21, 38) with their σ range, Q and
+    whether they carry a final state of their own; where the photons live
+    (``"model"`` when they reached it; ``"verbatim"`` when any travels as G4NDL
+    text; ``None`` without) and whether the fragment yields (``Fission/FF``)
+    are kept.
+
+    Thermal means an incident energy of 0.0253 eV.
+
+    Parameters
+    ----------
+    suite
+        A suite read from G4NDL.
+
+    Returns
+    -------
+    dict or None
+        ``None`` when the suite has no MT18. Otherwise one dict, not a table,
+        with these keys, all always present:
+
+        * ``cross_section``: ``None`` or a dict with ``count``, ``energy_min``,
+          ``energy_max`` (eV) and ``sigma_max`` (barn) of MT18.
+        * ``nubar_total``, ``nubar_prompt``, ``nubar_delayed``: ν̄ at thermal, or
+          ``None`` when the file states none. With a total (MT452) in the
+          suite, ``nubar_total`` is that and ``nubar_prompt`` is the neutron
+          product's multiplicity; without one, the product's multiplicity is
+          ``nubar_total`` and ``nubar_prompt`` is ``None``.
+        * ``delayed_families``: number of delayed-neutron families.
+        * ``delayed_spectra``: the ENDF law of their spectra as a string (the
+          laws joined by ``", "`` when they differ), or ``None``.
+        * ``prompt_spectrum``: the ENDF law of the prompt spectrum, or ``None``.
+        * ``angular_frame``: ``"CM"``, ``"LAB"`` or ``None``.
+        * ``energy_release``: ``None``, or a dict of ``totalEnergy``,
+          ``nonNeutrinoEnergy``, ``promptProductKE``, ``promptNeutronKE``,
+          ``promptGammaEnergy`` and ``neutrinoEnergy`` at thermal, as the model
+          holds them (eV for a G4NDL suite).
+        * ``chances``: a list with one dict per chance the suite has, in the
+          order MT19, 20, 21, 38: ``mt``, ``directory`` (``"FC"``, ``"SC"``,
+          ``"TC"``, ``"LC"``), ``cross_section`` (as above or ``None``),
+          ``q_value`` (or ``None``) and ``final_state`` (whether the chance has
+          a neutron distribution of its own).
+        * ``photons``: ``"model"``, ``"verbatim"`` or ``None``.
+        * ``verbatim_sections``: the sections below ``dataType`` 12 that travel
+          as G4NDL text, as strings ``"(infoType, dataType)"``.
+        * ``fragment_yields``: whether ``Fission/FF`` yields are kept.
+        * ``cross_section_path``, ``final_state_path``,
+          ``fragment_yields_path``: the files read, from the provenance.
+    """
     reaction = suite.findReactionByENDF_MT(18)
     if reaction is None:
         return None

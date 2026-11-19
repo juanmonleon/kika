@@ -171,6 +171,24 @@ class G4NDLLibrary:
         only, is therefore not an elastic isotope. An inelastic isotope is one
         with an ``Inelastic/CrossSection``; its channels are
         :meth:`inelasticChannels`.
+
+        Parameters
+        ----------
+        process : {"elastic", "inelastic", "capture", "fission"}
+            The files needed are ``Elastic/CrossSection`` and ``Elastic/FS``;
+            ``Inelastic/CrossSection``; ``Capture/CrossSection``;
+            ``Fission/CrossSection`` and ``Fission/FS``.
+
+        Returns
+        -------
+        list of IsotopeKey
+            Ordered by ``Z``, then ``A`` (a natural element, ``A=None``, before
+            any ``A``), then ``M``.
+
+        Raises
+        ------
+        ValueError
+            If ``process`` is not one of the four above.
         """
         subdirs = self._subdirs(process)
         keys = {k for (s, k) in self._index if s == subdirs[0]}
@@ -179,12 +197,50 @@ class G4NDLLibrary:
         return sorted(keys, key=lambda k: (k.Z, -1 if k.A is None else k.A, k.M))
 
     def has(self, target: TargetLike, process: str) -> bool:
-        """Whether ``target`` has every file ``process`` needs."""
+        """Whether ``target`` has every file ``process`` needs.
+
+        Parameters
+        ----------
+        target
+            Anything :class:`G4NDLLibrary` accepts as a target: ``"Fe56"``,
+            ``"Am242m1"``, ``"Cnat"``, a ZA integer such as ``26056``, a tuple
+            ``(Z, A)`` or ``(Z, A, M)``, or an :class:`~kika.g4ndl.IsotopeKey`.
+        process : {"elastic", "inelastic", "capture", "fission"}
+            The same files as in :meth:`isotopes`.
+
+        Returns
+        -------
+        bool
+            True when the library holds all of them for exactly that isotope.
+
+        Raises
+        ------
+        ValueError
+            If ``process`` is not one of the four above, or ``target`` cannot be
+            parsed.
+        """
         key = parse_target(target)
         return all((s, key) in self._index for s in self._subdirs(process))
 
     def inelasticChannels(self, target: TargetLike) -> List[str]:
-        """The ``Fxx`` directories holding a file for ``target``, in order."""
+        """The ``Fxx`` directories holding a file for ``target``, in order.
+
+        Parameters
+        ----------
+        target
+            As in :meth:`has`.
+
+        Returns
+        -------
+        list of str
+            Names such as ``"F01"``, in the order ``F01`` to ``F36``; empty when
+            the isotope has no inelastic channel file.
+
+        Raises
+        ------
+        ValueError
+            If ``target`` cannot be parsed.
+        """
         key = parse_target(target)
         return [s.split("/")[1] for s in CHANNELS["inelastic"] if (s, key) in self._index]
 
@@ -242,7 +298,36 @@ class G4NDLLibrary:
                     unindexed=len(self.unindexed), duplicates=len(self.duplicates))
 
     def locate(self, target: TargetLike, subdir: str) -> IndexedFile:
-        """The file holding ``target`` in ``subdir``, e.g. ``"Elastic/FS"``."""
+        """The file holding ``target`` in ``subdir``, e.g. ``"Elastic/FS"``.
+
+        Parameters
+        ----------
+        target
+            As in :meth:`has`.
+        subdir
+            One of the subdirectories the library indexes: ``Elastic/CrossSection``,
+            ``Elastic/FS``, ``Inelastic/CrossSection``, ``Inelastic/F01`` to
+            ``F36``, ``Capture/CrossSection``, ``Capture/FSMF6``, ``Capture/FS``,
+            ``Fission/CrossSection``, ``Fission/FS``, ``Fission/FC``, ``SC``,
+            ``TC``, ``LC`` and ``Fission/FF``.
+
+        Returns
+        -------
+        IndexedFile
+            An entry of the index, with ``key`` (the :class:`~kika.g4ndl.IsotopeKey`),
+            ``subdir``, ``path`` (the file that is read: the ``.z`` when both
+            variants exist), ``elementName`` (the element name in the file name),
+            ``shadowed`` (the plain-text twin the ``.z`` took precedence over, or
+            ``None``) and the property ``compressed`` (whether ``path`` is a
+            ``.z``).
+
+        Raises
+        ------
+        ~kika.g4ndl.IsotopeNotFoundError
+            If the library has no file for exactly that isotope in ``subdir``.
+        ValueError
+            If ``subdir`` is not indexed, or ``target`` cannot be parsed.
+        """
         if subdir not in _indexedSubdirs():
             raise ValueError(f"subdir {subdir!r} is not indexed; "
                              f"indexed: {sorted(_indexedSubdirs())}")
@@ -257,39 +342,220 @@ class G4NDLLibrary:
                 "element or a neighbouring isotope") from None
 
     def tokens(self, target: TargetLike, subdir: str) -> TokenStream:
-        """Open ``target``'s file in ``subdir`` as a :class:`TokenStream`."""
+        """Open ``target``'s file in ``subdir`` as a token stream.
+
+        Parameters
+        ----------
+        target, subdir
+            As in :meth:`locate`.
+
+        Returns
+        -------
+        TokenStream
+            A cursor over the whitespace-separated tokens of the file, after
+            zlib decompression for a ``.z``. It consumes the optional
+            ``G4NDL <label>`` header (kept in its ``header`` attribute) and reads
+            integers, floats and arrays of floats token by token; a malformed or
+            missing token raises :class:`~kika.g4ndl.G4NDLFormatError`.
+
+        Raises
+        ------
+        ~kika.g4ndl.IsotopeNotFoundError
+            If the library has no file for exactly that isotope in ``subdir``.
+        ValueError
+            If ``subdir`` is not indexed, or ``target`` cannot be parsed.
+        ~kika.g4ndl.G4NDLFormatError
+            If the file is not valid ASCII or zlib, or decompresses to more than
+            ``max_bytes`` of the library.
+        """
         f = self.locate(target, subdir)
         return TokenStream(read_text(f.path, self.max_bytes), path=f.path)
 
     def crossSection(self, target: TargetLike) -> CrossSectionRecord:
-        """``target``'s ``Elastic/CrossSection``, parsed to its last token."""
+        """``target``'s ``Elastic/CrossSection``, parsed to its last token.
+
+        Parameters
+        ----------
+        target
+            As in :meth:`has`.
+
+        Returns
+        -------
+        CrossSectionRecord
+            ``energy`` and ``sigma`` (arrays of equal length), ``bookkeeping``
+            (the two integers that open the file), ``header`` (``("G4NDL",
+            label)`` or ``None``) and ``path``. G4NDL stores energies in eV and
+            cross-sections in barn; kika does not convert. The pairs keep the
+            file order, repeated energies included. The file has no
+            interpolation record.
+
+        Raises
+        ------
+        ~kika.g4ndl.IsotopeNotFoundError
+            If the library has no such file for exactly that isotope.
+        ~kika.g4ndl.G4NDLFormatError
+            If the file does not follow the cross-section grammar, has an energy
+            that decreases or a negative cross-section.
+        ValueError
+            If ``target`` cannot be parsed.
+        """
         return parse_cross_section(self.tokens(target, "Elastic/CrossSection"))
 
     def elasticFinalState(self, target: TargetLike) -> ElasticFSRecord:
-        """``target``'s ``Elastic/FS``, parsed to its last token."""
+        """``target``'s ``Elastic/FS``, parsed to its last token.
+
+        Parameters
+        ----------
+        target
+            As in :meth:`has`.
+
+        Returns
+        -------
+        ElasticFSRecord
+            The angular distribution of the elastic neutron: ``repFlag`` (0
+            isotropic, 1 Legendre, 2 tabulated, 3 Legendre then tabulated),
+            ``targetMass`` (the mass ratio AWR, not the mass number),
+            ``frameFlag`` (1 laboratory, 2 centre of mass), ``frameFlag2`` (the
+            second frame flag, present for ``repFlag=0`` only; Geant4 keeps it
+            over the first), ``legendre`` and ``tabulated`` (blocks of records
+            per incident energy, ``None`` when ``repFlag`` does not select
+            them), ``header`` and ``path``. A Legendre record holds
+            ``temperature``, ``energy``, ``tempdep`` and the coefficients
+            ``a_1 ... a_NL`` (``a_0 = 1`` is implicit and not stored). A
+            tabulated record holds the same three scalars, an interpolation
+            record in ``mu``, and ``mu`` and ``probability`` arrays. The record
+            has the properties ``transitionEnergy`` (the last Legendre energy
+            for ``repFlag=3``, else ``None``), ``temperatures`` and ``tempdeps``.
+
+        Raises
+        ------
+        ~kika.g4ndl.IsotopeNotFoundError
+            If the library has no such file for exactly that isotope.
+        ~kika.g4ndl.G4NDLFormatError
+            If the file does not follow the grammar.
+        ValueError
+            If ``target`` cannot be parsed.
+        """
         return parse_elastic_fs(self.tokens(target, "Elastic/FS"))
 
     def inelasticCrossSection(self, target: TargetLike) -> CrossSectionRecord:
-        """``target``'s ``Inelastic/CrossSection``, the process cross section."""
+        """``target``'s ``Inelastic/CrossSection``, the process cross section.
+
+        Parameters
+        ----------
+        target
+            As in :meth:`has`.
+
+        Returns
+        -------
+        CrossSectionRecord
+            The same record as :meth:`crossSection` returns, with the energies
+            in eV and the cross-sections in barn as G4NDL stores them (kika does
+            not convert).
+
+        Raises
+        ------
+        ~kika.g4ndl.IsotopeNotFoundError
+            If the library has no such file for exactly that isotope.
+        ~kika.g4ndl.G4NDLFormatError
+            If the file does not follow the cross-section grammar.
+        ValueError
+            If ``target`` cannot be parsed.
+        """
         return parse_cross_section(self.tokens(target, "Inelastic/CrossSection"))
 
     def inelasticFinalState(self, target: TargetLike, channel: str) -> InelasticFSRecord:
-        """``target``'s ``Inelastic/<channel>`` file (``"F01"`` …), parsed to its last token."""
+        """``target``'s ``Inelastic/<channel>`` file (``"F01"`` …), parsed to its last token.
+
+        Parameters
+        ----------
+        target
+            As in :meth:`has`.
+        channel
+            The directory name, ``"F01"`` to ``"F36"``. It decides how the file
+            is read: ``F01``, ``F23`` to ``F27`` are read section by section
+            with an ``sfType`` per section (one file holds several reactions);
+            every other channel is one reaction, with one ``Qvalue`` after the
+            first section's header.
+
+        Returns
+        -------
+        InelasticFSRecord
+            ``channel``, ``composite`` (whether the channel is one of the
+            section-by-section ones), ``sections`` (in file order; each holds
+            ``infoType``, ``dataType`` (the ENDF file number: 3 cross-section, 4
+            angular, 5 energy, 6 energy-angle, 12 to 15 photons), ``sfType`` and
+            ``dummy`` (both ``None`` outside the composite channels) and the
+            parsed ``body``), ``Qvalue`` and ``Qdummy`` (only outside the
+            composite channels, else ``None``), ``header`` and ``path``. The
+            property ``reactionMTs`` lists the MTs the file states, in order of
+            first appearance (the channel's single MT outside the composite
+            channels).
+
+        Raises
+        ------
+        ~kika.g4ndl.IsotopeNotFoundError
+            If the library has no file for exactly that isotope in the channel.
+        ~kika.g4ndl.G4NDLFormatError
+            If the file does not follow the grammar of its channel.
+        ValueError
+            If ``channel`` is not an indexed directory, or ``target`` cannot be
+            parsed.
+        """
         from kika.g4ndl.inelastic_parse import parse_inelastic_fs
 
         return parse_inelastic_fs(self.tokens(target, f"Inelastic/{channel}"), channel)
 
     def captureCrossSection(self, target: TargetLike) -> CrossSectionRecord:
-        """``target``'s ``Capture/CrossSection``, MT102's σ."""
+        """``target``'s ``Capture/CrossSection``, MT102's σ.
+
+        Parameters
+        ----------
+        target
+            As in :meth:`has`.
+
+        Returns
+        -------
+        CrossSectionRecord
+            As :meth:`crossSection`: energies in eV and cross-sections in barn
+            as G4NDL stores them (kika does not convert).
+
+        Raises
+        ------
+        ~kika.g4ndl.IsotopeNotFoundError
+            If the library has no such file for exactly that isotope.
+        ~kika.g4ndl.G4NDLFormatError
+            If the file does not follow the cross-section grammar.
+        ValueError
+            If ``target`` cannot be parsed.
+        """
         return parse_cross_section(self.tokens(target, "Capture/CrossSection"))
 
     def captureFinalStateDirectory(self, target: TargetLike) -> Optional[str]:
         """``"Capture/FSMF6"``, ``"Capture/FS"`` or ``None``: what Geant4 reads for ``target``.
 
-        Raises :class:`~kika.g4ndl.exceptions.G4NDLError` when both exist.
         Geant4 would read ``FSMF6`` and never look at ``FS``; no real library
-        has such an isotope, so it is a library someone assembled by hand, and
-        which of the two they meant is not kika's to guess.
+        has an isotope with both, so it is a library someone assembled by hand,
+        and which of the two they meant is not kika's to guess.
+
+        Parameters
+        ----------
+        target
+            As in :meth:`has`.
+
+        Returns
+        -------
+        str or None
+            The directory that holds the file for ``target``; ``None`` when
+            neither has one.
+
+        Raises
+        ------
+        ~kika.g4ndl.G4NDLError
+            If both ``Capture/FSMF6`` and ``Capture/FS`` have a file for
+            ``target``.
+        ValueError
+            If ``target`` cannot be parsed.
         """
         key = parse_target(target)
         present = [s for s in CHANNELS["capture"] if (s, key) in self._index]
@@ -300,7 +566,37 @@ class G4NDLLibrary:
         return present[0] if present else None
 
     def captureFinalState(self, target: TargetLike):
-        """``target``'s capture final state (``FSMF6`` or ``FS``), or ``None`` without one."""
+        """``target``'s capture final state (``FSMF6`` or ``FS``), or ``None`` without one.
+
+        Parameters
+        ----------
+        target
+            As in :meth:`has`.
+
+        Returns
+        -------
+        object or None
+            ``None`` when the library has neither file for ``target``. For a
+            ``Capture/FSMF6`` file, a record with ``body`` (one ENDF MF6 body:
+            ``targetMass``, ``frameFlag``, ``nProducts`` and the products), ``header``
+            and ``path``. For a ``Capture/FS`` file, a record with ``mean`` (the
+            mean photon multiplicity, ``repFlag`` 1, or the photon cascade,
+            ``repFlag`` 2; its ``targetMass`` is the mass Geant4 uses for the
+            capture kinematics), ``angular`` (the photon angular data),
+            ``energies`` (the photon spectra; ``energies.needed`` says whether
+            the consumer reads any), ``header`` and ``path``.
+
+        Raises
+        ------
+        ~kika.g4ndl.G4NDLError
+            If both ``Capture/FSMF6`` and ``Capture/FS`` have a file for
+            ``target``.
+        ~kika.g4ndl.G4NDLFormatError
+            If the file does not follow the grammar, or is empty (Geant4 would
+            then sample the photons from its evaporation model).
+        ValueError
+            If ``target`` cannot be parsed.
+        """
         from kika.g4ndl.capture import parse_capture_mf6, parse_capture_photons
 
         sub = self.captureFinalStateDirectory(target)
@@ -310,28 +606,146 @@ class G4NDLLibrary:
         return parser(self.tokens(target, sub))
 
     def fissionCrossSection(self, target: TargetLike) -> CrossSectionRecord:
-        """``target``'s ``Fission/CrossSection``, MT18's σ."""
+        """``target``'s ``Fission/CrossSection``, MT18's σ.
+
+        Parameters
+        ----------
+        target
+            As in :meth:`has`.
+
+        Returns
+        -------
+        CrossSectionRecord
+            As :meth:`crossSection`: energies in eV and cross-sections in barn
+            as G4NDL stores them (kika does not convert).
+
+        Raises
+        ------
+        ~kika.g4ndl.IsotopeNotFoundError
+            If the library has no such file for exactly that isotope.
+        ~kika.g4ndl.G4NDLFormatError
+            If the file does not follow the cross-section grammar.
+        ValueError
+            If ``target`` cannot be parsed.
+        """
         return parse_cross_section(self.tokens(target, "Fission/CrossSection"))
 
     def fissionFinalState(self, target: TargetLike):
-        """``target``'s ``Fission/FS``: ν̄, spectra, energy release, photons."""
+        """``target``'s ``Fission/FS``: ν̄, spectra, energy release, photons.
+
+        Parameters
+        ----------
+        target
+            As in :meth:`has`.
+
+        Returns
+        -------
+        object
+            A record with ``sections`` (a tuple in file order; each section holds
+            ``infoType``, ``dataType`` and the parsed ``body``), ``header`` and
+            ``path``. The section bodies are ν̄ total (``infoType`` 2), the
+            delayed-neutron data (3), ν̄ prompt (4), the energy release (5, nine
+            terms in eV) and the angular, energy and photon data. The method
+            ``section(infoType, dataType)`` returns the last section of that
+            type, which is the one the consumer keeps when one repeats, or
+            ``None``.
+
+        Raises
+        ------
+        ~kika.g4ndl.IsotopeNotFoundError
+            If the library has no such file for exactly that isotope.
+        ~kika.g4ndl.G4NDLFormatError
+            If the file does not follow the grammar, or holds no section.
+        ValueError
+            If ``target`` cannot be parsed.
+        """
         from kika.g4ndl.fission import parse_fission_fs
 
         return parse_fission_fs(self.tokens(target, "Fission/FS"))
 
     def fissionChances(self, target: TargetLike) -> List[str]:
-        """The chance directories (``"FC"`` … ``"LC"``) holding a file for ``target``."""
+        """The chance directories (``"FC"`` … ``"LC"``) holding a file for ``target``.
+
+        Parameters
+        ----------
+        target
+            As in :meth:`has`.
+
+        Returns
+        -------
+        list of str
+            A subset of ``["FC", "SC", "TC", "LC"]`` (the chances MT19, 20, 21
+            and 38), in that order; empty when the isotope has no chance file.
+
+        Raises
+        ------
+        ValueError
+            If ``target`` cannot be parsed.
+        """
         key = parse_target(target)
         return [s.split("/")[1] for s in CHANNELS["fission"][:4] if (s, key) in self._index]
 
     def chanceFission(self, target: TargetLike, chance: str):
-        """``target``'s ``Fission/<chance>`` file (``"FC"`` … ``"LC"``)."""
+        """``target``'s ``Fission/<chance>`` file (``"FC"`` … ``"LC"``).
+
+        Parameters
+        ----------
+        target
+            As in :meth:`has`.
+        chance : {"FC", "SC", "TC", "LC"}
+            The chance directory.
+
+        Returns
+        -------
+        object
+            A record with ``chance``, ``crossSection`` (the record
+            :meth:`crossSection` returns, in eV and barn as G4NDL stores them;
+            its ``bookkeeping[0]`` is the chance's Q in eV, and a negative
+            cross-section is accepted), ``angularHead`` and ``energyHead`` (the
+            two integer pairs the consumer reads and discards), ``angular`` and
+            ``energy`` (the neutron's angular and energy data), and ``path``.
+            The last four are ``None`` when the file holds only the cross-section.
+            The property ``hasFinalState`` is true when ``angular`` is present.
+
+        Raises
+        ------
+        ~kika.g4ndl.IsotopeNotFoundError
+            If the library has no such file for exactly that isotope.
+        ~kika.g4ndl.G4NDLFormatError
+            If the file does not follow the grammar.
+        ValueError
+            If ``chance`` is not one of the four, or ``target`` cannot be parsed.
+        """
         from kika.g4ndl.fission import parse_chance_fission
 
         return parse_chance_fission(self.tokens(target, f"Fission/{chance}"), chance)
 
     def fragmentYields(self, target: TargetLike):
-        """``target``'s ``Fission/FF``, or ``None`` when the library has none for it."""
+        """``target``'s ``Fission/FF``, or ``None`` when the library has none for it.
+
+        Parameters
+        ----------
+        target
+            As in :meth:`has`.
+
+        Returns
+        -------
+        object or None
+            ``None`` without a file. Otherwise a record with ``blocks`` (in file
+            order; each holds ``MT``, ``MF``, ``dummy``, ``imax`` and ``energies``,
+            the ``imax + 1`` incident energies) plus ``header`` and ``path``. An
+            energy holds ``energy``, ``interpolation`` (the code to the next
+            energy) and three arrays with one entry per fragment: ``fsp``
+            (``Z*1000 + A``), ``isomer`` and ``yields`` (non-negative).
+
+        Raises
+        ------
+        ~kika.g4ndl.G4NDLFormatError
+            If the file does not follow the grammar, holds no block, or has a
+            negative yield.
+        ValueError
+            If ``target`` cannot be parsed.
+        """
         from kika.g4ndl.fission import parse_fragment_yields
 
         key = parse_target(target)
@@ -340,7 +754,31 @@ class G4NDLLibrary:
         return parse_fragment_yields(self.tokens(key, "Fission/FF"))
 
     def gammas(self, Z: int, A: int) -> GammasRecord:
-        """The ``Inelastic/Gammas/z<Z>.a<A>`` level scheme of nucleus ``(Z, A)``."""
+        """The ``Inelastic/Gammas/z<Z>.a<A>`` level scheme of nucleus ``(Z, A)``.
+
+        Parameters
+        ----------
+        Z, A
+            Charge and mass number of the residual nucleus, as integers.
+
+        Returns
+        -------
+        GammasRecord
+            ``Z``, ``A``, ``path`` and three arrays of equal length, one entry
+            per row of the file and in file order: ``levels`` (the level
+            energy), ``gammas`` (the photon energy) and ``probabilities``.
+            The format stores ``levels`` and ``gammas`` in keV (G4NDL's
+            convention); kika does not convert. The file is plain text with no
+            header.
+
+        Raises
+        ------
+        ~kika.g4ndl.IsotopeNotFoundError
+            If the library has no level scheme for ``(Z, A)``.
+        ~kika.g4ndl.G4NDLFormatError
+            If the file has a header, or a token count that is not a multiple of
+            three.
+        """
         from kika.g4ndl.inelastic_parse import parse_gammas
 
         try:
@@ -354,18 +792,43 @@ class G4NDLLibrary:
     def read(self, target: TargetLike, processes: Optional[Sequence[str]] = None):
         """``target`` as a :class:`~kika.nuclear_data.model.suite.ReactionSuite`.
 
-        ``processes`` (default: every process kika reads that the library has
-        for ``target``) is a subset of ``("elastic", "inelastic", "capture",
-        "fission")``.
         The elastic is MT2; the inelastic is one reaction per channel and
-        partial MT (:mod:`kika.g4ndl.inelastic_decode`) plus the ``inelastic``
+        partial MT (``kika.g4ndl.inelastic_decode``) plus the ``inelastic``
         total in ``suite.sums``; the capture is MT102
-        (:mod:`kika.g4ndl.capture`); the fission is MT18 and its chances
-        (:mod:`kika.g4ndl.fission_model`). What the library holds and kika does
+        (``kika.g4ndl.capture``); the fission is MT18 and its chances
+        (``kika.g4ndl.fission_model``). What the library holds and kika does
         not read (``ThermalScattering``, ...) is listed in ``suite.report``. This is
-        what ``kika.read(root, format="g4ndl", target=...)`` calls. Importing
-        the decoders here, not at module scope, keeps ``import kika.g4ndl``
-        from waking the model.
+        what ``kika.read(root, format="g4ndl", target=...)`` calls.
+
+        Parameters
+        ----------
+        target
+            As in :meth:`has`.
+        processes
+            A subset of ``("elastic", "inelastic", "capture", "fission")``.
+            ``None`` means every one of them that the library has for
+            ``target``. An inelastic target counts as present when it has an
+            ``Inelastic/CrossSection`` or at least one channel file.
+
+        Returns
+        -------
+        ~kika.nuclear_data.model.suite.ReactionSuite
+            The isotope's reactions and sums, and the conversion report in
+            ``suite.report``.
+
+        Raises
+        ------
+        ~kika.g4ndl.IsotopeNotFoundError
+            If a requested process is missing for exactly that isotope, or the
+            library holds nothing kika reads for it.
+        ValueError
+            If a name in ``processes`` is not one of the four, or ``target``
+            cannot be parsed.
+        ~kika.g4ndl.G4NDLFormatError
+            If a file of the requested processes does not follow its grammar.
+        ~kika.g4ndl.G4NDLUnsupportedError
+            If a file uses what kika will not decide on, such as interpolation
+            code 1.
         """
         from kika.g4ndl.decode import decodeElastic, newSuite
 
@@ -422,5 +885,24 @@ class G4NDLLibrary:
 
 
 def open(root, max_bytes: int = DEFAULT_MAX_BYTES) -> G4NDLLibrary:  # noqa: A001
-    """Index the G4NDL library at ``root``. See :class:`G4NDLLibrary`."""
+    """Index the G4NDL library at ``root``. See :class:`G4NDLLibrary`.
+
+    Parameters
+    ----------
+    root
+        The directory ``G4NEUTRONHPDATA`` would point at.
+    max_bytes
+        Ceiling on the decompressed size of any one file.
+
+    Returns
+    -------
+    G4NDLLibrary
+        The index of ``root``; no file is read yet.
+
+    Raises
+    ------
+    ~kika.g4ndl.G4NDLError
+        If ``root`` is not a directory or holds none of the indexed
+        subdirectories.
+    """
     return G4NDLLibrary(root, max_bytes=max_bytes)

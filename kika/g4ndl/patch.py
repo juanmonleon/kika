@@ -66,9 +66,30 @@ _SHARE_MODES = ("copy", "hardlink")
 class PatchResult:
     """What :func:`patch_isotope` (or :func:`patch_elastic`) produced.
 
-    ``replaced`` maps each written file (relative to the library root) to the
-    base file it replaces, or ``None`` when the base had no file for the
-    isotope; ``removed`` lists the twins deleted from the copy.
+    Returned by those two functions; a user does not build one.
+
+    Attributes
+    ----------
+    output : pathlib.Path
+        The patched library, as an absolute resolved path.
+    target : str
+        The isotope that was written, as ``str`` of its key (``"Fe56"``).
+    replaced : dict of str to str or None
+        Each file written, as a path relative to the library root with ``/``
+        separators, mapped to the base file it replaces (relative to the base
+        root), or ``None`` when the base had no file there. The base file can
+        be the other variant (``.z`` or plain) of the one written.
+    removed : list of str
+        The isotope's files of the base, relative to the root and sorted, that
+        are absent from the output and are not replaced by a written file: the
+        other variant of a written file, and the files of channels, chances or
+        final states the suite does not have.
+    manifest : pathlib.Path or None
+        The ``kika_manifest.json`` written at the root of the output.
+    report : object
+        The :class:`~kika.nuclear_data.model.conversion.ConversionReport` of the
+        write, with ``warnings``, ``losses``, ``approximations`` and
+        ``unsupported``.
     """
 
     output: Path
@@ -128,7 +149,74 @@ def patch_elastic(base_library, suite, output_library, *, compressed: Optional[b
                   share: str = "copy", overwrite: bool = False,
                   crossSectionLabel: Optional[str] = None, angularLabel: str = "eval",
                   targetMass: Optional[float] = None, header="keep") -> PatchResult:
-    """:func:`patch_isotope` with ``processes=("elastic",)``: only MT2 is replaced."""
+    """:func:`patch_isotope` with ``processes=("elastic",)``: only MT2 is replaced.
+
+    Of the isotope's files only ``Elastic/CrossSection`` and ``Elastic/FS`` are
+    written, replacing the base's two (or adding them when the base has none)
+    and removing their other variant (``.z`` or plain). Every other file of the
+    base, the isotope's inelastic, capture and fission files included, is copied
+    as it is, and the base is never modified.
+
+    Parameters
+    ----------
+    base_library
+        The G4NDL root to start from; read only.
+    suite
+        The isotope to write; its target names the files.
+    output_library
+        Where the patched library goes. An existing directory is replaced only
+        when ``overwrite`` is true and it holds a ``kika_manifest.json``.
+    compressed
+        ``True`` writes ``.z`` (zlib), ``False`` plain text. ``None`` follows
+        the variant of the base's file for the isotope, and ``.z`` when the base
+        has none.
+    share : {"copy", "hardlink"}
+        How the unchanged files reach the output: copied, or hard-linked to the
+        base (both trees on one volume).
+    overwrite
+        Replace a previous output of this function.
+    crossSectionLabel
+        The style of the cross-section to write; ``None`` writes ``"recon"``.
+    angularLabel
+        The style of the angular distribution to write.
+    targetMass
+        The mass ratio AWR to write. ``None`` takes the G4NDL ``targetMass`` or
+        the ENDF/ACE AWR the suite's provenance recorded; with neither, the
+        write is refused.
+    header
+        ``"keep"`` writes back the ``G4NDL <label>`` header the provenance
+        recorded (none, for a suite that did not come from G4NDL), ``None``
+        writes none, and a string writes ``G4NDL <string>`` in both files; the
+        string must be one token.
+
+    Returns
+    -------
+    PatchResult
+        Where the library went, what was replaced and removed, the manifest and
+        the conversion report.
+
+    Raises
+    ------
+    ValueError
+        If ``share`` is not one of the two above, ``header`` is a string that is
+        not one token, or the output and the base are the same tree or one holds
+        the other.
+    FileExistsError
+        If ``output_library`` exists and ``overwrite`` is false, or it exists
+        without a ``kika_manifest.json``.
+    RuntimeError
+        If the check after the write finds a file changed outside the isotope's
+        elastic files, or the written isotope does not read back to what was
+        encoded.
+    ~kika.g4ndl.G4NDLError
+        If ``base_library`` is not a G4NDL library.
+    ~kika.g4ndl.G4NDLUnsupportedError
+        If the suite has no MT2, no target mass is available (the elastic write
+        always needs one), or the writer refuses its data: a histogram
+        interpolation, or a cross-section axis or angular energy axis that
+        declares a unit other than eV or b. An axis that declares no unit is
+        written as given.
+    """
     return patch_isotope(base_library, suite, output_library, processes=("elastic",),
                          compressed=compressed, share=share, overwrite=overwrite,
                          crossSectionLabel=crossSectionLabel, angularLabel=angularLabel,
@@ -151,28 +239,54 @@ def patch_isotope(base_library, suite, output_library, *,
                   header="keep") -> PatchResult:
     """Copy ``base_library`` to ``output_library`` with ``suite``'s data in it.
 
+    The copy holds every file of the base except the isotope's files in the
+    subdirectories of the chosen processes (both the ``.z`` and the plain
+    variant) and the ``Inelastic/Gammas`` files passed in ``gammas``. In place
+    of them it holds the files written from ``suite``: for each process, the
+    cross-section and the final-state files of the isotope that the suite
+    yields, plus ``kika_manifest.json`` at the root. The base's files of the
+    isotope that the suite does not yield (another channel, the other
+    capture final state, a chance) are left out and listed in
+    ``PatchResult.removed``. The output is built in a temporary sibling
+    directory, checked, and only then renamed into place.
+
+    An existing ``output_library`` is replaced only when ``overwrite`` is true
+    and it holds a ``kika_manifest.json``, which is how kika recognises a
+    library it wrote. In any other case nothing is deleted and the call
+    raises. A failure while the new library is being built leaves the previous
+    output as it was.
+
     Parameters
     ----------
     base_library
         The G4NDL root to start from (what ``G4NEUTRONHPDATA`` points at).
         Read only.
     suite
-        The isotope to write; its target names the files.
+        The isotope to write; its target names the files. G4NDL stores
+        energies in eV and cross-sections in barn and kika does not convert. The
+        writer refuses a cross-section table (of any process) whose axes declare
+        a unit other than eV or b, and the elastic angular energy axis if it
+        declares one other than eV. An axis that declares no unit is written as
+        given, and the energies of the inelastic and fission angular and
+        energy tables are not checked.
     output_library
         Where the patched library goes. Must not exist, unless ``overwrite``
         and it is a library this function wrote (it has a ``kika_manifest.json``):
-        kika never deletes a directory it did not make.
+        kika never deletes a directory it did not make. It must not be the
+        base or inside it, and the base must not be inside it.
     processes
-        Any of ``"elastic"``, ``"inelastic"``, ``"capture"``, ``"fission"``. Default: what the suite
-        holds (:func:`kika.g4ndl.encode.suiteProcesses`). The isotope's files
-        of the other processes are the base's, untouched.
+        Any of ``"elastic"``, ``"inelastic"``, ``"capture"``, ``"fission"``.
+        ``None`` means what the suite holds
+        (``kika.g4ndl.encode.suiteProcesses``). The isotope's files of the
+        other processes are the base's, untouched.
     gammas
-        :class:`~kika.g4ndl.inelastic_records.GammasRecord` level schemes to
-        write into ``Inelastic/Gammas`` in place of the base's (plain text, as
-        Geant4 reads them).
+        Level schemes (``kika.g4ndl.inelastic_records.GammasRecord``) to write
+        into ``Inelastic/Gammas/z<Z>.a<A>`` in place of the base's, as plain
+        text. Every other level scheme is the base's.
     compressed
-        Write ``.z`` (zlib) or plain text. Default: whatever the base has for
-        that isotope, ``.z`` when the base has neither.
+        ``True`` writes ``.z`` (zlib), ``False`` plain text. ``None`` follows the
+        variant of the base's first file of the isotope in the chosen
+        processes, and ``.z`` when the base has none.
     share
         ``"copy"`` (default) copies every file; ``"hardlink"`` links the
         unchanged ones to the base, which takes no space and seconds instead
@@ -181,14 +295,44 @@ def patch_isotope(base_library, suite, output_library, *,
         base too; kika itself never does.
     overwrite, crossSectionLabel, angularLabel, targetMass, header
         ``overwrite`` replaces a previous output of this function; the rest go
-        to :func:`kika.g4ndl.encode.writeSuite`. The inelastic sums follow the
-        suite's partials there: edit MT51 and MT4 and the total are rebuilt.
+        to ``kika.g4ndl.encode.writeSuite``: the style of the cross-section
+        (``None`` writes ``"recon"``), the style of the elastic angular
+        distribution (``"eval"``), the AWR to write (``None`` takes the one the
+        suite's provenance recorded; the elastic write is refused when there is
+        none, and for the other processes only where a section needs an AWR,
+        such as an angular or MF6 section or a photon body) and the ``G4NDL <label>`` header (``"keep"`` writes back the
+        provenance's, ``None`` writes none, a one-token string writes that
+        label). The inelastic sums follow the suite's partials there: edit MT51
+        and MT4 and the total are rebuilt.
 
     Returns
     -------
     PatchResult
         With the :class:`~kika.nuclear_data.model.conversion.ConversionReport`
         in ``.report``. Read it.
+
+    Raises
+    ------
+    ValueError
+        If ``share`` is not ``"copy"`` or ``"hardlink"``, ``processes`` is empty
+        or holds a name other than the four above, ``header`` is a string that
+        is not one token, or the output and the base are the same tree or one
+        holds the other.
+    FileExistsError
+        If ``output_library`` exists and ``overwrite`` is false, or it exists
+        and has no ``kika_manifest.json``.
+    RuntimeError
+        If the copy differs from the base outside the isotope's files, or the
+        written isotope does not read back to what was encoded. The temporary
+        directory is removed and the output is not touched.
+    ~kika.g4ndl.G4NDLError
+        If ``base_library`` is not a G4NDL library.
+    ~kika.g4ndl.G4NDLUnsupportedError
+        If the writer refuses the suite: no target mass where one is needed
+        (always for the elastic; for the other processes only in a section that
+        needs an AWR), or data G4NDL cannot hold (such as a histogram
+        interpolation, or a cross-section axis that declares a unit other than
+        eV or b).
     """
     from kika.g4ndl.encode import (encodeElastic, recordDifferences, suiteProcesses,
                                    targetKey, writeSuite)
