@@ -104,21 +104,109 @@ for OpenMC"). A page that turns out to cover two tasks is split.
 
 ## 6. Docstrings and the API reference
 
-- The **docstring** is the contract of one function: parameters, return value,
-  exceptions, and one paragraph saying what it does. Docstrings use NumPy style (they are
-  rendered by `napoleon`).
+### 6.1 What is public
+
+- **The public surface of a package is its `__all__`**, with the public methods and
+  properties of the classes in it. It is what the API reference documents and what a user
+  may rely on. A name that is not exported is internal, whatever its spelling.
+- A submodule that an API page lists by its own path (`kika.nuclear_data.forward`) is
+  public in the same way, through its own `__all__`.
+- **Whatever a public function takes, returns or raises is public**: a class of kika in a
+  public signature, and an exception a caller is expected to catch, have their own entry,
+  so that the reader can follow the link.
+- One entry per object, under the name a user imports (`kika.algebra.integral`, never a
+  second one under `kika.algebra.integrate.integral`).
+
+### 6.2 The docstring is the contract
+
+On the public surface a docstring states the whole contract, in NumPy sections (rendered
+by `napoleon`):
+
+```python
+def group_integrals(x, y, laws, edges, weight=None):
+    """Integrate a table over every group of *edges*, each panel under its own law.
+
+    An edge inside a panel cuts it into two panels of the same law, so the result is
+    the table's own integral and not a quadrature of it.
+
+    Parameters
+    ----------
+    x, y, laws
+        The table: abscissae, ordinates and one interpolation law per interval.
+    edges : array_like
+        Group boundaries, non-decreasing. They may reach past the table on either
+        side, where the table is zero.
+    weight : {None, "1/x"}
+        The weight under the integral. None is a weight of 1.
+
+    Returns
+    -------
+    numpy.ndarray
+        One integral per group, ``len(edges) - 1`` values.
+
+    Raises
+    ------
+    ValueError
+        If *edges* is not a non-decreasing one-dimensional array, or *weight* is
+        not one of the two above.
+    """
+```
+
+- **Summary line**: one line that says what comes back or what is done. A paragraph
+  follows only for what the reader cannot guess from it: the convention kept, the case
+  that is refused, what the result must not be mistaken for.
+- **Parameters**: every parameter of the signature, in its order, and none that is not
+  there. Parameters with one meaning share an entry (`x, y, laws`). The description gives
+  what the name does not: the unit, the allowed values, what the default does, and when
+  the parameter does nothing. The type is written only when the signature does not give
+  it or cannot (no annotation, the shape of an array, the allowed strings).
+- **Returns** (or **Yields**): for every callable that takes parameters and returns a
+  value, the type and what it holds, with its unit, shape and order. A callable with no
+  parameters may say it in its summary line.
+- **Raises**: every exception the function raises itself, with the condition. An
+  exception from deeper down is listed when a caller is expected to handle it.
+- **Properties**: one line saying what the value is, with its unit.
+- **Classes**: what an instance is, and how a user gets one (built by hand, or returned
+  by which function). Constructor arguments go under *Parameters*; the fields of a
+  dataclass under *Attributes*, each with its meaning and unit. An enumeration or an
+  exception class needs one paragraph.
+- **Other sections** (*See Also*, *Notes*, *References*) when they earn their place. An
+  *Examples* block is added only if a test runs it (§4).
+- A docstring is reStructuredText: double backquotes for code, `:func:`, `:class:` and
+  `:mod:` roles for links, and a raw string (`r"""`) when it holds a backslash.
+- **A docstring is a page of the site.** What never goes on a page (`WRITING_MANUAL.md`
+  §1.2: history, dates, internal labels, private paths) does not go in a public docstring,
+  and the prose rules (`WRITING_MANUAL.md` §12) apply to it.
+- **Do not guess.** A docstring states what the code does. A unit, a frame or a default
+  that the code does not settle is asked about, never written.
+
+Off the public surface the budget is the opposite: one line, or nothing when the name and
+the signature already say it. A private helper does not get sections.
+
+### 6.3 Docstrings and the manual
+
 - The **manual** is the authority for the mathematics. A docstring that needs the method
   links to it (``See :doc:`/methods/<page>`.``) and does not re-derive it.
 - Existing docstrings that already explain a method are not stripped in a documentation
   pass. When a manual page is written, the docstring's equations must agree with it; if
   they disagree, the code decides, and both are fixed.
+
+### 6.4 The API pages
+
+- **One page per package**, `api_reference/<package>.rst` (reStructuredText: the page is
+  autodoc directives, with little prose). It opens with two or three sentences on what the
+  package is for and the links to its user-guide and methods pages. A package with more
+  than about fifteen names groups them under headings by what they are for.
+- A page lists the package's `__all__` (`automodule` with `:members:`), then the
+  submodules that are public by their own path, each under its own heading.
 - Every public function named on any page has an API entry; a role whose target does not
   exist renders as plain code, silently.
 
 ## 7. Keeping it true
 
-- A change to a public signature updates any user-guide page that calls it, in the same
-  commit. A change to an algorithm updates its manual page (`WRITING_MANUAL.md` §11).
+- A change to a public signature updates its docstring and any user-guide page that calls
+  it, in the same commit. A new public name is added to its package's `__all__` and
+  appears on its API page in that commit too. A change to an algorithm updates its manual page (`WRITING_MANUAL.md` §11).
 - Pages are built with warnings as errors before they are handed over. Read the Docs
   builds the same way (`fail_on_warning` in `.readthedocs.yaml`), so a warning fails the
   published site too:
