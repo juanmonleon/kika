@@ -41,10 +41,34 @@ def _fits(x, ys, i, j, rtol, atol):
 
 def thin_common_grid(x, ys, rtol: float = 1e-3, atol: float = 0.0,
                      keep: Optional[Iterable[int]] = None) -> np.ndarray:
-    """Indices of the points of ``x`` to keep. ``ys`` is ``(rows, len(x))``.
+    """Indices of the points of ``x`` to keep.
 
-    ``atol`` is in the units of ``y`` and may be an array with one value per
-    row (a floor for each reaction).
+    Parameters
+    ----------
+    x : array_like
+        The shared grid, non-decreasing.
+    ys : array_like
+        The rows, of shape ``(rows, len(x))``; a one-dimensional array is one
+        row.
+    rtol : float or array_like
+        Relative tolerance; one value, or one per point of *x* (the tolerance of
+        a chord that starts there).
+    atol : float or array_like
+        Absolute tolerance, in the units of ``y``; one value, or one per row
+        (a floor for each reaction).
+    keep : iterable of int, optional
+        Indices of points that are never dropped, besides the two ends.
+
+    Returns
+    -------
+    numpy.ndarray
+        The indices of the kept points, ascending integers, always including
+        the first and the last; every index for a grid of two points or fewer.
+
+    Raises
+    ------
+    ValueError
+        If the rows do not have as many points as *x*.
     """
     x = np.asarray(x, dtype=float)
     ys = np.atleast_2d(np.asarray(ys, dtype=float))

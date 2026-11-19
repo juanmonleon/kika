@@ -25,6 +25,25 @@ def compress_flat(x, y, laws=LINLIN):
     No tolerance or approximation is involved. Keep law boundaries, repeated
     abscissae and signed-zero ordinates. Return independent arrays, including
     when no node can be removed.
+
+    Parameters
+    ----------
+    x, y, laws
+        The table: abscissae (non-decreasing), ordinates, and one interpolation
+        law per interval (codes 1-5). A single code applies to every interval,
+        and lin-lin is the default. *y* must be one-dimensional.
+
+    Returns
+    -------
+    tuple of numpy.ndarray
+        ``(x, y, laws)`` of the same function with the constant nodes removed,
+        and one law per remaining interval.
+
+    Raises
+    ------
+    ValueError
+        If the table is not valid (:func:`~kika.algebra.validate`) or *y*
+        is not one-dimensional.
     """
     x, y, laws = validate(x, y, laws)
     if y.ndim != 1:
@@ -61,6 +80,25 @@ def compress_flat_pieces(pieces):
     piece; only the per-call cost goes. A material whose backgrounds jump
     every few hundred eV has thousands of regions per reaction, and checking
     each one alone took longer than tabulating it.
+
+    Parameters
+    ----------
+    pieces : iterable of (array_like, array_like)
+        The ``(x, y)`` of each piece, read as lin-lin. Each piece has
+        non-decreasing one-dimensional abscissae and ordinates of the same shape.
+
+    Returns
+    -------
+    list of tuple
+        One ``(x, y, laws)`` per piece, in order: the compressed arrays and a
+        lin-lin law for each of their intervals. An empty list for no pieces.
+
+    Raises
+    ------
+    ValueError
+        If a piece's abscissae are not one-dimensional or its ordinates do not
+        have their shape, if a value is not finite, or if the abscissae of a
+        piece decrease.
     """
     pieces = [(np.asarray(x, dtype=float), np.asarray(y, dtype=float)) for x, y in pieces]
     if not pieces:
@@ -121,6 +159,19 @@ def union(grids: Iterable[np.ndarray], steps: Iterable[float] = ()) -> np.ndarra
     neighbouring interval). *steps* are abscissae that must appear at least
     twice whatever the grids say -- the edge of a table that ends at a non-zero
     value inside the union's range, say, where the sum steps.
+
+    Parameters
+    ----------
+    grids : iterable of array_like
+        The grids to merge; each is flattened.
+    steps : iterable of float
+        Abscissae to repeat at least twice in the result.
+
+    Returns
+    -------
+    numpy.ndarray
+        The sorted union, non-decreasing, empty when no grid or step holds a
+        point.
     """
     grids = [np.asarray(g, dtype=float).ravel() for g in grids]
     steps = np.asarray(list(steps), dtype=float)
@@ -149,7 +200,18 @@ def occurrences(u: np.ndarray) -> np.ndarray:
 
 
 def discontinuities(x: np.ndarray) -> np.ndarray:
-    """Indices ``i`` with ``x[i] == x[i + 1]``: the zero-width intervals."""
+    """Indices ``i`` with ``x[i] == x[i + 1]``: the zero-width intervals.
+
+    Parameters
+    ----------
+    x : array_like
+        Abscissae, non-decreasing.
+
+    Returns
+    -------
+    numpy.ndarray
+        The indices ``i``, in increasing order, as integers.
+    """
     x = np.asarray(x, dtype=float)
     return np.flatnonzero(np.diff(x) == 0)
 
@@ -160,7 +222,28 @@ def split_at_discontinuities(x, y, laws) -> List[Tuple[np.ndarray, np.ndarray, n
     Each piece is ``(x, y, laws)`` with strictly increasing abscissae. A step's left value ends one piece and its right value
     starts the next. A piece of a single point -- a value that is both the
     right limit of one step and the left limit of the next -- has no interval
-    and is refused, since it states a value no interval owns.
+    and is refused, since it states a value no interval owns. An abscissa
+    repeated more than twice is first reduced when its consecutive copies have
+    equal values; copies with distinct values in between leave such an isolated
+    point.
+
+    Parameters
+    ----------
+    x, y, laws
+        The table: abscissae (non-decreasing), ordinates, and one interpolation
+        law per interval (codes 1-5). A single code applies to every interval.
+
+    Returns
+    -------
+    list of tuple
+        The pieces, left to right, each ``(x, y, laws)`` with one law per
+        interval.
+
+    Raises
+    ------
+    ValueError
+        If the table is not valid (:func:`~kika.algebra.validate`), or if
+        a piece would be a single point.
     """
     x, y, laws = validate(x, y, laws)
     # ENDF can repeat an identical threshold point more than twice. Such
@@ -197,6 +280,24 @@ def join_pieces(pieces: Sequence[Tuple[np.ndarray, np.ndarray, np.ndarray]]):
     agree in value the shared point is written once; where they do not it is
     written twice, which is the step. A gap between pieces would need values
     nobody stated and is refused.
+
+    Parameters
+    ----------
+    pieces : sequence of (x, y, laws)
+        The pieces, left to right; each a valid table with one law per interval
+        (:func:`~kika.algebra.validate`). The law of the zero-width interval
+        of a step is set to lin-lin.
+
+    Returns
+    -------
+    tuple of numpy.ndarray
+        ``(x, y, laws)`` of the joined table. Empty arrays for no pieces.
+
+    Raises
+    ------
+    ValueError
+        If a piece is not a valid table, or a piece does not start where the
+        previous one ends.
     """
     if not pieces:
         return np.zeros(0), np.zeros(0), np.zeros(0, dtype=np.int64)

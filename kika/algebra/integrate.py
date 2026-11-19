@@ -22,7 +22,7 @@ its third term, +6 % for ``y ~ x^-2`` on ``[1, 2]``). Here there is no branch:
 
 The weight ``1/x`` (an average that is uniform in ``ln x``) is also closed form on every
 law but log-lin, whose ``int e^{kx}/x dx`` is an exponential integral; a
-log-lin table has to be :func:`~kika.algebra.refine.to_linlin`-ed first, and is
+log-lin table has to be :func:`~kika.algebra.to_linlin`-ed first, and is
 refused here rather than approximated.
 
 Group integrals cut the table at the group edges, give each cut the value its
@@ -84,6 +84,29 @@ def panel_integrals(x, y, laws, weight: Optional[str] = None) -> np.ndarray:
 
     *weight* is ``None`` (``w = 1``) or ``"1/x"``. A zero-width interval
     contributes nothing.
+
+    Parameters
+    ----------
+    x, y, laws
+        The table: abscissae (non-decreasing), ordinates, and one interpolation
+        law per interval (codes 1-5). A single code applies to every interval.
+    weight : {None, "1/x"}
+        The weight under the integral. None is a weight of 1.
+
+    Returns
+    -------
+    numpy.ndarray
+        One integral per interval, ``len(x) - 1`` values (none for fewer than
+        two points).
+
+    Raises
+    ------
+    ValueError
+        If the table is not valid (:func:`~kika.algebra.validate`); if
+        *weight* is not one of the two above; or if it is ``"1/x"`` and an
+        interval of positive width starts at ``x <= 0``, or has the log-lin law
+        (4) and is not zero throughout (no closed form: see
+        :func:`~kika.algebra.to_linlin`).
     """
     if weight not in WEIGHTS:
         raise ValueError(f"weight must be one of {WEIGHTS}, got {weight!r}")
@@ -144,7 +167,27 @@ def _integrate_panels(x1, x2, y1, y2, laws, weight) -> np.ndarray:
 
 
 def cumulative_integral(x, y, laws, weight: Optional[str] = None) -> np.ndarray:
-    """``[0, int_{x0}^{x1}, int_{x0}^{x2}, ...]`` -- exact on the stated laws."""
+    """``[0, int_{x0}^{x1}, int_{x0}^{x2}, ...]`` -- exact on the stated laws.
+
+    Parameters
+    ----------
+    x, y, laws
+        The table: abscissae (non-decreasing), ordinates, and one interpolation
+        law per interval (codes 1-5). A single code applies to every interval.
+    weight : {None, "1/x"}
+        The weight under the integral. None is a weight of 1.
+
+    Returns
+    -------
+    numpy.ndarray
+        The running integral at every abscissa, starting at 0: ``len(x)``
+        values for a table of two points or more.
+
+    Raises
+    ------
+    ValueError
+        As :func:`panel_integrals`.
+    """
     p = panel_integrals(x, y, laws, weight)
     return np.concatenate(([0.0], np.cumsum(p)))
 
@@ -157,6 +200,28 @@ def group_integrals(x, y, laws, edges, weight: Optional[str] = None) -> np.ndarr
     falls inside a panel cuts it into two panels of the same law, valued by
     that law at the edge, so the result is the table's own integral and not a
     quadrature of it.
+
+    Parameters
+    ----------
+    x, y, laws
+        The table: abscissae (non-decreasing), ordinates, and one interpolation
+        law per interval (codes 1-5). A single code applies to every interval.
+    edges : array_like
+        Group boundaries, non-decreasing. They may reach past the table on
+        either side, where the table is zero.
+    weight : {None, "1/x"}
+        The weight under the integral. None is a weight of 1.
+
+    Returns
+    -------
+    numpy.ndarray
+        One integral per group, ``len(edges) - 1`` values.
+
+    Raises
+    ------
+    ValueError
+        If *edges* is not a non-decreasing one-dimensional array, or on any of
+        the conditions of :func:`panel_integrals`.
     """
     if weight not in WEIGHTS:
         raise ValueError(f"weight must be one of {WEIGHTS}, got {weight!r}")
@@ -189,6 +254,28 @@ def integral(x, y, laws, lo: Optional[float] = None, hi: Optional[float] = None,
     """``int_lo^hi y w dx``; the limits default to the table's own domain.
 
     Limits outside the table add nothing; ``hi <= lo`` gives zero.
+
+    Parameters
+    ----------
+    x, y, laws
+        The table: abscissae (non-decreasing), ordinates, and one interpolation
+        law per interval (codes 1-5). A single code applies to every interval.
+    lo, hi : float, optional
+        The limits of integration. None is the first and the last abscissa.
+    weight : {None, "1/x"}
+        The weight under the integral. None is a weight of 1.
+
+    Returns
+    -------
+    float
+        The integral; zero for a table of fewer than two points.
+
+    Raises
+    ------
+    ValueError
+        If the table is not valid (:func:`~kika.algebra.validate`), and,
+        when the limits enclose a range, on the conditions of
+        :func:`panel_integrals`.
     """
     x, y, laws = validate(x, y, laws)
     if x.size < 2:
@@ -208,6 +295,30 @@ def group_averages(x, y, laws, edges, weight: Optional[str] = None) -> np.ndarra
     over the part of the group the table happens to cover. A caller that wants
     the latter clips *edges* to the domain first. A group of zero weight (zero
     width) is ``nan``. With ``weight="1/x"`` every edge must be positive.
+
+    Parameters
+    ----------
+    x, y, laws
+        The table: abscissae (non-decreasing), ordinates, and one interpolation
+        law per interval (codes 1-5). A single code applies to every interval.
+    edges : array_like
+        Group boundaries, non-decreasing. They may reach past the table on
+        either side, where the table is zero.
+    weight : {None, "1/x"}
+        The weight of the mean: the numerator is ``int y w`` and the
+        denominator ``int w``. None is a weight of 1.
+
+    Returns
+    -------
+    numpy.ndarray
+        One mean per group, ``len(edges) - 1`` values; ``nan`` where the group
+        has zero width.
+
+    Raises
+    ------
+    ValueError
+        If *weight* is ``"1/x"`` and an edge is not positive, or on any of the
+        conditions of :func:`group_integrals`.
     """
     edges = np.asarray(edges, dtype=float)
     num = group_integrals(x, y, laws, edges, weight)
@@ -235,6 +346,30 @@ def interval_integrals(x, y, laws, lo, hi, weight: Optional[str] = None) -> np.n
     The cost is the number of piece ends inside each interval, summed, so
     overlapping intervals are cheap when there are thousands of them and
     quadratic when every one spans most of the others. ``hi <= lo`` gives zero.
+
+    Parameters
+    ----------
+    x, y, laws
+        The table: abscissae (non-decreasing), ordinates, and one interpolation
+        law per interval (codes 1-5). A single code applies to every interval.
+    lo, hi : array_like
+        The ends of the intervals: one-dimensional, finite, of one shape. The
+        intervals need not be sorted or disjoint.
+    weight : {None, "1/x"}
+        The weight under the integral. None is a weight of 1.
+
+    Returns
+    -------
+    numpy.ndarray
+        One integral per interval, in the order of *lo*; zero where
+        ``hi <= lo``.
+
+    Raises
+    ------
+    ValueError
+        If *lo* and *hi* are not one-dimensional arrays of one shape, or hold a
+        non-finite value; or on any of the conditions of
+        :func:`group_integrals` (apart from the one on *edges*).
     """
     lo = np.asarray(lo, dtype=float)
     hi = np.asarray(hi, dtype=float)
@@ -260,6 +395,29 @@ def interval_averages(x, y, laws, lo, hi, weight: Optional[str] = None) -> np.nd
     The same mean as :func:`group_averages` -- zero outside the table, ``nan``
     for an interval of zero weight -- for intervals that need not tile the
     line (:func:`interval_integrals`).
+
+    Parameters
+    ----------
+    x, y, laws
+        The table: abscissae (non-decreasing), ordinates, and one interpolation
+        law per interval (codes 1-5). A single code applies to every interval.
+    lo, hi : array_like
+        The ends of the intervals: one-dimensional, finite, of one shape.
+    weight : {None, "1/x"}
+        The weight of the mean: the numerator is ``int y w`` and the
+        denominator ``int w``. None is a weight of 1.
+
+    Returns
+    -------
+    numpy.ndarray
+        One mean per interval, in the order of *lo*; ``nan`` where
+        ``hi <= lo``.
+
+    Raises
+    ------
+    ValueError
+        If *weight* is ``"1/x"`` and an end is not positive, or on any of the
+        conditions of :func:`interval_integrals`.
     """
     lo = np.asarray(lo, dtype=float)
     hi = np.asarray(hi, dtype=float)
@@ -280,12 +438,39 @@ def log_window_averages(x, y, laws, centres, width: float,
 
     At a centre ``c`` the window is ``[c e^(-width/2), c e^(width/2)]``, clipped
     to the table's domain and to *bounds* ``(lo, hi)`` if given, and the mean is
-    :func:`interval_averages`' exact one. Clipping means near either end the
-    window is one-sided rather than averaging in the zero outside the table.
+    :func:`interval_averages`' exact one. Clipping makes the window one-sided
+    near either end: the zero outside the table is not averaged in.
     Sliding the window gives a smooth curve with no group edges to place: at
     the geometric centre of a group of an equal-``ln x`` grid of that width it
     *is* that group's :func:`group_averages`. ``nan`` where the clipped window
     is empty.
+
+    Parameters
+    ----------
+    x, y, laws
+        The table: abscissae (non-decreasing), ordinates, and one interpolation
+        law per interval (codes 1-5). A single code applies to every interval.
+        At least two abscissae.
+    centres : array_like
+        Window centres: one-dimensional and positive.
+    width : float
+        Width of the window in ``ln x``: finite and positive.
+    weight : {None, "1/x"}
+        The weight of the mean, as in :func:`interval_averages`.
+    bounds : (float, float), optional
+        ``(lo, hi)``: a further clip of the windows, inside the table's domain.
+
+    Returns
+    -------
+    numpy.ndarray
+        One mean per centre, in its order.
+
+    Raises
+    ------
+    ValueError
+        If *x* has fewer than two abscissae, *centres* is not a
+        one-dimensional array of positive values, or *width* is not finite and
+        positive; or on any of the conditions of :func:`interval_averages`.
     """
     x = np.asarray(x, dtype=float)
     centres = np.asarray(centres, dtype=float)
@@ -313,8 +498,34 @@ def legendre_moments(x, y, laws, max_order: int,
     ``[-1, 1]`` has to be extended by the caller if it means something else
     there. Exact for lin-lin and histogram panels (see the module docstring);
     log laws are re-expressed lin-lin to *tol* first
-    (:func:`~kika.algebra.refine.to_linlin`), the one approximation, and a
+    (:func:`~kika.algebra.to_linlin`), the one approximation, and a
     stated one.
+
+    Parameters
+    ----------
+    x, y, laws
+        The table: abscissae (non-decreasing), ordinates, and one interpolation
+        law per interval (codes 1-5). A single code applies to every interval.
+    max_order : int
+        The highest order ``L`` of the moments.
+    tol : float
+        Relative tolerance of the lin-lin re-expression of the log laws
+        (:func:`~kika.algebra.to_linlin`); unused for lin-lin and
+        histogram panels.
+
+    Returns
+    -------
+    numpy.ndarray
+        The moments of orders 0 to *max_order*, ``max_order + 1`` values; zeros
+        for a table of fewer than two points.
+
+    Raises
+    ------
+    ValueError
+        If the table is not valid (:func:`~kika.algebra.validate`).
+    RefinementError
+        If the re-expression of a log law does not converge
+        (:func:`~kika.algebra.to_linlin`).
     """
     x, y, laws = validate(x, y, laws)
     out = np.zeros(int(max_order) + 1)
@@ -341,6 +552,31 @@ def legendre_coefficients(mu, f, laws, max_order: int,
     of either end held at its end value out to it: a cosine outside a table's
     range is the table's end point, not an absence of data. The integrals are
     :func:`legendre_moments`.
+
+    Parameters
+    ----------
+    mu, f, laws
+        The table in the cosine: abscissae (non-decreasing), ordinates, and
+        one interpolation law per interval (codes 1-5). A single code applies
+        to every interval.
+    max_order : int
+        The highest order ``L`` of the coefficients.
+    tol : float
+        As in :func:`legendre_moments`.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``a_0..a_L``, ``max_order + 1`` values, normalised to ``a_0 = 1``
+        (left as they are when the integral of *f* is 1e-15 or less in
+        magnitude); zeros for an empty table.
+
+    Raises
+    ------
+    ValueError
+        If the table is not valid (:func:`~kika.algebra.validate`).
+    RefinementError
+        As :func:`legendre_moments`.
     """
     mu, f, laws = validate(mu, f, laws)
     if mu.size == 0:

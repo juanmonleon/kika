@@ -153,6 +153,48 @@ def prepare_evaluator(x, y, laws):
     Later edits to the source do not affect the snapshot. Domain rules,
     repeated nodes, endpoint values, and one-sided limits match ``evaluate``,
     ``left_limit`` and ``right_limit``. All interpolation remains in algebra.
+
+    Parameters
+    ----------
+    x, y, laws
+        The table: abscissae (non-decreasing), ordinates, and one interpolation
+        law per interval (codes 1-5). A single code applies to every interval.
+        *y* must be one-dimensional.
+
+    Returns
+    -------
+    callable
+        An immutable evaluator that owns copies of the validated arrays. It
+        reads the table as :func:`~kika.algebra.evaluate`, :func:`~kika.algebra.left_limit`
+        and :func:`~kika.algebra.right_limit` do, with these methods:
+
+        * ``evaluator(q, outside="zero")``: the value at *q*, a float for a
+          scalar and otherwise an array of the shape of *q*. *outside* is
+          ``"zero"``, ``"hold"`` or ``"raise"`` as in
+          :func:`~kika.algebra.evaluate`.
+        * ``evaluator.left_limit(q, outside="zero")`` and
+          ``evaluator.right_limit(q, outside="zero")``: the one-sided limits at
+          *q*, with the same return and *outside* as the call above.
+        * ``evaluator.constant_on(low, high)``: the value (a float) when the
+          table is exactly constant on the closed span ``[low, high]``, and None
+          when that cannot be proved: the span reaches off the domain, the table
+          has fewer than two points, the values differ or are not finite, a zero
+          has a negative sign, or a ln x panel's ends do not widen. It raises
+          ``ValueError`` unless *low* and *high* are finite with ``low < high``.
+        * ``evaluator.constant_on_many(lows, highs)``: ``constant_on`` for many
+          spans at once, as an array with one value per span and NaN where
+          ``constant_on`` gives None (all NaN for a table of fewer than two
+          points). It raises ``ValueError`` unless every span is finite with
+          ``low < high``.
+
+        Each method also raises ``ValueError`` for an *outside* that is not one
+        of the three strings, where it has that argument.
+
+    Raises
+    ------
+    ValueError
+        If the table is not valid (:func:`~kika.algebra.validate`) or *y*
+        is not one-dimensional.
     """
     x, y, laws = validate(x, y, laws)
     if y.ndim != 1:

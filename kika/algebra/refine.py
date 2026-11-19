@@ -11,7 +11,7 @@ means, where a panel is probed, which probes are kept -- and nothing else.
 vectorised call, and splits the ones that fail. **Only panels created in the
 previous pass are probed**: a panel that passed keeps its probes, and probing
 it again would ask the same question with the same numbers. That is what makes
-the engine's cost the number of panels it *creates* rather than panels times
+the engine's cost the number of panels it *creates*, not panels times
 passes.
 
 **Exact, or it raises.** A pass budget or point budget that runs out raises
@@ -61,16 +61,30 @@ class RefinementError(RuntimeError):
 class RefineResult:
     """What :func:`refine` returns.
 
-    ``x``, ``y`` are the refined nodes (``y`` keeps the column axis of the
-    input). ``passes`` counts probing passes and ``evaluations`` the points
-    the function was asked for. ``unresolved`` is the number of failing panels
-    accepted because they could not be split. With ``keep_probes``,
-    ``probe_x`` and ``probe_y`` hold, for every final panel in order, the
-    probes it passed with -- ``(panels, fractions)`` and
-    ``(panels, fractions[, columns])`` -- so a caller can report on them
-    without asking the function again -- and ``probe_pass`` the pass each
-    final panel settled in. A zero-width interval (a step) has no panel and
-    no probes.
+    A caller gets one from :func:`refine`, or from :func:`drive` run on
+    :func:`refine_steps`. With ``keep_probes`` the probes of every final panel
+    are kept, so a caller can report on them without asking the function again.
+    A zero-width interval (a step) has no panel and no probes.
+
+    Attributes
+    ----------
+    x, y : numpy.ndarray
+        The refined nodes; ``y`` keeps the column axis of the input.
+    passes : int
+        Number of probing passes.
+    evaluations : int
+        Number of points the function was asked for.
+    unresolved : int
+        Number of failing panels accepted because they could not be split.
+    probe_x : numpy.ndarray or None
+        With ``keep_probes``, the probe abscissae each final panel passed with,
+        in panel order, of shape ``(panels, fractions)``; otherwise None.
+    probe_y : numpy.ndarray or None
+        With ``keep_probes``, the function values at those probes, of shape
+        ``(panels, fractions[, columns])``; otherwise None.
+    probe_pass : numpy.ndarray or None
+        With ``keep_probes``, the pass in which each final panel settled;
+        otherwise None.
     """
 
     x: np.ndarray
@@ -111,7 +125,7 @@ def refine(x, y, evaluate: Callable, exceeds: Callable, *,
         Which starting intervals to refine (default: every one of positive
         width).
     log_x
-        Per starting interval, probe in ``ln x`` rather than ``x``.
+        Per starting interval, whether to probe in ``ln x`` (otherwise in ``x``).
     fractions
         Probe positions as fractions of a panel, in its probing variable.
     snap
@@ -139,6 +153,23 @@ def refine(x, y, evaluate: Callable, exceeds: Callable, *,
     reuse_probes
         Reuse exact (abscissa, starting interval) values from the previous
         pass; requires a deterministic evaluator. No rounded cache keys.
+
+    Returns
+    -------
+    RefineResult
+        The refined nodes and the counts of the run.
+
+    Raises
+    ------
+    RefinementError
+        If a budget runs out (``reason`` ``"passes"`` or ``"points"``), or a
+        failing panel cannot be split and *unresolvable* is ``"raise"``
+        (``reason`` ``"unresolvable"``).
+    ValueError
+        If *insert* or *unresolvable* is not one of its allowed strings; if
+        *precheck* is not an integer between 0 and ``len(fractions)``, or is
+        non-zero with ``insert="all"``; or if *keep_probes* is set and an
+        interval of positive width is not active.
     """
     return drive(refine_steps(x, y, exceeds, active=active, log_x=log_x, fractions=fractions,
                               snap=snap, insert=insert, max_passes=max_passes,
@@ -155,6 +186,20 @@ def drive(steps, evaluate):
     returns is the result. :func:`refine` is :func:`refine_steps` driven by its
     own function; a caller that refines many independent tables can instead
     advance them together and answer their requests in one batch.
+
+    Parameters
+    ----------
+    steps : generator
+        A generator such as :func:`refine_steps` returns.
+    evaluate : callable
+        ``evaluate(request) -> values``: answers one request that *steps*
+        yields with the values to send back.
+
+    Returns
+    -------
+    object
+        What *steps* returns when it finishes: a :class:`RefineResult` for
+        :func:`refine_steps`.
     """
     try:
         request = next(steps)
@@ -175,9 +220,39 @@ def refine_steps(x, y, exceeds: Callable, *,
     values of the function there; its return value is the
     :class:`RefineResult`. The arithmetic is :func:`refine`'s.
 
-    ``scale(x1)`` multiplies each panel's ratios by a factor of its left
-    abscissa: NJOY's tolerance five times tighter below 0.4999 eV
-    (:func:`kika.processing.tolerances.thermalFactor`).
+    Parameters
+    ----------
+    x, y, exceeds, active, log_x, fractions, snap, insert, max_passes, max_points, min_width_ulps, unresolvable, keep_probes, precheck, reuse_probes
+        As in :func:`refine`.
+    scale : callable, optional
+        ``scale(x1)`` multiplies each panel's ratios by a factor of its left
+        abscissa: NJOY's tolerance five times tighter below 0.4999 eV
+        (:func:`kika.processing.tolerances.thermalFactor`).
+
+    Yields
+    ------
+    tuple of numpy.ndarray
+        ``(q, owner)``: the abscissae to evaluate, one-dimensional, and the
+        index of the starting interval each falls in. The caller sends back the
+        function's values there, of the trailing shape of *y*.
+
+    Returns
+    -------
+    RefineResult
+        The result, as the generator's return value.
+
+    Raises
+    ------
+    RefinementError
+        If a budget runs out (``reason`` ``"passes"`` or ``"points"``; the
+        starting points count against *max_points*), or a failing panel cannot
+        be split and *unresolvable* is ``"raise"`` (``reason``
+        ``"unresolvable"``).
+    ValueError
+        If *insert* or *unresolvable* is not one of its allowed strings; if
+        *precheck* is not an integer between 0 and ``len(fractions)``, or is
+        non-zero with ``insert="all"``; or if *keep_probes* is set and an
+        interval of positive width is not active.
     """
     if insert not in ("worst", "balanced", "all"):
         raise ValueError(f"insert must be 'worst', 'balanced' or 'all', got {insert!r}")
@@ -402,7 +477,7 @@ def to_linlin(x, y, laws, tol: float = LINEARIZATION_TOLERANCE, *,
     * **histogram** panels gain the left limit of their right end as a repeated
       abscissa, ``(x_{i+1}, y_i)`` -- the exact lin-lin form of a step.
     * **log-lin, log-log** panels with an end at 0 are 0 inside, with the jump
-      at the other end (:func:`~kika.algebra.laws.vanishing_panels`): written as
+      at the other end (``kika.algebra.laws.vanishing_panels``): written as
       that step, exactly, by repeating the non-zero end's abscissa at 0.
     * **lin-log, log-lin, log-log** panels are refined until the chord agrees
       with the law to a relative *tol* at a quarter, a half and three quarters
@@ -413,6 +488,31 @@ def to_linlin(x, y, laws, tol: float = LINEARIZATION_TOLERANCE, *,
     :func:`refine`) it also stops when every candidate snaps onto its own ends.
     Both are limits of the representation, not of the method, and are
     accepted.
+
+    Parameters
+    ----------
+    x, y, laws
+        The table: abscissae (non-decreasing), ordinates, and one interpolation
+        law per interval (codes 1-5). A single code applies to every interval.
+    tol : float
+        Relative tolerance of the chord against the law.
+    snap : callable, optional
+        As in :func:`refine`.
+    max_passes : int
+        Pass budget of the refinement.
+
+    Returns
+    -------
+    tuple of numpy.ndarray
+        ``(x, y)`` of the lin-lin table; it has no laws, every interval is
+        lin-lin. Equal to the input when no panel needs points.
+
+    Raises
+    ------
+    ValueError
+        If the table is not valid (:func:`~kika.algebra.validate`).
+    RefinementError
+        If the refinement needs more than *max_passes* passes.
     """
     x, y, laws = validate(x, y, laws)
     if x.size < 2:
