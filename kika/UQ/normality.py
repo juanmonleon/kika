@@ -87,6 +87,18 @@ def anderson_darling_normal_p_value(statistic: float, n: int) -> float:
     R. B. D'Agostino and M. A. Stephens, *Goodness-of-Fit Techniques* (1986),
     Table 4.9: the statistic is corrected to ``A*² = A²(1 + 0.75/n + 2.25/n²)``
     and the p-value read from four exponential fits in ``A*²``.
+
+    Parameters
+    ----------
+    statistic
+        The Anderson-Darling statistic A² of the sample, as given by ``scipy.stats.anderson``.
+    n
+        Sample size.
+
+    Returns
+    -------
+    float
+        The p-value, clipped to [0, 1].
     """
     a = float(statistic) * (1.0 + 0.75 / n + 2.25 / (n * n))
     if a >= 0.6:

@@ -102,18 +102,25 @@ class UncertaintyResult:
     relative_uncertainty : float
         Relative uncertainty (σ/μ)
     response_value : float
-        Reference response value used for relative uncertainty
+        The response of the sensitivity profile, in its own unit. It does not enter
+        ``relative_uncertainty`` (the sensitivities are already relative); the
+        propagation requires it to be non-zero.
     response_error : float
-        Absolute one-sigma uncertainty on the unperturbed response. Reported as a
-        diagnostic only — it is *not* combined with sigma_ND in this function.
+        Absolute one-sigma uncertainty on the unperturbed response, in the unit of the
+        response; 0.0 when the profile has none. Reported as a
+        diagnostic only: it is *not* combined with sigma_ND in this function.
     contributions : List[UncertaintyContribution]
-        Individual reaction contributions sorted by magnitude
+        One entry per aligned parameter, sorted by decreasing magnitude of its
+        variance contribution. That contribution is ``S_i.T @ (C @ S)_i``: the
+        parameter's row of the sandwich sum, cross-correlations included, so the
+        entries add up to ``total_variance`` (relative variance, may be negative).
     n_reactions : int
-        Number of reactions included in propagation
+        Number of aligned parameters in the propagation (each Legendre order counts as one)
     n_energy_groups : int
-        Number of energy groups used
+        Number of energy groups of each parameter
     correlation_effects : float
-        Contribution from cross-correlations between reactions
+        Relative variance from the terms between different parameters: ``total_variance``
+        minus the sum of the per-parameter diagonal blocks
     bootstrap_ci_low, bootstrap_ci_high : float, optional
         Lower / upper bound of the bootstrap CI on sigma_ND (relative). Both None
         when bootstrap was disabled.
@@ -123,6 +130,9 @@ class UncertaintyResult:
         Number of bootstrap samples drawn. None when bootstrap was disabled.
     ci_level : float
         Confidence level used for the bootstrap CI (default 0.95).
+    alignment_report : AlignmentReport, optional
+        Record of the aliases, zero insertions, drops, exclusions and assumptions of
+        the alignment.
     """
     total_variance: float
     total_uncertainty: float
@@ -143,6 +153,7 @@ class UncertaintyResult:
 
     @property
     def response_relative_error(self) -> float:
+        """Relative one-sigma uncertainty of the response (a fraction): ``response_error / abs(response_value)``; 0.0 for a zero response with zero error, inf for a zero response otherwise."""
         if self.response_value == 0:
             return 0.0 if self.response_error == 0 else float("inf")
         return self.response_error / abs(self.response_value)
@@ -374,10 +385,84 @@ def sandwich_uncertainty_propagation(
 ) -> UncertaintyResult:
     """Propagate nuclear-data uncertainty with ``S.T @ C @ S``.
 
-    ``sdf_data`` may be an :class:`SDFData` or a format-neutral
-    :class:`SensitivityProfile`. Alignment is strict by default. Use
+    *sdf_data* may be an :class:`~kika.sensitivities.sdf.SDFData` or a format-neutral
+    :class:`~kika.sensitivities.profile.SensitivityProfile`. Alignment is strict by default. Use
     ``missing="drop"`` only when excluding uncovered parameters is intended;
     the returned ``alignment_report`` records every exclusion and alias.
+
+    The sum runs over the flat axis built by :func:`align_sensitivity_covariance`:
+    parameters (nuclide, MT, and Legendre order for MT 4000 and above) in sorted
+    order, each with its groups in ascending energy. The sensitivities are relative
+    coefficients and the covariance is relative, so the variance is a relative variance
+    (fraction squared, not percent) and ``total_uncertainty`` a relative sigma. A
+    sensitivity with no covariance is an error, or is dropped with ``missing="drop"``;
+    a covariance with no sensitivity is ignored; a pair of parameters with no
+    cross block counts as zero covariance.
+
+    Parameters
+    ----------
+    sdf_data
+        The sensitivity profile. Its ``response`` must be finite and non-zero.
+    cov_mat
+        One cross-section covariance or a sequence of them. At least one of *cov_mat*
+        and *legendre_cov_mat* is required.
+    legendre_cov_mat
+        One multigroup Legendre covariance or a sequence of them.
+    reaction_filter : dict, optional
+        Which reactions to keep, as built by :func:`filter_reactions_by_nuclide` or
+        :func:`filter_reactions_by_type`. A key ``"ALL_NUCLIDES"`` maps to a list of MTs kept
+        for every nuclide (other keys are then ignored); otherwise a ZAID key maps to the
+        MTs kept for that nuclide, an empty list meaning all of them, and a nuclide with
+        no key is removed. None keeps everything. MT 1 is always removed and MT 0 is kept
+        only when listed explicitly. Legendre reactions are matched by their
+        sensitivity MT (4000 plus the order).
+    nubar_mode : {"total", "components"} or dict
+        For a nuclide with MT 452 and at least one of MT 455 and 456, which view of
+        nu-bar to keep so that it is not counted twice. ``"components"`` keeps MT 455
+        and 456 and drops MT 452 only when both are present; otherwise (and for
+        ``"total"``) MT 452 is kept and the components dropped. A dict maps ZAID to a
+        mode; a nuclide not in it uses ``"total"``. A warning is issued for each drop.
+    energy_tolerance
+        Relative tolerance of the grid comparisons (``energy_rtol`` of
+        :func:`align_sensitivity_covariance`).
+    verbose
+        Log the nu-bar decisions and the largest contributions.
+    bootstrap
+        Estimate a confidence interval on the relative uncertainty by redrawing the
+        sensitivities as ``S + sigma_S * N(0, 1)`` per element (``sigma_S`` the absolute
+        sensitivity uncertainties, independent across elements) and recomputing
+        ``sqrt(abs(S.T @ C @ S))``. The covariance is not resampled. Needs a finite
+        sensitivity uncertainty for every aligned element.
+    n_bootstrap
+        Number of draws; at least 2 when *bootstrap* is True, otherwise unused.
+    ci_level
+        Confidence level of the interval, strictly between 0 and 1 (equal-tailed
+        percentiles).
+    bootstrap_seed
+        Seed of the random generator; None draws a fresh one.
+    alias_policy : {"exact", "tsurfer"}
+        As in :func:`align_sensitivity_covariance`.
+    missing : {"error", "drop"}
+        As in :func:`align_sensitivity_covariance`.
+
+    Returns
+    -------
+    UncertaintyResult
+        Total and per-parameter variances, relative uncertainty, optional bootstrap
+        statistics and the alignment report.
+
+    Raises
+    ------
+    ValueError
+        If neither covariance is given, *ci_level* is not in (0, 1), *n_bootstrap* is
+        below 2 with *bootstrap*, the bootstrap lacks finite sensitivity uncertainties,
+        the profile's response is None or zero, no reaction remains after the filters,
+        or an input of :func:`align_sensitivity_covariance` is invalid.
+    AlignmentError
+        As in :func:`align_sensitivity_covariance`, including
+        :class:`MissingCovarianceError` when ``missing="error"``.
+    TypeError
+        If *sdf_data* is neither of the types above.
     """
     if cov_mat is None and legendre_cov_mat is None:
         raise ValueError("At least one covariance matrix (cov_mat or legendre_cov_mat) must be provided")
