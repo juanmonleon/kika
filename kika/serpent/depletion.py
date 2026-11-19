@@ -50,7 +50,22 @@ DEP_PROPERTY_LABELS = {
 
 @dataclass
 class DepletionMaterial:
-    """Burnup-dependent data for a single material."""
+    """Burnup-dependent data for a single material.
+
+    A user gets it from ``DepletionFile.materials``.
+
+    Attributes
+    ----------
+    name : str
+        Material name as in the ``MAT_<name>_<PROP>`` variables of the file.
+    properties : dict of str to numpy.ndarray
+        By property name (``"VOLUME"``, ``"BURNUP"``, ``"ADENS"``, ``"MDENS"``,
+        ``"A"``, ``"H"``, ``"SF"``, ``"GSRC"``, ``"ING_TOX"``, ``"INH_TOX"``). A
+        per-isotope property has shape ``(n_isotopes + 2, n_steps)``: the isotopes in
+        the order of ``DepletionFile.zai``, then a "lost" row and a "total" row.
+        A property the file writes with a single value per step has shape
+        ``(1, n_steps)``.
+    """
     name: str
     properties: Dict[str, np.ndarray] = field(default_factory=dict)
     # Each property → shape (n_isotopes + 2, n_steps)
@@ -58,26 +73,66 @@ class DepletionMaterial:
 
     @property
     def available_properties(self) -> List[str]:
+        """Sorted names of the properties present for this material."""
         return sorted(self.properties.keys())
 
     def get_isotope_evolution(
         self, prop: str, isotope_idx: int
     ) -> Optional[np.ndarray]:
-        """Time evolution of a single isotope, shape ``(n_steps,)``."""
+        """Time evolution of a single isotope, shape ``(n_steps,)``.
+
+        Parameters
+        ----------
+        prop : str
+            Property name, a key of ``properties``.
+        isotope_idx : int
+            Row of the property array: the position in ``DepletionFile.zai``. It is
+            not checked against the isotope rows, so ``n_isotopes`` and
+            ``n_isotopes + 1`` return the "lost" and "total" rows.
+
+        Returns
+        -------
+        numpy.ndarray or None
+            The row, one value per burnup step. None if the property is absent or
+            *isotope_idx* is past the last row.
+        """
         arr = self.properties.get(prop)
         if arr is None or isotope_idx >= arr.shape[0]:
             return None
         return arr[isotope_idx, :]
 
     def get_total(self, prop: str) -> Optional[np.ndarray]:
-        """Total (last row) for a property, shape ``(n_steps,)``."""
+        """Total (last row) for a property, shape ``(n_steps,)``.
+
+        Parameters
+        ----------
+        prop : str
+            Property name, a key of ``properties``.
+
+        Returns
+        -------
+        numpy.ndarray or None
+            The last row of the property array; None if the property is absent.
+        """
         arr = self.properties.get(prop)
         if arr is None:
             return None
         return arr[-1, :]
 
     def get_lost(self, prop: str) -> Optional[np.ndarray]:
-        """Lost (second-to-last row), shape ``(n_steps,)``."""
+        """Lost (second-to-last row), shape ``(n_steps,)``.
+
+        Parameters
+        ----------
+        prop : str
+            Property name, a key of ``properties``.
+
+        Returns
+        -------
+        numpy.ndarray or None
+            The second-to-last row of the property array; None if the property is
+            absent.
+        """
         arr = self.properties.get(prop)
         if arr is None:
             return None
@@ -90,8 +145,28 @@ class DepletionMaterial:
 
 @dataclass
 class DepletionFile:
-    """All depletion data from a Serpent ``_dep.m`` file."""
-    zai: List[int] = field(default_factory=list)
+    """All depletion data from a Serpent ``_dep.m`` file.
+
+    A user gets one from :func:`read_depletion_file`.
+
+    Attributes
+    ----------
+    zai : list of int
+        ZAI codes of the tracked isotopes, in the row order of the property arrays.
+        The terminating markers of the file's ``ZAI`` vector (0 and 666) are removed.
+    names : list of str
+        The entries of the ``NAMES`` variable, stripped of padding.
+    materials : dict of str to DepletionMaterial
+        By material name.
+    totals : dict of str to numpy.ndarray
+        The ``TOT_<PROP>`` variables, by property name, with the same shapes as the
+        material properties.
+    burnup : numpy.ndarray
+        The ``BU`` vector, one value per step, as written in the file.
+    days : numpy.ndarray
+        The ``DAYS`` vector, one value per step.
+    """
+    zai:List[int] = field(default_factory=list)
     names: List[str] = field(default_factory=list)
     materials: Dict[str, DepletionMaterial] = field(default_factory=dict)
     totals: Dict[str, np.ndarray] = field(default_factory=dict)
@@ -105,18 +180,34 @@ class DepletionFile:
 
     @property
     def n_burnup_steps(self) -> int:
+        """Number of burnup steps, the length of ``burnup``."""
         return len(self.burnup)
 
     @property
     def material_names(self) -> List[str]:
+        """Sorted names of the materials."""
         return sorted(self.materials.keys())
 
     @property
     def n_materials(self) -> int:
+        """Number of materials."""
         return len(self.materials)
 
     def zai_to_symbol(self, zai: int) -> str:
-        """Convert ZAI code to element symbol (e.g., 922350 → U-235)."""
+        """Convert a ZAI code to a nuclide label (e.g., 922350 → U-235).
+
+        Parameters
+        ----------
+        zai : int
+            Code in the form ``ZZAAAI``. The last digit (the isomer) is dropped.
+            0 gives ``"total"``.
+
+        Returns
+        -------
+        str
+            Symbol and mass number, ``"<symbol>-<A>"``. An element missing from the
+            built-in table (it covers most elements up to Fm) gives ``"Z<z>-<A>"``.
+        """
         if zai == 0:
             return "total"
         z = zai // 10000

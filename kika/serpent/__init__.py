@@ -3,6 +3,16 @@
 # Public API for Serpent Monte Carlo code support.
 # ──────────────────────────────────────────────────────────────────────────────
 
+"""Readers for the Serpent input deck and its text outputs.
+
+The package parses the cards of an input file (detectors, energy and time grids,
+``sens`` cards) and the MATLAB-format outputs of a run: sensitivities (``.sens``),
+detectors (``_det.m``), run results (``_res.m``), per-cycle history (``_his.m``) and
+depletion (``_dep.m``). Each ``read_*`` function takes a path or the raw text. The
+output readers return a container of numpy arrays holding the numbers as Serpent
+writes them; the input reader returns a ``SerpentInput`` of dataclasses.
+"""
+
 # Sensitivity output (.sens files)
 from .sens import (
     PertCategory,

@@ -61,6 +61,31 @@ def _split_response_name(resp: str) -> Tuple[str, Optional[int]]:
 
 
 def parse_sensitivity_text(text: str) -> SensitivityFile:
+    """Parse the text of a Serpent ``.sens`` file.
+
+    Parameters
+    ----------
+    text : str
+        Full content of the file.
+
+    Returns
+    -------
+    SensitivityFile
+        With the ``ADJ_PERT_<response>_SENS`` and ``_SENS_E_INT`` blocks grouped by
+        base response (the name before ``_BIN_<n>``). Values, errors and energy edges
+        are those of the file: nothing is reordered, normalised or converted. A base
+        with one bin keeps the bare name unless the file wrote ``_BIN_0``.
+
+    Raises
+    ------
+    ParseError
+        (A ``RuntimeError`` of ``kika.serpent.parse_sens``.) If ``SENS_N_MAT``,
+        ``SENS_N_ZAI``, ``SENS_N_PERT`` or ``SENS_N_ENE`` is missing; a list or block
+        (``SENS_MAT_LIST``, ``SENS_ZAI_LIST``, ``SENS_PERT_LIST``, ``SENS_E``,
+        ``SENS_LETHARGY_WIDTHS``) is missing or has a length that disagrees with the
+        counts; no sensitivity block is found; a block has the wrong number of values;
+        or a response bin lacks its energy-dependent or integrated block.
+    """
     # ----------------------
     # Header scalars
     # ----------------------
@@ -201,10 +226,23 @@ def parse_sensitivity_text(text: str) -> SensitivityFile:
 
 
 def read_sensitivity_file(path_or_text: str) -> SensitivityFile:
-    """Load from a filesystem path or from a raw text string.
+    """Load a Serpent ``.sens`` file from a path or from its text.
 
-    If `path_or_text` points to an existing file, it is read from disk. Otherwise
-    the string is treated as raw content.
+    Parameters
+    ----------
+    path_or_text : str
+        Path of an existing file, which is read from disk. Any other string is taken
+        as the content of the file.
+
+    Returns
+    -------
+    SensitivityFile
+
+    Raises
+    ------
+    ParseError
+        As for :func:`parse_sensitivity_text`. A path that does not exist is parsed
+        as text and fails here.
     """
     text = _read_text(path_or_text)
     return parse_sensitivity_text(text)
