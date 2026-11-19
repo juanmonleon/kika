@@ -69,6 +69,7 @@ class Nuclide:
 
     @property
     def element(self) -> Optional[str]:
+        """Element symbol for atomic number ``zaid // 1000``, or None if unknown."""
         atomic_number = self.zaid // 1000
         return ATOMIC_NUMBER_TO_SYMBOL.get(atomic_number)
 
@@ -79,6 +80,7 @@ class Nuclide:
 
     @property
     def is_natural(self) -> bool:
+        """True for a natural element: ``zaid`` above 1000 and a multiple of 1000."""
         return _is_natural_zaid(self.zaid)
 
     def convert_natural_element(self) -> None:
@@ -169,6 +171,13 @@ class NuclideAccessor:
     >>> material.nuclide[26056]    # Access by ZAID
     >>> material.nuclide['Fe']     # Access natural Fe
     >>> material.nuclide[26000]    # Access natural Fe by ZAID
+
+    Parameters
+    ----------
+    nuclide_dict
+        The dictionary of :class:`~kika.mcnp.material.Nuclide` entries, keyed by
+        symbol, that the accessor wraps. It is not copied: changes through the
+        accessor change it.
     """
 
     def __init__(self, nuclide_dict: Dict[str, Nuclide]):
@@ -243,7 +252,20 @@ class NuclideAccessor:
         return self._dict.items()
 
     def get(self, key: Union[str, int], default=None):
-        """Get nuclide by symbol or ZAID with optional default."""
+        """Get nuclide by symbol or ZAID with optional default.
+
+        Parameters
+        ----------
+        key
+            Symbol or ZAID, normalised as in ``accessor[key]``.
+        default
+            Returned when *key* is not present or is not a valid symbol.
+
+        Returns
+        -------
+        ~kika.mcnp.material.Nuclide or object
+            The nuclide, or *default*.
+        """
         try:
             return self[key]
         except (KeyError, ValueError):
@@ -312,10 +334,12 @@ class Material:
 
     @property
     def is_atomic(self) -> bool:
+        """True when ``fraction_type`` is ``'ao'`` (atomic fractions)."""
         return self.fraction_type == "ao"
 
     @property
     def is_weight(self) -> bool:
+        """True when ``fraction_type`` is ``'wo'`` (weight fractions)."""
         return self.fraction_type == "wo"
 
     @property
@@ -602,11 +626,19 @@ class Material:
         density : float
             Density magnitude.
         unit : str
-            Unit string (``'g/cc'`` or ``'kg/m3'``); case-insensitive.
+            ``'g/cc'``, ``'kg/m3'`` or ``'atoms/b-cm'``, case-insensitive and ignoring
+            spaces; the aliases ``'g/cm3'``, ``'g/cm^3'``, ``'kg/m^3'``,
+            ``'atoms/barn-cm'`` and ``'a/b-cm'`` are accepted and stored under the
+            canonical name.
 
         Returns
         -------
         None
+
+        Raises
+        ------
+        ValueError
+            If *unit* is none of the three.
         """
         normalized_unit = _normalize_density_unit(unit)
         if normalized_unit not in {"g/cc", "kg/m3", "atoms/b-cm"}:
@@ -738,12 +770,25 @@ class Material:
         return atomic_mass
 
     def to_weight_fraction(self) -> Material:
-        """Convert atomic fractions to weight fractions (stored as positives).
+        """Convert atomic fractions to weight fractions, in place.
+
+        The stored fractions are always positive; ``fraction_type`` is what says they
+        are atomic or weight. Each fraction ``x`` becomes ``x * m / sum(x * m)``, so
+        the result sums to 1, with ``m`` the atomic mass of the nuclide (the
+        abundance-weighted mean for a natural element). Without a tabulated mass,
+        ``m`` is the mass number for an isotope and 1.0 for a natural element with
+        no abundance data. A material that is already ``'wo'`` is returned unchanged,
+        without renormalising.
 
         Returns
         -------
         Material
-            Self reference for chaining.
+            This material, with ``fraction_type`` ``'wo'``.
+
+        Raises
+        ------
+        ValueError
+            If the total of ``x * m`` is zero or negative (for instance, no nuclides).
         """
         if self.is_weight:
             return self
@@ -764,12 +809,25 @@ class Material:
         return self
 
     def to_atomic_fraction(self) -> Material:
-        """Convert weight fractions to atomic fractions (stored as positives).
+        """Convert weight fractions to atomic fractions, in place.
+
+        The stored fractions are always positive; ``fraction_type`` is what says they
+        are atomic or weight. Each fraction ``w`` becomes ``(w / m) / sum(w / m)``, so
+        the result sums to 1, with ``m`` the atomic mass of the nuclide (the
+        abundance-weighted mean for a natural element). Without a tabulated mass,
+        ``m`` is the mass number for an isotope and 1.0 for a natural element with
+        no abundance data. A material that is already ``'ao'`` is returned unchanged,
+        without renormalising.
 
         Returns
         -------
         Material
-            Self reference for chaining.
+            This material, with ``fraction_type`` ``'ao'``.
+
+        Raises
+        ------
+        ValueError
+            If the total of ``w / m`` is zero or negative (for instance, no nuclides).
         """
         if self.is_atomic:
             return self
@@ -1405,7 +1463,19 @@ class Material:
 
 @dataclass
 class MaterialCollection:
-    """Container class for material objects."""
+    """Container of materials keyed by ID, built by hand or read from an input file.
+
+    :meth:`~kika.mcnp.material.MaterialCollection.from_mcnp`,
+    :meth:`~kika.mcnp.material.MaterialCollection.from_serpent` and
+    :func:`~kika.materials.read_serpent_materials` return one. Iterating gives the
+    materials in insertion order.
+
+    Attributes
+    ----------
+    by_id
+        The materials, keyed by ``Material.id``. Serpent materials are keyed by
+        their position in the file (1, 2, ...); ``by_name`` indexes them by name.
+    """
 
     by_id: Dict[int, Material] = field(default_factory=dict)
 

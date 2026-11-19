@@ -72,6 +72,31 @@ def read_material(lines: List[str], start_index: int) -> Tuple[Optional[Material
     - 'c KIKA_MAT_NAME: <name>' comment before material card
     - '$ KIKA_DENSITY: <mass> g/cc, <atomic> atoms/b-cm' inline comment
     - '$ <SYMBOL>' inline comments after nuclide fractions
+
+    A negative ZAID fraction is a weight fraction (``'wo'``) and a positive one an
+    atomic fraction (``'ao'``); the stored fraction is the absolute value, and the
+    material's ``fraction_type`` is the one the card uses (``'ao'`` when it has no
+    nuclides). Continuation lines (``&`` at the end of the line, or a following
+    line that starts with a number) are read as part of the card. The ``KIKA_DENSITY`` mass density
+    is stored in g/cc; the atomic density in the comment is not used.
+
+    Parameters
+    ----------
+    lines
+        Lines of the MCNP input.
+    start_index
+        Index in *lines* of the first line of the card.
+
+    Returns
+    -------
+    tuple of (~kika.mcnp.material.Material or None, int)
+        The material, or None if the line at *start_index* is not an ``m<n>`` card,
+        and the index of the first line not read.
+
+    Raises
+    ------
+    ValueError
+        If the card mixes positive and negative fractions.
     """
     i = start_index
 
