@@ -1,0 +1,60 @@
+"""Error bars as one path per direction: ``Axes.errorbar`` makes one path per point,
+and on a log axis transforms each in Python (3 x 20 000 points with x and y errors
+take seconds). Here the segments of a direction share one ``Line2D``, split by NaN."""
+
+from typing import Optional
+
+import numpy as np
+
+
+def _below_above(err, n: int):
+    arr = np.asarray(err, dtype=float)
+    try:
+        arr = np.broadcast_to(arr, (2, n)) if arr.ndim == 2 else np.broadcast_to(arr, (n,))
+    except ValueError:
+        raise ValueError(f"errors must be a scalar, ({n},) or (2, {n}); got shape {np.shape(err)}")
+    if arr.ndim == 2:
+        return np.abs(arr[0]), np.abs(arr[1])
+    return np.abs(arr), np.abs(arr)
+
+
+def _polyline(a0, a1, b):
+    gap = np.full_like(a0, np.nan)
+    return np.column_stack([a0, a1, gap]).ravel(), np.column_stack([b, b, gap]).ravel()
+
+
+def draw_errorbars(ax, x, y, yerr=None, xerr=None, *, color=None, linewidth: float = 1.5,
+                   capsize: float = 0.0, capthick: Optional[float] = None,
+                   alpha: Optional[float] = None, zorder: float = 2):
+    """``ax.errorbar(x, y, yerr, xerr, fmt='none', ...)``, except that overlapping bars under ``alpha`` do not darken each other."""
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    n = x.size
+    if y.size != n:
+        raise ValueError(f"x and y must have the same length, got {n} and {y.size}")
+    if n == 0:
+        return []
+
+    common = {'color': color, 'alpha': alpha, 'zorder': zorder}
+    cap = {**common, 'linestyle': 'none', 'markersize': 2.0 * capsize, 'markeredgecolor': color}
+    if capthick is not None:
+        cap['markeredgewidth'] = capthick
+
+    spans = []
+    for err, dep, indep, horizontal in ((xerr, x, y, True), (yerr, y, x, False)):
+        if err is not None:
+            below, above = _below_above(err, n)
+            spans.append((dep - below, dep + above, indep, horizontal))
+
+    # Bars before caps, as Axes.errorbar adds them: the caps sit on top.
+    artists = []
+    for lo, hi, indep, horizontal in spans:
+        a, b = _polyline(lo, hi, indep)
+        xs, ys = (a, b) if horizontal else (b, a)
+        artists += ax.plot(xs, ys, linewidth=linewidth, solid_capstyle='butt', **common)
+    if capsize > 0:
+        for lo, hi, indep, horizontal in spans:
+            ends, at = np.r_[lo, hi], np.r_[indep, indep]
+            xs, ys = (ends, at) if horizontal else (at, ends)
+            artists += ax.plot(xs, ys, marker='|' if horizontal else '_', **cap)
+    return artists

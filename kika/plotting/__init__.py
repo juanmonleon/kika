@@ -52,6 +52,7 @@ from .styles import (
     style_parts,
 )
 from .plot_builder import PlotBuilder
+from .errorbars import draw_errorbars
 from .heatmap_builder import HeatmapBuilder
 from .heatmap_grid import grid_columns, heatmap_grid, shared_norm
 from .comparison import (
@@ -96,6 +97,7 @@ __all__ = [
     'style_names',
     'style_parts',
     'PlotBuilder',
+    'draw_errorbars',
     'HeatmapBuilder',
     'heatmap_grid',
     'grid_columns',
