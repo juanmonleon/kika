@@ -39,7 +39,7 @@ Usage:
     >>>
     >>> # Compute σE at 1.406 MeV
     >>> sigma_E = compute_energy_resolution_tof(1.406, config)
-    >>> print(f"σE = {sigma_E * 1000:.2f} keV")  # ~3.3 keV
+    >>> print(f"σE = {sigma_E * 1000:.2f} keV")  # ~7.2 keV
     >>>
     >>> # Compute folded differential cross section
     >>> mu_grid, dsigma_domega, info = compute_folded_differential_xs(
@@ -74,16 +74,19 @@ from kika.algebra import fold_tabulated
 @dataclass
 class EnergyFoldingConfig:
     """
-    Configuration for energy folding calculations.
+    Time-of-flight parameters of a measurement, from which the energy resolution follows.
 
-    Attributes:
-        flight_path_m: Flight path length in meters (default: GELINA 27.037 m)
-        delta_t_ns: Time resolution FWHM in nanoseconds (default: 5.0 ns)
-                    Note: This is the Full Width at Half Maximum of the time response,
-                    following standard experimental convention (GELINA, ORELA, n_TOF).
+    Passed as ``config`` to :func:`compute_energy_resolution_tof` and
+    :func:`compute_folded_differential_xs`. The fold itself has nothing to configure:
+    it is exact, so there is no window or sample count.
 
-    The fold itself has nothing to configure: it is exact
-    (:mod:`kika.algebra.fold`), so there is no window or sample count.
+    Attributes
+    ----------
+    flight_path_m : float
+        Flight path length in metres. Default 27.037.
+    delta_t_ns : float
+        Time resolution in nanoseconds, as a full width at half maximum (FWHM), not a
+        standard deviation. Default 5.0.
     """
     flight_path_m: float = 27.037  # GELINA default
     delta_t_ns: float = 5.0        # Time resolution FWHM (not sigma!)
@@ -113,9 +116,9 @@ def tof_energy_resolution(
     :math:`t = L / v` and :math:`v = c\sqrt{2E/m_n}` (non-relativistic; the
     correction is below 1% up to ~10 MeV).
 
-    **This function is the single definition of that formula.**  It previously
-    existed five times across the repo in two mutually incompatible conventions
-    differing by the factor :data:`FWHM_TO_SIGMA` — see ``delta_t_is_fwhm``.
+    This function is the single definition of that formula. The result is a standard
+    deviation in MeV (absolute, not relative); the two readings of ``delta_t_ns``
+    differ by the factor ``FWHM_TO_SIGMA`` (see ``delta_t_is_fwhm``).
 
     Parameters
     ----------
@@ -129,13 +132,15 @@ def tof_energy_resolution(
         Whether ``delta_t_ns`` is a **FWHM** (the usual experimental convention:
         pulse widths and detector timing are normally quoted that way) or
         already a standard deviation.  When True the result is divided by
-        :data:`FWHM_TO_SIGMA`.  There is no safe default that suits both
-        readings, so callers that care should pass this explicitly.
+        ``FWHM_TO_SIGMA`` (:math:`2\sqrt{2\ln 2}`).  There is no safe default that
+        suits both readings, so callers that care should pass this explicitly.
 
     Returns
     -------
     float
-        :math:`\sigma_E` in MeV (a standard deviation, either way).
+        :math:`\sigma_E` in MeV (a standard deviation, either way); 0.0 when
+        ``energy_mev`` is not positive. The time of flight is ``flight_path_m``
+        divided by the non-relativistic neutron speed, in ns.
     """
     if energy_mev <= 0.0:
         return 0.0
@@ -162,23 +167,36 @@ def compute_energy_resolution_tof(
 
     This function:
     1. Computes the FWHM of energy resolution: FWHM_E = E × 2 × Δt / t
-    2. Converts to standard deviation: σE = FWHM_E / 2.35482
+    2. Converts to standard deviation: σE = FWHM_E / FWHM_TO_SIGMA (2.35482...)
 
-    Parameters:
-        energy_mev: Neutron energy in MeV
-        config: EnergyFoldingConfig with TOF parameters (optional)
-        flight_path_m: Flight path in meters (overrides config if provided)
-        delta_t_ns: Time resolution FWHM in nanoseconds (overrides config if provided)
-                    Note: This should be the FWHM of the time response, NOT sigma.
+    It is :func:`tof_energy_resolution` with ``delta_t_is_fwhm=True``, and the time of
+    flight ``t`` is the flight path over the non-relativistic neutron speed.
 
-    Returns:
-        Energy resolution σE (standard deviation) in MeV
+    Parameters
+    ----------
+    energy_mev
+        Neutron energy in MeV.
+    config
+        Source of the flight path and time resolution. None is a default
+        :class:`EnergyFoldingConfig`.
+    flight_path_m
+        Flight path in metres. Overrides ``config.flight_path_m`` when given.
+    delta_t_ns
+        Time resolution in nanoseconds, the FWHM of the time response and not its
+        standard deviation. Overrides ``config.delta_t_ns`` when given.
 
-    Examples:
+    Returns
+    -------
+    float
+        Energy resolution σE, a standard deviation in MeV (absolute, not relative);
+        0.0 when ``energy_mev`` is not positive.
+
+    Examples
+    --------
         >>> # Using config
         >>> config = EnergyFoldingConfig(flight_path_m=27.037, delta_t_ns=10.0)
         >>> sigma_E = compute_energy_resolution_tof(1.406, config)
-        >>> print(f"σE = {sigma_E * 1000:.2f} keV")  # ~3.3 keV
+        >>> print(f"σE = {sigma_E * 1000:.2f} keV")  # ~7.2 keV
 
         >>> # Using explicit parameters
         >>> sigma_E = compute_energy_resolution_tof(1.0, flight_path_m=27.037, delta_t_ns=5.0)
@@ -210,25 +228,31 @@ def fold_cross_section(
     """
     Compute energy-folded cross section using ACE data.
 
-    Thin ACE adapter over :func:`kika.algebra.fold.fold_tabulated`:
+    Thin ACE adapter over :func:`kika.algebra.fold_tabulated`:
 
         σ_folded = ∫ σ(E) × G(E; E₀, σE) dE / ∫ G(E; E₀, σE) dE
 
     Exact for the lin-lin interpolant of the ACE cross section (closed form,
-    :func:`kika.algebra.fold.fold_tabulated`), held at its end values past
-    the table.  **Values changed twice**: in September 2026 away from a
-    Gaussian-weighted average of the tabulated points (8.6 % off on Fe-56
-    elastic), and in October 2026 to the exact integral (up to 6e-4 from the
-    trapezoid rule in between).
+    :func:`kika.algebra.fold_tabulated`), held at its end values past the table.
 
-    Parameters:
-        ace_data: ACE data object from kika.read_ace()
-        target_energy_mev: Central energy for folding (MeV)
-        mt: Reaction MT number (e.g., 2 for elastic)
-        sigma_E_mev: Energy resolution σE (MeV)
+    Parameters
+    ----------
+    ace_data
+        ACE data object, as returned by ``kika.read_ace()``.
+    target_energy_mev
+        Central energy E₀ of the fold, in MeV.
+    mt
+        Reaction MT number (e.g. 2 for elastic).
+    sigma_E_mev
+        Standard deviation σE of the Gaussian kernel, in MeV (absolute). Zero or
+        negative gives the unfolded value.
 
-    Returns:
-        Tuple of (folded_xs, unfolded_xs) in barns
+    Returns
+    -------
+    tuple of float
+        ``(folded_xs, unfolded_xs)`` in barns. The unfolded value is the table
+        linearly interpolated at ``target_energy_mev`` and held at its end values past
+        the table.
     """
     # Get cross section data from ACE
     xs_data = ace_data.cross_section.to_plot_data(mt=mt)
@@ -251,20 +275,26 @@ def endf_angular_distribution(
 ) -> np.ndarray:
     """
     Compute normalized angular distribution from ENDF Legendre coefficients.
-    
+
     ENDF format:
         f(μ) = (1/2) × Σ_{l=0}^{L} (2l+1) × a_l × P_l(μ)
-    
+
     where a_0 = 1 (implicit) and a_coeffs = [a_1, a_2, ..., a_L]
-    
+
     The result integrates to 1 over μ ∈ [-1, 1].
-    
-    Parameters:
-        mu: Cosine of scattering angle (array)
-        a_coeffs: ENDF coefficients [a_1, a_2, ..., a_L] (a_0=1 implicit)
-    
-    Returns:
-        Angular distribution f(μ) (normalized PDF)
+
+    Parameters
+    ----------
+    mu : array_like
+        Cosine of the scattering angle.
+    a_coeffs : array_like
+        ENDF coefficients ``[a_1, a_2, ..., a_L]``; a_0 = 1 is implicit. An empty
+        sequence gives the isotropic value 0.5.
+
+    Returns
+    -------
+    numpy.ndarray
+        f(μ), per unit μ, with the shape of ``mu`` (at least one-dimensional).
     """
     mu = np.atleast_1d(mu)
     
@@ -292,18 +322,28 @@ def fold_angular_distribution(
     This folds the angular distribution PDF (shape only, not cross section),
     through the ACE container's own fold: nodes on every incident energy the
     distribution tabulates, weights exact for its lin-lin interpolation in
-    energy (:func:`kika.algebra.fold.gaussian_fold_nodes`).  Until October
-    2026 this averaged 21 uniform samples over +-4 sigma, a rule of its own.
+    energy (:func:`kika.algebra.gaussian_fold_nodes`).
 
-    Parameters:
-        ace_data: ACE data object from kika.read_ace()
-        target_energy_mev: Central energy for folding (MeV)
-        mt: Reaction MT number
-        sigma_E_mev: Energy resolution σE (MeV)
-        num_mu_points: Number of μ grid points
+    Parameters
+    ----------
+    ace_data
+        ACE data object, as returned by ``kika.read_ace()``.
+    target_energy_mev
+        Central energy of the fold, in MeV.
+    mt
+        Reaction MT number.
+    sigma_E_mev
+        Standard deviation σE of the Gaussian kernel in energy, in MeV (absolute).
+    num_mu_points
+        Number of points of the μ grid.
 
-    Returns:
-        Tuple of (mu_grid, folded_pdf, unfolded_pdf)
+    Returns
+    -------
+    tuple of numpy.ndarray
+        ``(mu_grid, folded_pdf, unfolded_pdf)``, each of shape ``(num_mu_points,)``.
+        ``mu_grid`` runs from -1 to 1 ascending; both PDFs are the neutron angular
+        PDF per unit μ, interpolated linearly onto it. ``unfolded_pdf`` is the
+        distribution at ``target_energy_mev``.
     """
     mu_grid = np.linspace(-1, 1, num_mu_points)
 
@@ -359,29 +399,49 @@ def compute_folded_differential_xs(
         - "angular_only": Fold angular distribution only, use unfolded XS
         - "both": Fold both cross section and angular distribution
     
-    Parameters:
-        ace_data: ACE data object from kika.read_ace()
-        target_energy_mev: Central energy for folding (MeV)
-        mt: Reaction MT number (e.g., 2 for elastic scattering)
-        config: EnergyFoldingConfig with TOF parameters (uses defaults if None)
-        mode: Folding mode - "xs_only", "angular_only", or "both"
-        endf_coeffs: ENDF Legendre coefficients [a_1, ..., a_L] for custom angular
-                     distribution. If None, uses ACE angular distributions.
-        sigma_E_mev: Override energy resolution (computed from TOF if None)
-        num_mu_points: Number of μ grid points for output
-    
-    Returns:
-        Tuple of:
-        - mu_grid: cos(θ) values, shape (num_mu_points,)
-        - dsigma_domega: dσ/dΩ in b/sr, shape (num_mu_points,)
-        - info: Dict with diagnostic information:
-            - sigma_E_mev: Energy resolution used
-            - folded_xs: Folded cross section (barns)
-            - unfolded_xs: Unfolded cross section (barns)
-            - xs_ratio: folded_xs / unfolded_xs
-            - mode: Folding mode used
-    
-    Examples:
+    The result is ``dσ/dΩ = σ × f(μ) / (2π)``, with σ the folded cross section in
+    "xs_only" and "both" (the unfolded one in "angular_only") and f(μ) the angular
+    PDF per unit μ.
+
+    Parameters
+    ----------
+    ace_data
+        ACE data object, as returned by ``kika.read_ace()``.
+    target_energy_mev
+        Central energy of the fold, in MeV.
+    mt
+        Reaction MT number (e.g. 2 for elastic scattering).
+    config
+        Source of the flight path and time resolution (FWHM) from which σE is
+        computed. None is a default :class:`EnergyFoldingConfig`. Unused for σE when
+        ``sigma_E_mev`` is given; it is still returned in ``info["config"]``.
+    mode : {"xs_only", "angular_only", "both"}
+        What is folded; see above.
+    endf_coeffs
+        ENDF Legendre coefficients ``[a_1, ..., a_L]`` for the angular distribution.
+        Used only in "xs_only" mode; None takes the ACE angular distribution at
+        ``target_energy_mev``. In the other modes it is ignored.
+    sigma_E_mev
+        Standard deviation σE of the energy resolution, in MeV (absolute). None
+        computes it with :func:`compute_energy_resolution_tof` at
+        ``target_energy_mev`` from ``config``.
+    num_mu_points
+        Number of points of the μ grid.
+
+    Returns
+    -------
+    mu_grid : numpy.ndarray
+        cos(θ), ascending from -1 to 1, shape ``(num_mu_points,)``.
+    dsigma_domega : numpy.ndarray
+        dσ/dΩ in b/sr, shape ``(num_mu_points,)``.
+    info : dict
+        ``sigma_E_mev`` and ``sigma_E_kev`` (the σE used), ``folded_xs`` and
+        ``unfolded_xs`` (barns; equal in "angular_only"), ``xs_ratio``
+        (``folded_xs / unfolded_xs``, 1.0 when ``unfolded_xs`` is not positive),
+        ``mode`` and ``config``.
+
+    Examples
+    --------
         >>> import kika
         >>> ace = kika.read_ace("path/to/file.ace")
         >>> 
@@ -488,15 +548,33 @@ def compute_unfolded_differential_xs(
     This is equivalent to calling compute_folded_differential_xs with
     σE = 0, but more efficient as it skips the folding calculations.
     
-    Parameters:
-        ace_data: ACE data object from kika.read_ace()
-        target_energy_mev: Energy in MeV
-        mt: Reaction MT number
-        endf_coeffs: Optional ENDF coefficients [a_1, ..., a_L]
-        num_mu_points: Number of μ grid points
-    
-    Returns:
-        Tuple of (mu_grid, dsigma_domega, info)
+    The result is ``dσ/dΩ = σ × f(μ) / (2π)``, with σ the cross section interpolated
+    linearly at the energy and f(μ) the angular PDF per unit μ.
+
+    Parameters
+    ----------
+    ace_data
+        ACE data object, as returned by ``kika.read_ace()``.
+    target_energy_mev
+        Energy in MeV.
+    mt
+        Reaction MT number.
+    endf_coeffs
+        ENDF Legendre coefficients ``[a_1, ..., a_L]`` for the angular distribution.
+        None takes the ACE angular distribution at ``target_energy_mev``.
+    num_mu_points
+        Number of points of the μ grid.
+
+    Returns
+    -------
+    mu_grid : numpy.ndarray
+        cos(θ), ascending from -1 to 1, shape ``(num_mu_points,)``.
+    dsigma_domega : numpy.ndarray
+        dσ/dΩ in b/sr, shape ``(num_mu_points,)``.
+    info : dict
+        ``sigma_E_mev`` and ``sigma_E_kev`` (0.0), ``folded_xs`` and ``unfolded_xs``
+        (both the cross section in barns), ``xs_ratio`` (1.0) and ``mode``
+        (``"unfolded"``). It has no ``config`` key.
     """
     mu_grid = np.linspace(-1, 1, num_mu_points)
     
