@@ -130,6 +130,22 @@ def load_mf33_covariance(
     if pendf_path is not None:
         mf3_sections = read_pendf_mf3_sections(pendf_path)
 
+    unified, union_grid, mts_present = build_mf33_covariance(
+        mf33_file, mt_list, mf3_sections, energy_unit=energy_unit, logger=logger,
+    )
+    return unified, mf3_sections, union_grid, mts_present
+
+
+def build_mf33_covariance(
+    mf33_file,
+    mt_list: Sequence[int],
+    mf3_sections: Optional[Dict[int, MF3MT]] = None,
+    *,
+    energy_unit: str = "eV",
+    logger=None,
+) -> Tuple[CrossSectionCovariance, List[float], List[int]]:
+    """Steps 3-6 of :func:`load_mf33_covariance`; an absolute block with no σ in ``mf3_sections`` is dropped."""
+    mf3_sections = mf3_sections or {}
     sibling_sections = dict(mf33_file.sections)
 
     requested_mts = sorted({int(mt) for mt in mt_list})
@@ -140,9 +156,7 @@ def load_mf33_covariance(
             f"[MF33] MTs {missing}: not in MF33; no perturbation applied for these."
         )
     if not mts_present:
-        raise RuntimeError(
-            f"None of MTs {requested_mts} are present in MF33 of {endf_path}"
-        )
+        raise RuntimeError(f"None of MTs {requested_mts} are present in MF33")
 
     per_mt_covs: Dict[int, CrossSectionCovariance] = {}
     for mt in mts_present:
@@ -220,7 +234,7 @@ def load_mf33_covariance(
                 is_relative=True,
             )
 
-    return unified, mf3_sections, list(union_grid), mts_present
+    return unified, list(union_grid), mts_present
 
 
 # ---------------------------------------------------------------------------
