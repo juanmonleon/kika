@@ -136,7 +136,8 @@ def compute_difference(
         * ``'relative'``: ``(comparison - reference) / reference``
         * ``'absolute'``: ``comparison - reference``
     interpolation : str
-        Interpolation method passed to :func:`interpolate_to_grid`. Lin-lin
+        Interpolation method passed to
+        :func:`~kika.algebra.interpolate_to_grid`. Lin-lin
         by default, the law of a PENDF or ACE table; pass the data's own law
         when it states another.
     grid : {'reference', 'comparison', 'union'}
@@ -240,6 +241,47 @@ class ComparisonBuilder:
     2. **Dual-panel** – main overlay on top, difference panel below
        (enabled via :meth:`set_difference_panel`).
 
+    Every method that configures the figure returns the builder, so calls chain.
+    :meth:`build` draws.
+
+    Units. There is no ``set_units``: the figure is drawn in the units of the
+    reference. At :meth:`build`, the comparisons and overlays are converted to the
+    ``x_unit`` and ``y_unit`` of the reference (for a curve from
+    :func:`~kika.plotting.plottable`, the unit its adapter set, else the
+    canonical one of its quantity); a curve of another dimension is left as it
+    is, with a :class:`~kika.plotting.MixedQuantityWarning`, and nothing is
+    converted when the reference has no units. Axis limits and the differences are
+    in those units. The axes are labelled from the quantity and unit of the curves
+    on the main panel only. A difference panel carries no unit, so its energy axis
+    takes the label given to :meth:`set_labels` and, without one, a fixed
+    ``'Energy (MeV)'`` on a log axis or ``'Energy-group index'`` on a linear one,
+    whatever unit the data are in.
+
+    Parameters
+    ----------
+    style : str or Style
+        A registered style name or alias, or a :class:`~kika.plotting.Style`.
+    figsize : tuple of float
+        ``(width, height)`` in inches.
+    dpi : int
+        Dots per inch.
+    font_family : str, optional
+        Font family; None uses the style's own.
+    notebook_mode, interactive : bool, optional
+        Force the notebook layout or interactive backend. None detects them.
+    interpolation : str, optional
+        Law between the points when the curves are put on a common grid
+        (``'lin-lin'``, ``'log-log'``, ...). None takes the law the reference
+        states in its ``interpolation``, and ``'lin-lin'`` when it states none.
+    grid_strategy : {'reference', 'comparison', 'union'}
+        The grid the differences are computed on, as ``grid`` of
+        :func:`~kika.plotting.compute_difference`.
+
+    Raises
+    ------
+    ValueError
+        If ``style`` is not a known style.
+
     Examples
     --------
     >>> fig = (ComparisonBuilder()
@@ -321,13 +363,44 @@ class ComparisonBuilder:
     # ---- fluent API -------------------------------------------------------
 
     def set_reference(self, data: PlotData, **styling) -> 'ComparisonBuilder':
-        """Set the reference (baseline) dataset. A PlotItem is accepted too."""
+        """Set the reference (baseline) dataset. A PlotItem is accepted too.
+
+        Parameters
+        ----------
+        data : PlotData or PlotItem
+            The baseline. Its ``x_unit`` and ``y_unit`` are the units the figure
+            is drawn in (for a curve from :func:`~kika.plotting.plottable`, the
+            unit its adapter set, else the canonical one of its quantity). Calling again replaces it.
+        **styling
+            Styling overrides for this curve (color, linestyle, ...), as in
+            :meth:`PlotBuilder.add_data`.
+
+        Returns
+        -------
+        ComparisonBuilder
+            This builder, so that calls can be chained.
+        """
         self._reference = _unwrap(data)
         self._reference_styling = styling
         return self
 
     def add_comparison(self, data: PlotData, **styling) -> 'ComparisonBuilder':
-        """Add a comparison dataset. A PlotItem is accepted too."""
+        """Add a comparison dataset. A PlotItem is accepted too.
+
+        Parameters
+        ----------
+        data : PlotData or PlotItem
+            A curve to compare with the reference. It is converted to the
+            reference's units when the figure is built.
+        **styling
+            Styling overrides for this curve (color, linestyle, ...), as in
+            :meth:`PlotBuilder.add_data`.
+
+        Returns
+        -------
+        ComparisonBuilder
+            This builder, so that calls can be chained.
+        """
         self._comparisons.append((_unwrap(data), styling))
         return self
 
@@ -336,6 +409,19 @@ class ComparisonBuilder:
 
         Overlays are rendered on the main panel but are NOT included in
         difference computations.
+
+        Parameters
+        ----------
+        data : PlotData or PlotItem
+            The curve to draw. It is converted to the reference's units when the
+            figure is built.
+        **styling
+            Styling overrides for this curve, as in :meth:`PlotBuilder.add_data`.
+
+        Returns
+        -------
+        ComparisonBuilder
+            This builder, so that calls can be chained.
         """
         self._overlays.append((_unwrap(data), styling))
         return self
@@ -345,6 +431,22 @@ class ComparisonBuilder:
 
         Scatter overlays are rendered on the main panel AND their difference
         against the reference is shown as scatter points in the diff panel.
+
+        Parameters
+        ----------
+        data : PlotData or PlotItem
+            The points to draw. Their difference is taken on their own abscissae
+            (``grid='comparison'``). If computing the difference raises any
+            error (for instance no overlap with the reference), the points are
+            left out of the diff panel without a message. They are converted to
+            the reference's units when the figure is built.
+        **styling
+            Styling overrides for these points, as in :meth:`PlotBuilder.add_data`.
+
+        Returns
+        -------
+        ComparisonBuilder
+            This builder, so that calls can be chained.
         """
         self._scatter_overlays.append((_unwrap(data), styling))
         return self
@@ -384,6 +486,11 @@ class ComparisonBuilder:
             If ``True``, show *only* the difference panel (no main overlay).
         log_y : bool
             Use logarithmic y-axis on the difference panel (default ``False``).
+
+        Returns
+        -------
+        ComparisonBuilder
+            This builder, so that calls can be chained.
         """
         self._show_diff_panel = True
         if mode is not _NOT_SET:
@@ -410,7 +517,27 @@ class ComparisonBuilder:
         x_label: Optional[str] = None,
         y_label: Optional[str] = None,
     ) -> 'ComparisonBuilder':
-        """Set plot labels."""
+        """Set plot labels.
+
+        Parameters
+        ----------
+        title
+            A string, shown above the main panel (above the only panel when
+            there is no difference panel). None or ``''`` hides it. Not passing
+            it leaves the title as it was.
+        x_label : str, optional
+            Label of the shared energy axis. The text is used as written, with
+            its unit as you spell it. None keeps the label as it was.
+        y_label : str, optional
+            Label of the main panel's ordinate; not the difference panel's, which
+            is set by :meth:`set_difference_panel`. In the difference-only layout
+            it is ignored. None keeps it as it was.
+
+        Returns
+        -------
+        ComparisonBuilder
+            This builder, so that calls can be chained.
+        """
         if title is not _NOT_SET:
             self._title = title
         if x_label is not None:
@@ -422,7 +549,21 @@ class ComparisonBuilder:
     def set_scales(
         self, log_x: bool = False, log_y: bool = False,
     ) -> 'ComparisonBuilder':
-        """Set axis scales."""
+        """Set axis scales.
+
+        Parameters
+        ----------
+        log_x : bool
+            Logarithmic energy axis, shared by the panels.
+        log_y : bool
+            Logarithmic ordinate of the main panel. The difference panel has its
+            own, ``log_y`` of :meth:`set_difference_panel`.
+
+        Returns
+        -------
+        ComparisonBuilder
+            This builder, so that calls can be chained.
+        """
         self._use_log_x = log_x
         self._use_log_y = log_y
         return self
@@ -432,7 +573,24 @@ class ComparisonBuilder:
         x_lim: Optional[Tuple[Optional[float], Optional[float]]] = None,
         y_lim: Optional[Tuple[Optional[float], Optional[float]]] = None,
     ) -> 'ComparisonBuilder':
-        """Set axis limits for the main panel."""
+        """Set axis limits for the main panel.
+
+        Parameters
+        ----------
+        x_lim : tuple, optional
+            ``(min, max)`` of the energy axis, in the units of the reference
+            (see the class docstring), for every panel. None, or a None end,
+            leaves that end to matplotlib.
+        y_lim : tuple, optional
+            ``(min, max)`` of the main panel's ordinate, in the units of the
+            reference. In the difference-only layout it limits the difference
+            instead, and wins over the ``y_lim`` of :meth:`set_difference_panel`.
+
+        Returns
+        -------
+        ComparisonBuilder
+            This builder, so that calls can be chained.
+        """
         self._x_lim = x_lim
         self._y_lim = y_lim
         return self
@@ -440,7 +598,23 @@ class ComparisonBuilder:
     def set_legend(
         self, loc: str = 'best', ncol: Optional[int] = None,
     ) -> 'ComparisonBuilder':
-        """Set legend placement."""
+        """Set legend placement.
+
+        Parameters
+        ----------
+        loc : str
+            Location of the main panel's legend, as in
+            :meth:`PlotBuilder.set_legend` (matplotlib locations, or
+            ``'outside <direction>'``). The difference panel has no legend in the
+            dual layout.
+        ncol : int, optional
+            Number of columns; None gives matplotlib's one.
+
+        Returns
+        -------
+        ComparisonBuilder
+            This builder, so that calls can be chained.
+        """
         self._legend_loc = loc
         self._legend_ncol = ncol
         return self
@@ -459,6 +633,27 @@ class ComparisonBuilder:
         `show_minor_x` / `show_minor_y` override `show_minor` for one axis; see
         `PlotBuilder.set_grid`. Both panels get the same grid, since they share
         the abscissa and are read as one figure.
+
+        Parameters
+        ----------
+        grid : bool, optional
+            Show the major grid. None leaves it to the style.
+        alpha : float, optional
+            Opacity of the major grid, 0 to 1. None takes the style's
+            ``grid.alpha``.
+        show_minor : bool, optional
+            Subdivide both axes; the default of ``show_minor_x`` and
+            ``show_minor_y``.
+        minor_alpha : float
+            Opacity of the minor grid, 0 to 1.
+        show_minor_x, show_minor_y : bool, optional
+            Subdivide that axis, overriding ``show_minor`` for it; None, True and
+            False mean what they do in :meth:`PlotBuilder.set_grid`.
+
+        Returns
+        -------
+        ComparisonBuilder
+            This builder, so that calls can be chained.
         """
         self._grid = grid
         self._grid_alpha = alpha
@@ -478,7 +673,7 @@ class ComparisonBuilder:
         Averaging is not a mode of the comparison: each series is averaged or
         not on its own, by carrying ``PlotData.metadata['group_average_overlay']``
         (the payload, and what ``main_display`` does on the main panel, are in
-        :mod:`kika.plotting.averages`; the main panel is a
+        ``kika.plotting.averages``; the main panel is a
         :class:`PlotBuilder` and draws them with
         :meth:`PlotBuilder.set_group_average`). The comparison compares
         whatever each series draws, so a series can be compared with its own
@@ -490,7 +685,7 @@ class ComparisonBuilder:
           same abscissae, value by value;
         * one averaged -- each of its layers against the other's pointwise
           curve: a window at its centres, the steps against the pointwise
-          curve on its own grid, group by group (:mod:`kika.algebra.compare`);
+          curve on its own grid, group by group (``kika.algebra.compare``);
         * neither -- the pointwise diff alone.
 
         Inside the averaged span the pointwise diff gives way to the averaged
@@ -500,6 +695,29 @@ class ComparisonBuilder:
         y axis covers the averaged layers too. ``shade_range`` tints the
         averaged span on every panel, so a span narrower than the plot is
         visible.
+
+        This method only records the two settings. It computes no average: the
+        averages are the ones the series already carry, and :meth:`build` draws
+        them and their differences.
+
+        Parameters
+        ----------
+        main_display : {'pointwise', 'average', 'both'}
+            What the main panel draws for a series that carries an average. On
+            the difference panel the averaged diff replaces the pointwise one
+            inside the averaged span in every case.
+        shade_range : bool
+            Tint the averaged span on every panel.
+
+        Returns
+        -------
+        ComparisonBuilder
+            This builder, so that calls can be chained.
+
+        Raises
+        ------
+        ValueError
+            If ``main_display`` is not one of the three above.
         """
         if main_display not in _averages.DISPLAYS:
             raise ValueError(f"main_display must be one of {_averages.DISPLAYS}, "
@@ -519,6 +737,25 @@ class ComparisonBuilder:
         ``'upper left'`` (the default), ``'upper right'``, ``'lower left'``
         and ``'lower right'``, so it can be moved off a curve that runs
         under it. ``None`` keeps the current value of either.
+
+        Parameters
+        ----------
+        show : bool
+            Whether the annotation is drawn.
+        fontsize : float, optional
+            Size of the text, in points. Default 11 until set.
+        loc : {'upper left', 'upper right', 'lower left', 'lower right'}, optional
+            Corner of the difference panel the annotation sits in.
+
+        Returns
+        -------
+        ComparisonBuilder
+            This builder, so that calls can be chained.
+
+        Raises
+        ------
+        ValueError
+            If ``loc`` is not one of the four corners.
         """
         if loc is not None and loc not in _REFERENCE_LABEL_ANCHORS:
             raise ValueError(f"loc must be one of {sorted(_REFERENCE_LABEL_ANCHORS)}, "
@@ -691,9 +928,28 @@ class ComparisonBuilder:
         """
         Build and return the comparison figure.
 
+        The figure is drawn in the units of the reference; see the class
+        docstring for how the axes are labelled.
+
+        Parameters
+        ----------
+        show : bool
+            Call ``matplotlib.pyplot.show`` once the figure is drawn.
+
         Returns
         -------
         matplotlib.figure.Figure
+            The figure: one panel, two panels (main above, difference below,
+            sharing the energy axis), or the difference alone when
+            :meth:`set_difference_panel` was called with ``only=True``.
+
+        Raises
+        ------
+        ValueError
+            If no reference was set, if there is neither a comparison nor a
+            scatter overlay, or if a comparison does not overlap the reference
+            in x (``compute_difference`` runs only when the difference panel is
+            enabled).
         """
         if self._reference is None:
             raise ValueError(

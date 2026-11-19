@@ -255,23 +255,47 @@ class PlotBuilder:
         
         Parameters
         ----------
-        data : PlotData or tuple
-            The data to plot. Can be either:
-            - A PlotData object
-            - A tuple (PlotData, UncertaintyBand) as returned by to_plot_data with uncertainty=True
-            If a tuple is provided and uncertainty is None, the UncertaintyBand from the tuple will be used.
+        data : PlotData or PlotItem or tuple
+            The data to plot. Can be any of:
+
+            * A :class:`~kika.plotting.PlotData` object.
+            * A :class:`~kika.plotting.PlotItem`, as returned by
+              :func:`~kika.plotting.plottable`: its curve and its band.
+            * A tuple ``(PlotData, UncertaintyBand)``, as returned by
+              ``to_plot_data`` with ``uncertainty=True``.
+
+            When the curve carries ``x_unit`` and ``y_unit`` (everything from
+            :func:`~kika.plotting.plottable` does: the adapter's unit, or the
+            canonical one of the quantity) it is converted to the display units
+            when the figure is built; see :meth:`set_units`.
+            With a tuple or a ``PlotItem`` and ``uncertainty`` None, the band of
+            the pair is used.
         uncertainty : UncertaintyBand or PlotData, optional
             Uncertainty to plot with this data. Can be either:
-            - UncertaintyBand object (will be plotted as shaded region)
-            - PlotData object with uncertainty values (will be converted to band)
-            If data is a tuple and this parameter is provided, this parameter takes precedence.
+
+            * An :class:`~kika.plotting.UncertaintyBand` (plotted as a shaded
+              region, or as error bars for ``style='errorbar'``).
+            * A :class:`~kika.plotting.PlotData` of uncertainty values, converted
+              to a band at once, with no further sigma factor. For the
+              multigroup and Legendre uncertainty classes ``y`` follows their
+              ``uncertainty_type`` (a percentage when relative). For any other
+              class ``y`` is a relative uncertainty as a fraction.
+
+            If ``data`` is a tuple or a ``PlotItem`` and this parameter is given,
+            this parameter takes precedence.
         **styling_overrides
             Styling overrides for this specific data (color, linestyle, etc.)
-            
+
         Returns
         -------
         PlotBuilder
-            Self for method chaining
+            This builder, so that calls can be chained.
+
+        Raises
+        ------
+        ValueError
+            If a heatmap was already added (:meth:`add_heatmap`), or if ``data``
+            is a tuple that does not have two elements.
         """
         # Check for conflicts with heatmap data
         if self._heatmap_data is not None:
@@ -487,6 +511,28 @@ class PlotBuilder:
         returns) are converted on the way in; curves without unit metadata are
         drawn as given. Without a call, the first curve that states a unit sets it.
         Axis limits passed to :meth:`set_limits` are in these units.
+
+        Parameters
+        ----------
+        x, y : str, optional
+            Display unit of the abscissa and of the ordinate: a key of the unit
+            table (aliases such as ``'MEV'`` or ``'barn'`` are accepted). None
+            leaves that axis to the first curve that states a unit, and undoes an
+            earlier choice. A curve from :func:`~kika.plotting.plottable` is in
+            the unit its adapter set, else the canonical one of its quantity
+            (eV and barn for a cross section), and is converted to this unit. A unit of another dimension than the curve's is not
+            applied to it, and the figure warns with
+            :class:`~kika.plotting.MixedQuantityWarning`.
+
+        Returns
+        -------
+        PlotBuilder
+            This builder, so that calls can be chained.
+
+        Raises
+        ------
+        UnitError
+            If ``x`` or ``y`` is not a known unit.
         """
         from .units import normalise_unit
         self._x_unit = normalise_unit(x) if x else None
@@ -557,12 +603,33 @@ class PlotBuilder:
 
         A series is averaged on its own, by carrying
         ``PlotData.metadata['group_average_overlay']`` (the payload is
-        described in :mod:`kika.plotting.averages`); a series without one is
+        described in ``kika.plotting.averages``); a series without one is
         drawn as always. *main_display* is ``'pointwise'`` (no averaged
         layer), ``'average'`` (the pointwise curve masked inside the averaged
         span, the layers there) or ``'both'`` (the default: the pointwise
         curve faded, the layers on top). *shade_range* tints the averaged span.
         Unless the y limits are set, the y axis covers the layers.
+
+        This method only records the two settings. It computes no average and
+        draws nothing: the averages are the ones the series already carry, and
+        :meth:`build` draws them.
+
+        Parameters
+        ----------
+        main_display : {'pointwise', 'average', 'both'}
+            What is drawn for a series that carries an average, as above.
+        shade_range : bool
+            Tint the averaged span of the series.
+
+        Returns
+        -------
+        PlotBuilder
+            This builder, so that calls can be chained.
+
+        Raises
+        ------
+        ValueError
+            If ``main_display`` is not one of the three above.
         """
         if main_display not in _averages.DISPLAYS:
             raise ValueError(f"main_display must be one of {_averages.DISPLAYS}, "
@@ -704,6 +771,10 @@ class PlotBuilder:
             This method is deprecated. Use HeatmapBuilder instead for more
             control over heatmap formatting options.
 
+        It emits a ``DeprecationWarning``: "PlotBuilder.add_heatmap() is
+        deprecated. Use HeatmapBuilder instead for more control over heatmap
+        formatting options."
+
         Parameters
         ----------
         heatmap_data : HeatmapPlotData
@@ -719,7 +790,13 @@ class PlotBuilder:
         Returns
         -------
         PlotBuilder
-            Self for method chaining (returns HeatmapBuilder internally)
+            This builder, so that calls can be chained. :meth:`build` then
+            draws the heatmap through a :class:`~kika.plotting.HeatmapBuilder`.
+
+        Raises
+        ------
+        ValueError
+            If a curve was already added with :meth:`add_data`.
 
         Notes
         -----

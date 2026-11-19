@@ -26,7 +26,47 @@ def _polyline(a0, a1, b):
 def draw_errorbars(ax, x, y, yerr=None, xerr=None, *, color=None, linewidth: float = 1.5,
                    capsize: float = 0.0, capthick: Optional[float] = None,
                    alpha: Optional[float] = None, zorder: float = 2):
-    """``ax.errorbar(x, y, yerr, xerr, fmt='none', ...)``, except that overlapping bars under ``alpha`` do not darken each other."""
+    """``ax.errorbar(x, y, yerr, xerr, fmt='none', ...)``, except that overlapping bars under ``alpha`` do not darken each other.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        The axes drawn on.
+    x, y : array_like
+        Points, of one length. The errors are in the units of the axis they
+        belong to.
+    yerr, xerr : array_like, optional
+        Error of each point: a scalar, ``(n,)`` for a symmetric error, or
+        ``(2, n)`` for ``(below, above)``. Signs are ignored. None draws no
+        bars in that direction.
+    color : optional
+        Colour of bars and caps. None takes the colour of the axes' cycle for
+        each line drawn.
+    linewidth : float
+        Width of the bars, in points.
+    capsize : float
+        Length of the caps, in points. 0 draws no caps.
+    capthick : float, optional
+        Width of the caps, in points. None leaves matplotlib's default for the
+        marker edge.
+    alpha : float, optional
+        Opacity of bars and caps.
+    zorder : float
+        Drawing order.
+
+    Returns
+    -------
+    list of matplotlib.lines.Line2D
+        The lines drawn: one per direction for the bars, then one per direction
+        for the caps. Empty when ``x`` has no points.
+
+    Raises
+    ------
+    ValueError
+        If ``x`` and ``y`` differ in length, or an error array cannot be
+        broadcast to ``(n,)`` or ``(2, n)`` (a scalar, or a ``(1,)`` or
+        ``(1, n)`` array, is accepted and broadcast).
+    """
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
     n = x.size

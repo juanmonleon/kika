@@ -106,6 +106,29 @@ def register_adapter(type_name: str, quantity: str) -> Callable[[Adapter], Adapt
     ``type_name`` is the class's ``module.QualName``. Matching walks the source's
     MRO, so subclasses are covered, and nothing is imported to register: a source
     type costs nothing until somebody plots one.
+
+    Parameters
+    ----------
+    type_name : str
+        ``'<module>.<qualified name>'`` of the source class, as ``type(source)``
+        spells it.
+    quantity : str
+        A key of :data:`~kika.plotting.QUANTITIES`. The adapter is registered for
+        this pair only; registering the same pair again replaces the adapter.
+
+    Returns
+    -------
+    callable
+        A decorator. It stores the function it decorates and returns it
+        unchanged. The function takes the source and the selector keywords of
+        :func:`plottable` and returns a :class:`~kika.plotting.PlotItem` whose
+        curve carries the units the adapter set, and the canonical units of the
+        quantity where it set none (:func:`plottable` fills those in).
+
+    Raises
+    ------
+    ValueError
+        If ``quantity`` is not a key of :data:`~kika.plotting.QUANTITIES`.
     """
     get_quantity(quantity)
 
@@ -120,7 +143,20 @@ def _type_names(obj: Any) -> List[str]:
 
 
 def supported_quantities(source: Any) -> List[str]:
-    """Quantities :func:`plottable` can produce for ``source`` (not per reaction)."""
+    """Quantities :func:`plottable` can produce for ``source`` (not per reaction).
+
+    Parameters
+    ----------
+    source
+        A parsed object. A path is not opened here, so it has no adapters.
+
+    Returns
+    -------
+    list of str
+        The keys of :data:`~kika.plotting.QUANTITIES` for which an adapter is
+        registered for the class of ``source`` or one of its base classes, in
+        the order of :data:`~kika.plotting.QUANTITIES`.
+    """
     names = _type_names(source)
     return [q for q in QUANTITIES if any((n, q) in _ADAPTERS for n in names)]
 

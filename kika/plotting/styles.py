@@ -86,11 +86,40 @@ class Style:
     # -- colours ---------------------------------------------------------------
 
     def color(self, index: int) -> str:
-        """Colour of the ``index``-th series (the palette repeats past its end)."""
+        """Colour of the ``index``-th series (the palette repeats past its end).
+
+        Parameters
+        ----------
+        index : int
+            Position of the series, from 0.
+
+        Returns
+        -------
+        str
+            An entry of :attr:`palette`, ``palette[index % len(palette)]``.
+        """
         return self.palette[index % len(self.palette)]
 
     def cmap(self, kind: str = 'sequential') -> mpl.colors.Colormap:
-        """The style's ``'sequential'`` or ``'diverging'`` colour map."""
+        """The style's ``'sequential'`` or ``'diverging'`` colour map.
+
+        Parameters
+        ----------
+        kind : {'sequential', 'diverging'}
+            Which of the two maps.
+
+        Returns
+        -------
+        matplotlib.colors.Colormap
+            The matplotlib map of that name when the style gives a name; a map
+            interpolated through the stops, named ``'kika-<style>-<kind>'``, when
+            it gives stops.
+
+        Raises
+        ------
+        ValueError
+            If ``kind`` is neither of the two above.
+        """
         if kind not in ('sequential', 'diverging'):
             raise ValueError(f"kind must be 'sequential' or 'diverging', got {kind!r}")
         spec = self.sequential if kind == 'sequential' else self.diverging
@@ -99,7 +128,21 @@ class Style:
         return mpl.colors.LinearSegmentedColormap.from_list(f'kika-{self.name}-{kind}', list(spec))
 
     def cmap_name(self, kind: str = 'sequential') -> str:
-        """A name for :meth:`cmap` that matplotlib or kika can resolve."""
+        """A name for :meth:`cmap` that matplotlib or kika can resolve.
+
+        Parameters
+        ----------
+        kind : str
+            ``'sequential'``, or anything else for the diverging map. Unlike
+            :meth:`cmap`, no other value is refused.
+
+        Returns
+        -------
+        str
+            The matplotlib map name the style gives, or ``'kika-<style>-<kind>'``
+            for a map given as stops. That name is registered with matplotlib
+            when the style is registered or composed.
+        """
         spec = self.sequential if kind == 'sequential' else self.diverging
         return spec if isinstance(spec, str) else f'kika-{self.name}-{kind}'
 
@@ -108,6 +151,23 @@ class Style:
 
         Useful for ordered series (a distribution at increasing energies), which
         read better on a ramp than with categorical colours.
+
+        Parameters
+        ----------
+        n : int
+            Number of colours. One colour is the start of the map.
+        kind : {'sequential', 'diverging'}
+            Which map to sample, as in :meth:`cmap`.
+
+        Returns
+        -------
+        list of str
+            ``n`` hex colours (``'#rrggbb'``) from the start of the map to its end.
+
+        Raises
+        ------
+        ValueError
+            If ``kind`` is neither of the two above.
         """
         cmap = self.cmap(kind)
         positions = np.linspace(0.0, 1.0, n) if n > 1 else np.array([0.0])
@@ -116,7 +176,23 @@ class Style:
     # -- rcParams --------------------------------------------------------------
 
     def rc_value(self, key: str, default: Any = None) -> Any:
-        """A single rcParam as this style sets it (falls back to matplotlib's default)."""
+        """A single rcParam as this style sets it (falls back to matplotlib's default).
+
+        Parameters
+        ----------
+        key : str
+            An rcParams key (``'axes.facecolor'``). Only the keys in :attr:`rc` are
+            read: the sizes and layout that :meth:`rc_params` adds are not.
+        default
+            Returned when ``key`` is in neither :attr:`rc` nor matplotlib's
+            defaults.
+
+        Returns
+        -------
+        object
+            The value in :attr:`rc`, else matplotlib's default for ``key``, else
+            ``default``.
+        """
         if key in self.rc:
             return self.rc[key]
         return mpl.rcParamsDefault.get(key, default)
@@ -143,6 +219,14 @@ class Style:
             font name such as ``'Arial'``).
         projection : str, optional
             ``'3d'`` disables constrained layout, which does not work with 3-D axes.
+
+        Returns
+        -------
+        dict
+            rcParams key to value: the shared sizes and layout, then :attr:`rc`
+            over them, then ``font.family``, ``axes.prop_cycle`` (the palette) and,
+            when given, ``figure.figsize`` and ``figure.dpi``. Sizes are in points,
+            ``figsize`` in inches.
         """
         rc: Dict[str, Any] = {
             'font.size': 11 if notebook_mode else 12,
@@ -190,6 +274,17 @@ class Style:
         Starts from matplotlib's defaults (so a user's own rc settings do not leak
         into kika figures), applies :meth:`rc_params` with ``rc_kwargs``, and
         restores everything on exit.
+
+        Parameters
+        ----------
+        **rc_kwargs
+            The arguments of :meth:`rc_params` (``notebook_mode``, ``figsize``,
+            ``dpi``, ``font_family``, ``projection``).
+
+        Yields
+        ------
+        Style
+            This style.
 
         >>> with get_style('signature').context():
         ...     fig, ax = plt.subplots()
@@ -310,7 +405,29 @@ _ALIASES: Dict[str, str] = {
 
 
 def register_style(style: Style, *, replace: bool = False) -> Style:
-    """Add ``style`` to the registry, so every builder and ``get_style`` can use it."""
+    """Add ``style`` to the registry, so every builder and ``get_style`` can use it.
+
+    Parameters
+    ----------
+    style : Style
+        The style to add. It is stored under ``style.name`` in lower case, and
+        its colour maps given as stops are registered with matplotlib.
+    replace : bool
+        Skip the check on the name, so ``style`` replaces a registered style of
+        the same name. A style registered under the name of an alias is not
+        found by that name, because :func:`get_style` resolves aliases first.
+
+    Returns
+    -------
+    Style
+        ``style`` itself.
+
+    Raises
+    ------
+    ValueError
+        If ``replace`` is False and the name (in lower case) is already
+        registered or is an alias.
+    """
     key = style.name.lower()
     if not replace and (key in _REGISTRY or key in _ALIASES):
         raise ValueError(f"A style named {style.name!r} already exists")
@@ -336,6 +453,22 @@ def get_style(style: Union[str, Style, None] = None) -> Style:
 
     ``None`` gives the default style, ``'classic'``. A :class:`Style` instance is
     returned unchanged, so functions can accept either.
+
+    Parameters
+    ----------
+    style : str or Style, optional
+        A registered name or alias, matched without regard to case.
+
+    Returns
+    -------
+    Style
+        The registered style, or ``style`` itself when it already is one.
+
+    Raises
+    ------
+    ValueError
+        If the name is neither registered nor an alias. The message lists the
+        registered names.
     """
     if isinstance(style, Style):
         return style
@@ -542,6 +675,11 @@ def compose_style(
     ``base`` gives everything not chosen here: the page and axes, the ink, the
     rcParams, ``dark``, ``light_variant``, ``band_alpha`` and ``neutral``.
 
+    The result is **not** registered: pass it to the builders directly, or
+    register it with ``register_style(style, replace=True)``. Colour maps given
+    as stops are registered with matplotlib under :meth:`Style.cmap_name`
+    either way, and composing again under the same name replaces them.
+
     Parameters
     ----------
     base : str or Style
@@ -558,12 +696,18 @@ def compose_style(
     grid : bool, optional
         Whether axes draw a grid.
     name, label : str
-        Name and label of the result. The name must not be a built-in style's.
+        Name and label of the result. The name is refused, whatever its case,
+        if it is an alias or the name of any registered style that this
+        function did not produce (built-in, or added with
+        :func:`register_style`). A name that an earlier call produced may be
+        used again.
 
-    The result is **not** registered: pass it to the builders directly, or
-    register it with ``register_style(style, replace=True)``. Colour maps given
-    as stops are registered with matplotlib under :meth:`Style.cmap_name`
-    either way, and composing again under the same name replaces them.
+    Returns
+    -------
+    Style
+        A new style: ``base`` with the parts chosen above replaced. A ``font``
+        sets the font family and its font list, and gives ``'stix'`` the STIX
+        mathtext (any other font removes a mathtext choice of the base).
 
     Raises
     ------

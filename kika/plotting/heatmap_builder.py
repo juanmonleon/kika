@@ -820,7 +820,12 @@ class HeatmapBuilder(PlotBuilder):
         Returns
         -------
         HeatmapBuilder
-            Self for method chaining
+            This builder, so that calls can be chained.
+
+        Raises
+        ------
+        ValueError
+            If a curve was already added with ``add_data``.
 
         Notes
         -----
@@ -917,11 +922,10 @@ class HeatmapBuilder(PlotBuilder):
     def heatmap_style(self) -> Style:
         """The style heatmaps are drawn in: this builder's, whichever it is.
 
-        A dark style used to be swapped for its light sibling here, so every
-        heatmap came out on white. That threw away work the dark styles had
-        already done: `signature-dark`'s diverging map is centred on its own
-        navy (`#0b1d29`), i.e. built so zero correlation disappears into the
-        page rather than glowing white in the middle of it.
+        A dark style is used as it is and is not swapped for its light variant,
+        so a heatmap in a dark style has a dark page. The diverging map of
+        ``'signature-dark'`` is centred on its own navy (``#0b1d29``), so that
+        zero correlation blends into the page and does not glow white.
         """
         return self.style_spec
 

@@ -162,7 +162,24 @@ class Quantity:
     log_y: bool = False
 
     def axis_label(self, axis: str, unit: Optional[str] = None) -> str:
-        """``'Incident energy (MeV)'``: the axis name and ``unit`` (default: canonical)."""
+        """The label of one axis: its name and the unit it is shown in.
+
+        Parameters
+        ----------
+        axis : str
+            ``'x'`` for the abscissa; any other value gives the ordinate.
+        unit : str, optional
+            The display unit written in the label (``'MeV'`` gives
+            ``'Incident energy (MeV)'``). None is the canonical unit of that axis.
+            It only names the unit: no values are converted here.
+
+        Returns
+        -------
+        str
+            ``'<axis name> (<unit>)'``, or the name alone when the unit is
+            ``'1'``, ``'mu'`` or ``'1/mu'``, which have no written form. ``'%'``
+            is written (``'Relative uncertainty (%)'``).
+        """
         name = self.x_label if axis == 'x' else self.y_label
         shown = display_unit(unit or (self.x_unit if axis == 'x' else self.y_unit))
         return f'{name} ({shown})' if shown else name
@@ -203,7 +220,23 @@ QUANTITIES: Dict[str, Quantity] = {q.name: q for q in (
 
 
 def get_quantity(name: str) -> Quantity:
-    """The :class:`Quantity` called ``name``."""
+    """The :class:`Quantity` called ``name``.
+
+    Parameters
+    ----------
+    name : str
+        A key of :data:`QUANTITIES`, spelt exactly (``'cross_section'``).
+
+    Returns
+    -------
+    Quantity
+        The entry of :data:`QUANTITIES` of that name.
+
+    Raises
+    ------
+    ValueError
+        If ``name`` is not a key of :data:`QUANTITIES`.
+    """
     try:
         return QUANTITIES[name]
     except KeyError:
