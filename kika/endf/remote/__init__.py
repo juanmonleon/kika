@@ -93,27 +93,56 @@ def download_endf(
     This function downloads the file without parsing it, useful when you
     want to save the raw ENDF file for external use or editing.
 
+    The file comes from the IAEA Nuclear Data Service (``nds.iaea.org``). It is
+    kept in the local cache (``~/.kika/endf_cache``, or the directory named by
+    the ``KIKA_ENDF_CACHE_DIR`` environment variable) with no expiry, until
+    :func:`~kika.endf.clear_cache` removes it. A cached file is copied to
+    ``save_to`` without a request.
+
     Parameters
     ----------
     isotope : str or int
-        Isotope specification (e.g., "Fe56", 26056, "U-235")
+        Isotope specification (e.g., "Fe56", 26056, "U-235"). A trailing ``m``
+        selects the isomer ("Am242m").
     save_to : str or Path
-        Path where to save the file. Can be:
-        - A full file path: "./data/Fe56.endf"
-        - A directory: "./data/" (filename will be auto-generated)
+        Where to save the file. A full file path ("./data/Fe56.endf"), or a
+        directory ("./data/": an existing directory, or a string ending in a
+        slash) in which the file is named ``<symbol><A>_<library>_<particle>.endf``,
+        for instance ``Fe56_endfb8.1_n.endf``. Missing parent directories are
+        created.
     library : str
-        Nuclear data library (default: "endfb8.1")
+        Nuclear data library, in any spelling ``list_available_libraries()``
+        accepts ("endfb8.1", "ENDF/B-VIII.1").
     particle : str
-        Incident particle type (default: "n")
+        Incident particle type of the sublibrary ("n" for neutron).
     force_download : bool
-        Force re-download even if cached (default: False)
+        True skips the cache lookup and downloads again, replacing the cached file.
     timeout : float
-        Request timeout in seconds (default: 30.0)
+        Request timeout in seconds.
 
     Returns
     -------
     Path
-        Path to the saved file
+        Path to the saved file, ``save_to`` or the generated name inside it.
+
+    Raises
+    ------
+    IsotopeNotFoundError
+        If ``isotope`` cannot be parsed, if the IAEA answers 404, or if the file
+        has to be located by a constructed URL and the nuclide has no known MAT.
+        When ``save_to`` is a directory, an isotope that cannot be parsed raises
+        a plain ``ValueError`` instead, before this check.
+    LibraryNotFoundError
+        If ``library`` is not a recognised name. When ``save_to`` is a
+        directory, an unknown library raises a plain ``KeyError`` instead.
+    NetworkError
+        If the request times out or fails, or the downloaded archive cannot be
+        unpacked.
+    AccessBlockedError
+        (A ``NetworkError``.) If the server refuses automated clients with a bot
+        challenge.
+    CacheError
+        If the file cannot be written to the cache.
 
     Examples
     --------

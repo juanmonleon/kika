@@ -1,10 +1,10 @@
-"""
-ENDF module for reading and working with Evaluated Nuclear Data Files.
+"""Evaluated nuclear data in ENDF-6 format: reading, downloading and processing.
 
-This module provides functionality for:
-- Reading local ENDF files
-- Downloading ENDF files from IAEA Nuclear Data Service
-- Caching downloaded files locally
+A tape is read whole (:func:`~kika.endf.read_endf`) or one MF at a time, on
+demand (:func:`~kika.endf.open_endf`), and files can be downloaded from the IAEA
+Nuclear Data Service into a local cache. Energies are in eV and cross sections
+in barns, as the format writes them; the readings of angular distributions and
+cross sections in :mod:`kika.endf.dcs` follow the same units.
 """
 from .read_endf import (
     read_endf,

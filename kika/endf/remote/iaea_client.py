@@ -372,8 +372,22 @@ def check_access(timeout: float = 15.0) -> str:
     """Whether kika can download from the IAEA right now.
 
     Returns ``"ok"``, ``"blocked"`` (the server answers with a bot challenge,
-    see :class:`AccessBlockedError`) or ``"offline"`` (no answer at all). One
-    small request against the root of the download tree.
+    see ``AccessBlockedError``) or ``"offline"`` (no answer at all). One
+    small request against the root of the download tree, with no retry; it does
+    not use the cache and downloads no file.
+
+    Parameters
+    ----------
+    timeout : float
+        Seconds to wait for the answer.
+
+    Returns
+    -------
+    str
+        ``"ok"`` for any answer that is not a bot challenge (a 404 or a server
+        error counts as ``"ok"``), ``"blocked"`` for a bot challenge (status 403,
+        429 or 503 carrying one), ``"offline"`` when the request fails (no
+        connection, timeout, or any other ``httpx.HTTPError``).
     """
     try:
         with httpx.Client(timeout=timeout, follow_redirects=True) as client:

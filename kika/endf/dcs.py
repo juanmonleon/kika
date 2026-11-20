@@ -1,23 +1,20 @@
 r"""Differential cross sections from ENDF MF4 (angular) + MF3 (cross section).
 
-This module is the **single definition** of the physics behind the desktop
-app's MF4 differential view.  Each piece used to exist twice — once here in
-Python and once as a TypeScript reimplementation in the app — which is exactly
-how the two drifted apart (see ``delta_t_is_fwhm`` below).  Anything that
-encodes a *choice* now lives here:
+The module holds every choice that turns the MF4 angular data and the MF3 cross
+section into a differential cross section:
 
-- the angular reconstruction :math:`f(\mu)` from Legendre coefficients,
-- the interpolation of those coefficients **in energy**, honouring the MF4
-  ``(NBT, INT)`` law rather than assuming lin-lin,
+- the angular distribution :math:`f(\mu) = \sum_\ell \tfrac{2\ell+1}{2}\,a_\ell
+  P_\ell(\mu)` from Legendre coefficients, with :math:`a_0 = 1` implicit,
+- the interpolation of those coefficients **in energy** under the MF4
+  ``(NBT, INT)`` law (lin-lin when none is given),
 - the elastic LAB :math:`\leftrightarrow` CM frame transform,
 - the three readings of :math:`\sigma(E)`: nominal, bin-averaged, TOF-folded.
 
-The two plot products the app asks for are :func:`differential_xs_vs_angle`
-(:math:`d\sigma/d\Omega` against :math:`\mu` at fixed :math:`E`) and
-:func:`differential_xs_vs_energy` (against :math:`E` at fixed :math:`\mu`).
+The two products are :func:`differential_xs_vs_angle` (:math:`d\sigma/d\Omega`
+against :math:`\mu` at fixed :math:`E`) and :func:`differential_xs_vs_energy`
+(against :math:`E` at fixed :math:`\mu`).
 
-Everything takes plain arrays rather than an ENDF object, so the API layer can
-feed it already-extracted data, and the tests can feed it literals.
+Every function takes plain arrays, not an ENDF object.
 
 Conventions
 -----------
@@ -85,37 +82,36 @@ Weighting = Literal["lethargy", "constant"]
 
 @dataclass(frozen=True)
 class TofResolution:
-    r"""Time-of-flight energy resolution for the folded :math:`\sigma(E)`.
+    r"""Energy resolution of a time-of-flight spectrometer, for the folded readings.
+
+    An instance gives the standard deviation :math:`\sigma_E` of the Gaussian
+    kernel that the folded readings of :math:`\sigma` and :math:`a_\ell` average
+    over. Build it by hand: from a flight path and a timing spread, or from a
+    width the experiment declared.
 
     Parameters
     ----------
     flight_path_m : float
-        Flight path :math:`L` in metres (GELINA default 27.037 m).
+        Flight path :math:`L` in metres (27.037 m by default).
     delta_t_ns : float
-        Timing spread :math:`\delta t` in nanoseconds.
-    delta_t_is_fwhm : bool, default True
-        Whether ``delta_t_ns`` is a **FWHM** (the usual experimental
-        convention, and what :func:`kika.utils.energy_folding.tof_energy_resolution`
-        assumes) or already a standard deviation.
-
-        .. warning::
-           This flag is the divergence that motivated this module.  The app's
-           TypeScript reimplementation applied no FWHM→σ conversion, so its
-           folding kernel was :data:`kika._constants.FWHM_TO_SIGMA` ≈ 2.355×
-           wider than the library's for the same inputs.  There is no safe
-           default that suits both readings; callers that care should pass it
-           explicitly.
-    min_sigma_e_kev : float, default 0.0
-        Floor on :math:`\sigma_E`, in keV; none by default.
-
-        It used to be 1 keV, to keep a Gauss-Hermite kernel from collapsing to
-        a delta at low energy.  The fold has integrated on the table's own
-        points since September 2026 (:func:`kika.algebra.gaussian_fold_nodes`),
-        and a narrow kernel then tends to the interpolated value as it should,
-        so the floor protected nothing and only widened the resolution of a
-        good spectrometer: 27 m and 3.5 ns FWHM give :math:`\sigma_E` = 0.70 keV
-        at 0.6 MeV, which a 1 keV floor read as 1.4x wider.  Pass a value to
-        reproduce a result computed with the floor.
+        Timing spread :math:`\delta t` in nanoseconds (10 ns by default).
+    delta_t_is_fwhm : bool
+        True (default): ``delta_t_ns`` is a FWHM and is divided by
+        ``kika._constants.FWHM_TO_SIGMA`` (about 2.355) to give a standard
+        deviation. False: it is already a standard deviation. The two readings
+        give kernels 2.355 times apart; there is no safe default for both, so
+        pass it explicitly.
+    min_sigma_e_kev : float
+        Floor on :math:`\sigma_E`, in keV. The default 0 means no floor. The
+        floor applies to every branch, a declared width included, and at
+        non-positive energies as well.
+    declared_fwhm_ev : float, optional
+        A resolution the experiment declared itself, as a FWHM in eV constant in
+        energy. When it is positive it replaces the flight-path geometry.
+    declared_fwhm_fraction : float, optional
+        The same as a fraction of the incident energy (0.01 is 1 %, not 1).
+        Used only when ``declared_fwhm_ev`` is None or not positive, and only
+        when positive itself.
     """
 
     flight_path_m: float = 27.037
@@ -133,15 +129,25 @@ class TofResolution:
     declared_fwhm_fraction: Optional[float] = None
 
     def sigma_e_mev(self, energy_mev: Union[float, np.ndarray]) -> Union[float, np.ndarray]:
-        r""":math:`\sigma_E` in MeV at one or many incident energies.
+        r"""Standard deviation :math:`\sigma_E` of the kernel at the given energies.
 
-        A declared width wins over the flight-path geometry when one is given.
-        The two are not interchangeable and one cannot be re-expressed as the
-        other: the TOF relation makes :math:`\sigma_E` grow as
-        :math:`E^{3/2}`, whereas a declared resolution is typically quoted as a
-        constant or as a fixed fraction of :math:`E`.  Fitting an
-        :math:`(L, \delta t)` pair to a declared width would therefore only
-        agree at the single energy it was fitted at.
+        A positive declared width wins over the flight-path geometry. The two are
+        not interchangeable: the TOF relation makes :math:`\sigma_E` grow as
+        :math:`E^{3/2}`, whereas a declared resolution is quoted as a constant
+        or as a fixed fraction of :math:`E`.
+
+        Parameters
+        ----------
+        energy_mev : float or numpy.ndarray
+            Incident energy in MeV.
+
+        Returns
+        -------
+        float or numpy.ndarray
+            :math:`\sigma_E` in MeV (a standard deviation, not a FWHM): a float
+            for a scalar input, an array of the input's shape otherwise. It is 0
+            at a non-positive energy, or when the geometry has a non-positive
+            ``flight_path_m`` or ``delta_t_ns``, unless ``min_sigma_e_kev`` lifts it.
         """
         e = np.atleast_1d(np.asarray(energy_mev, dtype=float))
         out = np.empty_like(e)
@@ -175,13 +181,19 @@ def legendre_basis(mu: np.ndarray, max_order: int) -> np.ndarray:
     r"""Legendre polynomials :math:`P_l(\mu)` for :math:`l = 0 \ldots L`.
 
     Evaluated by Bonnet's recurrence
-    :math:`(l+1)P_{l+1} = (2l+1)\mu P_l - l P_{l-1}`, which is what the app's
-    client-side kernel uses; the shared basis keeps the two bit-comparable.
+    :math:`(l+1)P_{l+1} = (2l+1)\mu P_l - l P_{l-1}`.
+
+    Parameters
+    ----------
+    mu : array_like
+        Cosines, in :math:`[-1, 1]`. A scalar is treated as one point.
+    max_order : int
+        Highest order :math:`L` returned.
 
     Returns
     -------
     np.ndarray
-        Shape ``(max_order + 1, len(mu))``.
+        Shape ``(max_order + 1, len(mu))``; row ``l`` is :math:`P_l` at every ``mu``.
     """
     mu = np.atleast_1d(np.asarray(mu, dtype=float))
     basis = np.empty((max_order + 1, mu.size), dtype=float)
@@ -202,10 +214,25 @@ def angular_pdf(mu: np.ndarray, a_coeffs: Sequence[float]) -> np.ndarray:
     with :math:`a_0 = 1` implicit by the MF4 normalization convention, so
     ``a_coeffs`` is :math:`[a_1, a_2, \ldots, a_L]` and :math:`\int f\,d\mu = 1`.
 
-    Equivalent to :func:`kika.utils.energy_folding.endf_angular_distribution`
-    (a test pins them together); this one evaluates the basis by recurrence
-    instead of ``scipy.special.legendre``, which matters when sweeping
-    thousands of energies.
+    Equivalent to :func:`kika.utils.energy_folding.endf_angular_distribution`;
+    this one evaluates the basis by recurrence instead of
+    ``scipy.special.legendre``, which is faster when sweeping thousands of
+    energies.
+
+    Parameters
+    ----------
+    mu : array_like
+        Cosines, in the frame the coefficients are given in. The function does
+        not check the range.
+    a_coeffs : sequence of float
+        :math:`a_1 \ldots a_L`, without :math:`a_0`. An empty sequence gives the
+        isotropic :math:`f = 1/2`.
+
+    Returns
+    -------
+    np.ndarray
+        :math:`f(\mu)` per unit cosine (the distribution normalised to 1 over
+        :math:`[-1, 1]`), one value per ``mu``.
     """
     mu = np.atleast_1d(np.asarray(mu, dtype=float))
     a = np.asarray(a_coeffs, dtype=float)
@@ -229,7 +256,29 @@ def angular_pdf_uncertainty(
                           \sigma_{a_l}^2
 
     Diagonal-only: it ignores the MF34 off-diagonal blocks, so it is a display
-    aid rather than a defensible uncertainty on the reconstructed shape.
+    aid and not a defensible uncertainty on the reconstructed shape.
+
+    Parameters
+    ----------
+    mu : array_like
+        Cosines, in the frame the coefficients are given in.
+    a_coeffs : sequence of float
+        :math:`a_1 \ldots a_L`, without :math:`a_0`. Only its length is used.
+    a_sigmas : sequence of float
+        Absolute standard deviation of each coefficient, in the same order and of
+        the same length as ``a_coeffs`` (the units of :math:`a_\ell`, which are
+        dimensionless).
+
+    Returns
+    -------
+    np.ndarray
+        :math:`\sigma_f(\mu)`, one value per ``mu``, in the units of :math:`f`
+        (per unit cosine). Zeros when the sequences are empty.
+
+    Raises
+    ------
+    ValueError
+        If ``a_coeffs`` and ``a_sigmas`` differ in length.
     """
     mu = np.atleast_1d(np.asarray(mu, dtype=float))
     a = np.asarray(a_coeffs, dtype=float)
@@ -254,7 +303,22 @@ def frame_alpha(*, awr: Optional[float] = None, mass_number: Optional[float] = N
     Prefers the ENDF atomic weight ratio (:math:`AWR = m_{target}/m_n`, so
     :math:`\alpha = 1/AWR`); falls back to the mass number
     (:math:`\alpha \approx m_n / A`), good to ~0.1%.  Returns ``0.0`` when
-    neither is known, which every function here treats as "no transform".
+    neither is known, which the functions that take ``alpha`` here treat as "no
+    transform".
+
+    Parameters
+    ----------
+    awr : float, optional
+        ENDF atomic weight ratio of the target (target mass in neutron masses).
+        Used when positive.
+    mass_number : float, optional
+        Target mass number :math:`A`. Used only when ``awr`` is missing or not
+        positive; the neutron mass is taken as 1.00866 u.
+
+    Returns
+    -------
+    float
+        :math:`\alpha`, dimensionless; 0.0 when neither argument is positive.
     """
     if awr and awr > 0:
         return 1.0 / float(awr)
@@ -287,6 +351,34 @@ def transform_angular_curve(
 
     The returned cosine grid is generally non-uniform.  ``alpha = 0`` is a
     passthrough.
+
+    Parameters
+    ----------
+    mu : array_like
+        Cosines in the source frame (CM for ``"cm2lab"``, LAB for ``"lab2cm"``).
+    y : array_like
+        The density at each ``mu``, per steradian or per unit cosine (the
+        Jacobian is the same), in any unit; it is multiplied or divided by
+        :math:`J` and keeps its unit.
+    alpha : float
+        Mass ratio from :func:`frame_alpha`. Zero or negative returns copies of
+        ``mu`` and ``y`` unchanged, whatever ``direction`` says.
+    direction : {"cm2lab", "lab2cm"}
+        The frame change.
+
+    Returns
+    -------
+    (numpy.ndarray, numpy.ndarray)
+        The cosines in the target frame and the density there, both of the shape
+        of ``mu``. For ``"cm2lab"`` the cosines are the images of ``mu`` and
+        the density is ``y`` times :math:`J`. For ``"lab2cm"`` the cosines are
+        the images of ``mu`` and the density is ``y`` divided by :math:`J`
+        evaluated at the CM cosine.
+
+    Raises
+    ------
+    ValueError
+        If ``direction`` is neither string and ``alpha`` is positive.
     """
     mu = np.asarray(mu, dtype=float)
     y = np.asarray(y, dtype=float)
@@ -308,7 +400,23 @@ def interpolate_log_log(x_grid, y_grid, xq):
     """Log-log interpolation of ``y(x)``, clamped to the endpoints.
 
     The ENDF convention for pointwise cross sections (INT=5).  Falls back to
-    linear on any interval where a value is non-positive.  ``x_grid`` ascending.
+    linear on any interval where a value is non-positive.
+
+    Parameters
+    ----------
+    x_grid, y_grid : array_like
+        The table. ``x_grid`` must be ascending; the function does not check it.
+    xq : float or array_like
+        Query abscissae, in the units of ``x_grid``. At or below ``x_grid[0]``
+        the result is ``y_grid[0]``, at or above ``x_grid[-1]`` it is
+        ``y_grid[-1]``.
+
+    Returns
+    -------
+    float or numpy.ndarray
+        ``y`` at ``xq``, in the units of ``y_grid``: a float for a scalar
+        ``xq``, otherwise an array of its shape. An empty table gives NaN; a
+        one-point table gives its single value.
     """
     x = np.asarray(x_grid, dtype=float)
     y = np.asarray(y_grid, dtype=float)
@@ -345,6 +453,25 @@ def bin_edges_for_energy(energies: Sequence[float], index: int) -> Tuple[float, 
 
     The first/last point takes a one-sided half-bin mirrored to the other side.
     A single-point grid yields a degenerate bin.
+
+    Parameters
+    ----------
+    energies : sequence of float
+        Ascending energy grid, in eV.
+    index : int
+        Position of the point whose bin is wanted, from 0 to ``len(energies) - 1``.
+        A negative index is not supported: it is treated as the first point's
+        branch of the edges.
+
+    Returns
+    -------
+    (float, float)
+        ``(lo, hi)`` in eV, with ``lo`` clipped at 0.
+
+    Raises
+    ------
+    ValueError
+        If ``energies`` is empty.
     """
     e = np.asarray(energies, dtype=float)
     n = e.size
@@ -379,23 +506,41 @@ def bin_edges_for_width(
     r"""Bin ``[lo, hi]`` around ``energy_ev`` from an explicit width.
 
     The companion to :func:`bin_edges_for_energy`, which takes its width from
-    the spacing of the MF4 incident-energy grid.  That is the right default —
-    it is the resolution at which the angular distribution is actually
-    tabulated — but it also means the window is as coarse as that grid, and for
-    a nuclide whose angular data is far sparser than its cross section it can
-    span a wide range with nothing on screen to say so.
+    the spacing of the MF4 incident-energy grid. That window is as coarse as the
+    grid, and for a nuclide whose angular data is far sparser than its cross
+    section it can span a wide range.
 
-    ``mode``:
+    Parameters
+    ----------
+    energy_ev : float
+        Centre of the window, in eV. A non-positive value returns ``(0.0, 0.0)``.
+    mode : {"relative", "tof", "mf4grid"}
+        ``'relative'``: a fixed :math:`\Delta E / E` equal to ``relative_width``,
+        centred on ``energy_ev``. ``'tof'``: ``n_sigma`` times the standard
+        deviation :math:`\sigma_E` of the time-of-flight resolution at this
+        energy on each side, so a bin average and a fold can be compared on
+        equal terms. ``'mf4grid'`` needs the grid and is refused: call
+        :func:`bin_edges_for_energy`.
+    relative_width : float
+        Full width of the window as a fraction of ``energy_ev`` (0.02 is 2 %).
+        Used by ``'relative'`` only.
+    tof : TofResolution, optional
+        The resolution for ``'tof'``; a default :class:`TofResolution` when None.
+        Used by ``'tof'`` only.
+    n_sigma : float
+        Half-width of the window in units of :math:`\sigma_E`. Used by ``'tof'``
+        only.
 
-    ``'relative'``
-        A fixed :math:`\Delta E / E`, centred on ``energy_ev``.
-    ``'tof'``
-        ``n_sigma`` times the time-of-flight resolution width at this energy,
-        so a bin average and a fold can be compared on equal terms.
-    ``'mf4grid'``
-        Not handled here — it needs the grid, so call
-        :func:`bin_edges_for_energy` instead.  Passing it raises, rather than
-        silently substituting a different window.
+    Returns
+    -------
+    (float, float)
+        ``(lo, hi)`` in eV, with ``lo`` clipped at 0.
+
+    Raises
+    ------
+    ValueError
+        If ``mode`` is ``'mf4grid'``, or (for a positive ``energy_ev``) not one
+        of the three strings.
     """
     if mode == "mf4grid":
         raise ValueError(
@@ -439,6 +584,21 @@ def sigma_nominal(xs_energies_ev, xs_values, energy_ev, xs_interpolation=None):
     ``xs_interpolation`` is the table's ``(NBT, INT)`` pairs; ``None`` means
     one lin-lin region, which is what a PENDF or an ACE file states. Values
     outside the table hold its end values.
+
+    Parameters
+    ----------
+    xs_energies_ev, xs_values
+        The table: energies in eV, ascending, and :math:`\sigma` in barns.
+    energy_ev : float or array_like
+        Energies in eV at which to read :math:`\sigma`.
+    xs_interpolation : sequence of (int, int), optional
+        The table's ``(NBT, INT)`` regions. None is one lin-lin region.
+
+    Returns
+    -------
+    float or numpy.ndarray
+        :math:`\sigma` in barns at ``energy_ev``: a float for a scalar input,
+        an array otherwise.
     """
     return _sigma_at(xs_energies_ev, xs_values, energy_ev, xs_interpolation)
 
@@ -468,7 +628,26 @@ def sigma_bin_averaged(
     of an MF4 grid does reach zero once its half-width is mirrored.  Both
     integrals diverge there while their ratio tends to :math:`\sigma` at the
     lower end, so such a bin is truncated at the first positive grid point
-    inside it rather than evaluated at the singularity.
+    inside it, and is not evaluated at the singularity.
+
+    Parameters
+    ----------
+    xs_energies_ev, xs_values
+        The table: energies in eV, ascending, and :math:`\sigma` in barns.
+    e_lo_ev, e_hi_ev : float
+        Window edges in eV.
+    weighting : {"lethargy", "constant"}
+        The flux weight :math:`w`: ``'lethargy'`` is :math:`1/E`, ``'constant'``
+        is 1. Any other string is read as ``'constant'``.
+    xs_interpolation : sequence of (int, int), optional
+        The table's ``(NBT, INT)`` regions. None is one lin-lin region.
+
+    Returns
+    -------
+    float
+        The average, in barns. When the window does not overlap the table, or
+        the average is not finite, :math:`\sigma` read nominally at the lower
+        edge.
     """
     grid = np.asarray(xs_energies_ev, dtype=float)
     values = np.asarray(xs_values, dtype=float)
@@ -496,13 +675,29 @@ def sigma_folded(xs_energies_ev, xs_values, energy_ev, tof: TofResolution):
 
     Averages :math:`\sigma` over a Gaussian kernel
     :math:`N(E_0, \sigma_E^2)`, exactly for the lin-lin interpolant of the
-    table (:func:`kika.algebra.fold.fold_tabulated`), with :math:`\sigma_E`
+    table (:func:`kika.algebra.fold_tabulated`), with :math:`\sigma_E`
     from ``tof``.  Vectorized over ``energy_ev``.
 
     Note the folding samples :math:`\sigma` **linearly** (``numpy.interp``
-    semantics), unlike :func:`sigma_nominal`.  That is deliberate: the fold is
-    an integral of the tabulated interpolant, and log-log sampling inside it
-    would bias the quadrature near zeros.
+    semantics), unlike :func:`sigma_nominal`, which honours the table's own
+    law. The fold is an integral of the lin-lin interpolant, and log-log
+    sampling inside it would bias the quadrature near zeros.
+
+    Parameters
+    ----------
+    xs_energies_ev, xs_values
+        The table: energies in eV, ascending, and :math:`\sigma` in barns.
+    energy_ev : float or array_like
+        Kernel centroids :math:`E_0` in eV.
+    tof : TofResolution
+        Gives the kernel's standard deviation :math:`\sigma_E` at each centroid.
+        Where it is 0 the result is the table read at the centroid.
+
+    Returns
+    -------
+    float or numpy.ndarray
+        The folded :math:`\sigma` in barns: a float for a scalar ``energy_ev``,
+        otherwise an array of its shape.
     """
     e0 = np.asarray(energy_ev, dtype=float)
     sigma_e_ev = np.asarray(tof.sigma_e_mev(e0 / 1e6), dtype=float) * 1e6
@@ -529,8 +724,32 @@ def resolve_sigma(
 
     ``'nominal'`` → :func:`sigma_nominal`; ``'binavg'`` → :func:`sigma_bin_averaged`
     over ``bin_edges``; ``'folded'`` → :func:`sigma_folded` with ``tof``.  A
-    mode whose inputs are missing falls back to nominal rather than raising, so
-    a UI toggle can never produce a hole in the curve.
+    mode whose inputs are missing (``bin_edges`` or ``tof`` None), or a mode
+    string that is none of the three, falls back to nominal and does not raise.
+
+    Parameters
+    ----------
+    xs_energies_ev, xs_values
+        The table: energies in eV, ascending, and :math:`\sigma` in barns.
+    energy_ev : float or array_like
+        Energies in eV. Not used by ``'binavg'``, which reads ``bin_edges``
+        (one window, so a single value in the result).
+    mode : {"nominal", "binavg", "folded"}
+        The reading.
+    bin_edges : (float, float), optional
+        Window ``(lo, hi)`` in eV, for ``'binavg'``.
+    tof : TofResolution, optional
+        The resolution, for ``'folded'``.
+    weighting : {"lethargy", "constant"}
+        The flux weight of ``'binavg'``; see :func:`sigma_bin_averaged`.
+    xs_interpolation : sequence of (int, int), optional
+        The table's ``(NBT, INT)`` regions, for ``'nominal'`` and ``'binavg'``.
+        ``'folded'`` always reads the table linearly.
+
+    Returns
+    -------
+    float or numpy.ndarray
+        :math:`\sigma` in barns, as the chosen function returns it.
     """
     if mode == "binavg" and bin_edges is not None:
         return sigma_bin_averaged(xs_energies_ev, xs_values, bin_edges[0], bin_edges[1],
@@ -556,6 +775,18 @@ def max_legendre_order(section) -> int:
 
     Returns ``0`` for a section with no Legendre part, e.g. a purely isotropic
     one, which is the correct order for :math:`f(\mu) = 1/2`.
+
+    Parameters
+    ----------
+    section
+        An MF4 section. Its ``legendre_coefficients`` attribute (one row
+        :math:`a_1 \ldots a_{NL}` per incident energy) is read first; if that is
+        missing or empty, its ``num_legendre_coefficients`` count.
+
+    Returns
+    -------
+    int
+        The longest row, or the count, or 0 when neither is available.
     """
     rows = getattr(section, "legendre_coefficients", None)
     if rows:
@@ -607,8 +838,9 @@ class LegendreProvenance:
 
     A viewer built only around stored coefficients shows nothing for the half
     of the evaluations that tabulate :math:`f(\mu)` instead, and shows a mixed
-    section as if its whole energy range were stored.  Both are answered by
-    carrying the provenance next to the numbers rather than inferring it.
+    section as if its whole energy range were stored.  The provenance is carried
+    next to the numbers so that neither is inferred. Get one from
+    :func:`legendre_provenance`.
 
     Attributes
     ----------
@@ -641,6 +873,10 @@ class LegendreProvenance:
 
     @property
     def is_projected(self) -> bool:
+        """True when some of the orders are computed by projection, not stored.
+
+        It is ``projected != "none"``: true for ``"all"`` and ``"above_boundary"``.
+        """
         return self.projected != "none"
 
 
@@ -657,6 +893,24 @@ def legendre_provenance(
     section the two differ by exactly the point of this function -- the file
     stores nothing, and the projection can still give you :math:`a_\ell` up to
     whatever order you ask for.
+
+    Parameters
+    ----------
+    section
+        An MF4 section. Its ``ltt`` attribute (missing or None is 0) selects the
+        case; ``legendre_energies`` gives the boundary of a mixed section.
+    projection_order : int
+        Highest order offered for the projected part. For a tabulated section it
+        is the ``max_order``; for a mixed one ``max_order`` is the larger of it
+        and the stored maximum. An isotropic or Legendre section ignores it.
+
+    Returns
+    -------
+    LegendreProvenance
+        The file's LTT, its name, the highest stored and the highest askable
+        order, which part is projected, and for a mixed section the last
+        energy of the stored Legendre part in eV (None when
+        ``legendre_energies`` is missing or empty).
     """
     ltt = int(getattr(section, "ltt", 0) or 0)
     stored = max_legendre_order(section)
@@ -744,17 +998,37 @@ def coefficients_at_energies(
 ) -> np.ndarray:
     r"""Interpolate :math:`a_l(E)` onto ``query_ev``, honouring the MF4 law.
 
-    ``nbt_int_pairs`` are the MF4 ``(NBT, INT)`` regions for the incident-energy
-    grid.  When omitted the ENDF default of lin-lin (INT=2) over the whole grid
-    is assumed — which is what the app's client-side kernel implicitly did by
-    only ever evaluating *at* grid points.  Outside the tabulated range the edge
-    value is held; callers that would rather show a gap should mask on
-    ``energies_ev[0] / [-1]`` themselves.
+    Outside the tabulated range the edge value is held; mask on
+    ``energies_ev[0]`` and ``energies_ev[-1]`` to show a gap.
+
+    Parameters
+    ----------
+    energies_ev : sequence of float
+        The MF4 incident-energy grid in eV, ascending.
+    coefficients : mapping or numpy.ndarray
+        Either ``{order: values}`` with integer or string keys and one value per
+        grid energy (order 0 is dropped, a missing order below the highest
+        becomes a row of zeros), or an array of shape ``(L, len(energies_ev))``
+        whose row ``i`` is :math:`a_{i+1}`. The coefficients are the
+        dimensionless :math:`a_\ell` of ``f(mu) = sum (2l+1)/2 a_l P_l(mu)``.
+    query_ev : float or sequence of float
+        Energies in eV at which to interpolate.
+    nbt_int_pairs : sequence of (int, int), optional
+        The MF4 ``(NBT, INT)`` regions of the incident-energy grid. None is
+        lin-lin (INT=2) over the whole grid.
+    max_order : int, optional
+        Keep orders up to this one. None keeps all.
 
     Returns
     -------
     np.ndarray
-        Shape ``(L, len(query_ev))``, rows indexed by :math:`l - 1`.
+        Shape ``(L, len(query_ev))``, rows indexed by :math:`l - 1`. With no
+        orders, shape ``(0, len(query_ev))``.
+
+    Raises
+    ------
+    ValueError
+        If a row, or the array, does not have one value per grid energy.
     """
     grid = np.asarray(energies_ev, dtype=float)
     matrix = _as_coefficient_matrix(coefficients, grid.size, max_order)
@@ -800,7 +1074,27 @@ def coefficients_folded(
     is :math:`a_1 \ldots a_L` per energy, exactly as
     :func:`coefficients_at_energies` returns them.
 
-    Returns an ``(L, nq)`` array.
+    Parameters
+    ----------
+    energies_ev : sequence of float
+        The MF4 incident-energy grid in eV, ascending.
+    coefficients : numpy.ndarray
+        Array of shape ``(L, len(energies_ev))``, row ``i`` being :math:`a_{i+1}`.
+        A mapping is not accepted here.
+    query_ev : float or sequence of float
+        Kernel centroids in eV.
+    tof : TofResolution
+        Gives the kernel's standard deviation at each centroid.
+    nbt_int_pairs
+        Not used: the fold reads each coefficient linearly between the grid
+        points, whatever the MF4 law says.
+    max_order : int, optional
+        Keep orders up to this one. None keeps all.
+
+    Returns
+    -------
+    np.ndarray
+        Shape ``(L, len(query_ev))``.
     """
     grid = np.asarray(energies_ev, dtype=float)
     matrix = np.atleast_2d(np.asarray(coefficients, dtype=float))
@@ -830,8 +1124,27 @@ def coefficients_bin_averaged(
     way: exactly, under the MF4 interpolation law ``nbt_int_pairs`` (lin-lin by
     default) and the same flux weight.
 
-    ``bin_edges`` is one ``(lo, hi)`` per output point.  Returns an
-    ``(L, len(bin_edges))`` array.
+    Parameters
+    ----------
+    energies_ev : sequence of float
+        The MF4 incident-energy grid in eV, ascending.
+    coefficients : numpy.ndarray
+        Array of shape ``(L, len(energies_ev))``, row ``i`` being :math:`a_{i+1}`.
+        A mapping is not accepted here.
+    bin_edges : sequence of (float, float)
+        One window ``(lo, hi)`` in eV per output point.
+    weighting : {"lethargy", "constant"}
+        The flux weight, as in :func:`sigma_bin_averaged`.
+    max_order : int, optional
+        Keep orders up to this one. None keeps all.
+    nbt_int_pairs : sequence of (int, int), optional
+        The MF4 ``(NBT, INT)`` regions of the incident-energy grid. None is
+        lin-lin.
+
+    Returns
+    -------
+    np.ndarray
+        Shape ``(L, len(bin_edges))``.
     """
     grid = np.asarray(energies_ev, dtype=float)
     matrix = np.atleast_2d(np.asarray(coefficients, dtype=float))
@@ -882,13 +1195,44 @@ def resolve_coefficients(
     That is the same choice ``scripts/precompute_chi2_folded_al_c0.py`` makes,
     and the two must not disagree.
 
-    .. deprecated:: October 2026
-       Not the reading of a measurement.  A detector counts
-       :math:`\langle\sigma f\rangle`, and the evaluation states
-       :math:`\sigma(E)` and :math:`f(\mu, E)` at every energy, so their
-       product at each energy is exactly what it asserts; averaging the factors
-       apart assumes they do not vary together inside the window.  Use
-       :func:`coefficients_sigma_weighted`.  The app no longer calls this.
+    **Deprecated** for any ``mode`` other than ``'nominal'``: it then issues a
+    ``DeprecationWarning`` saying that it averages the coefficients apart from
+    sigma, and to use :func:`coefficients_sigma_weighted` for what a
+    measurement sees.  A detector counts :math:`\langle\sigma f\rangle`, and the
+    evaluation states :math:`\sigma(E)` and :math:`f(\mu, E)` at every energy,
+    so their product at each energy is what it asserts; averaging the factors
+    apart assumes they do not vary together inside the window.
+
+    Parameters
+    ----------
+    energies_ev : sequence of float
+        The MF4 incident-energy grid in eV, ascending.
+    coefficients : mapping or numpy.ndarray
+        As in :func:`coefficients_at_energies` for ``'nominal'``; an array of
+        shape ``(L, len(energies_ev))`` for the two averaged modes.
+    query_ev : float or sequence of float
+        Energies in eV, for ``'nominal'`` and ``'folded'``. ``'binavg'`` reads
+        ``bin_edges`` instead.
+    mode : {"nominal", "binavg", "folded"}
+        The reading. ``'binavg'`` needs ``bin_edges`` and ``'folded'`` needs
+        ``tof``; without it the result is the nominal one.
+    bin_edges : sequence of (float, float), optional
+        One window ``(lo, hi)`` in eV per output point, for ``'binavg'``.
+    tof : TofResolution, optional
+        The resolution, for ``'folded'``.
+    weighting : {"lethargy", "constant"}
+        The flux weight of ``'binavg'``.
+    nbt_int_pairs : sequence of (int, int), optional
+        The MF4 ``(NBT, INT)`` regions, for ``'nominal'`` and ``'binavg'``; the
+        fold ignores them.
+    max_order : int, optional
+        Keep orders up to this one. None keeps all.
+
+    Returns
+    -------
+    np.ndarray
+        Shape ``(L, n)`` with ``n`` the number of query energies, or of windows
+        for ``'binavg'``.
     """
     if mode != "nominal":
         warnings.warn(
@@ -924,11 +1268,28 @@ def resolution_fold_nodes(
 ) -> Tuple[np.ndarray, np.ndarray]:
     r"""Quadrature nodes and weights for a Gaussian fold over tabulated data.
 
-    :func:`kika.algebra.fold.gaussian_fold_nodes` in eV: every point of every
+    :func:`kika.algebra.gaussian_fold_nodes` in eV: every point of every
     grid inside :math:`E_0 \pm 6\sigma_E` and the window edges, with weights
     exact for the integrand's lin-lin interpolant between them.  The same
     integral :func:`sigma_folded` and :func:`coefficients_folded` take through
-    :func:`~kika.algebra.fold.fold_tabulated`.
+    :func:`~kika.algebra.fold_tabulated`.
+
+    Parameters
+    ----------
+    energy_ev : float
+        Kernel centroid :math:`E_0` in eV.
+    sigma_e_ev : float
+        Standard deviation :math:`\sigma_E` of the kernel in eV.
+    grids : sequence of sequence of float
+        The tables whose points the nodes include, in eV.
+
+    Returns
+    -------
+    (numpy.ndarray, numpy.ndarray)
+        The nodes in eV and their weights, which sum to 1. For
+        ``sigma_e_ev <= 0`` the single node ``energy_ev`` with weight 1, whatever
+        ``grids`` holds. With ``sigma_e_ev > 0``, empty ``grids`` is refused with
+        the error of :func:`kika.algebra.gaussian_fold_nodes`.
     """
     return gaussian_fold_nodes(energy_ev, sigma_e_ev, grids)
 
@@ -954,7 +1315,27 @@ def product_reading_nodes(
 
     Whatever the reading, the average of a product is :math:`\sum_i w_i\,
     \sigma(E_i)\,f(E_i)`, so the resolution acts on what a detector counts and
-    never on the factors one at a time.
+    not on the factors one at a time.
+
+    Parameters
+    ----------
+    energy_ev : float
+        The nominal energy :math:`E_0` in eV.
+    mode : {"nominal", "binavg", "folded"}
+        The reading. ``'folded'`` needs ``tof`` and ``'binavg'`` needs
+        ``bin_edges``; without it the result is the single node of ``'nominal'``.
+    grids : sequence of sequence of float
+        The tables of the product (cross-section grid and MF4 grid), in eV. Their
+        points become the nodes.
+    tof : TofResolution, optional
+        The resolution, for ``'folded'``.
+    bin_edges : (float, float), optional
+        The window ``(lo, hi)`` in eV, for ``'binavg'``.
+
+    Returns
+    -------
+    (numpy.ndarray, numpy.ndarray)
+        The nodes in eV and their weights, which sum to 1.
     """
     e0 = float(energy_ev)
     if mode == "folded" and tof is not None:
@@ -1012,6 +1393,42 @@ def coefficients_sigma_weighted(
     :func:`sigma_folded`) and under the table's own law otherwise
     (``xs_interpolation``, as :func:`sigma_nominal`; lin-lin by default).
     Nominal, it is the file at :math:`E_0`.
+
+    Parameters
+    ----------
+    energies_ev : sequence of float
+        The MF4 incident-energy grid in eV, ascending.
+    coefficients : mapping or numpy.ndarray
+        :math:`a_1 \ldots a_L` on that grid, as in :func:`coefficients_at_energies`.
+    xs_energies_ev, xs_values
+        The cross-section table: energies in eV, ascending, and :math:`\sigma`
+        in barns.
+    energy_ev : float
+        The nominal energy :math:`E_0` in eV.
+    mode : {"nominal", "binavg", "folded"}
+        The reading of :func:`product_reading_nodes`. The ``'binavg'`` weight is
+        always :math:`1/E`. ``'folded'`` needs ``tof`` and ``'binavg'`` needs
+        ``bin_edges``; without it the reading is nominal.
+    tof : TofResolution, optional
+        The resolution, for ``'folded'``.
+    bin_edges : (float, float), optional
+        The window ``(lo, hi)`` in eV, for ``'binavg'``.
+    nbt_int_pairs : sequence of (int, int), optional
+        The MF4 ``(NBT, INT)`` regions of ``energies_ev``. None is lin-lin.
+    max_order : int, optional
+        Keep orders up to this one. None keeps all.
+    xs_interpolation : sequence of (int, int), optional
+        The table's ``(NBT, INT)`` regions. None is one lin-lin region. Not used
+        by a fold.
+
+    Returns
+    -------
+    (numpy.ndarray, float)
+        The effective coefficients :math:`a_1^\mathrm{eff} \ldots a_L^\mathrm{eff}`
+        (shape ``(L,)``) and :math:`\langle\sigma\rangle` in barns. When
+        :math:`\langle\sigma\rangle` is not positive, the coefficients are the
+        mean over the nodes with the reading's own quadrature weights (Gaussian
+        or the :math:`1/E` trapezoid), not weighted by :math:`\sigma`.
     """
     grid = np.asarray(energies_ev, dtype=float)
     xs_grid = np.asarray(xs_energies_ev, dtype=float)
@@ -1074,6 +1491,24 @@ def coefficients_sigma_weighted_folded(
     :func:`coefficients_at_energies`.  The quadrature is
     :func:`resolution_fold_nodes` on the union of both grids.
 
+    Parameters
+    ----------
+    energies_ev : sequence of float
+        The MF4 incident-energy grid in eV, ascending.
+    coefficients : mapping or numpy.ndarray
+        :math:`a_1 \ldots a_L` on that grid, as in :func:`coefficients_at_energies`.
+    xs_energies_ev, xs_values
+        The cross-section table: energies in eV, ascending, and :math:`\sigma`
+        in barns.
+    energy_ev : float
+        The nominal energy :math:`E_0` in eV.
+    tof : TofResolution
+        Gives the kernel's standard deviation :math:`\sigma_E` at ``energy_ev``.
+    nbt_int_pairs : sequence of (int, int), optional
+        The MF4 ``(NBT, INT)`` regions of ``energies_ev``. None is lin-lin.
+    max_order : int, optional
+        Keep orders up to this one. None keeps all.
+
     Returns
     -------
     (np.ndarray, float)
@@ -1092,6 +1527,20 @@ def differential_xs_factor(sigma, per_steradian: bool):
     :math:`d\sigma/d\Omega = \sigma/(2\pi)\,f(\mu)` [barn/sr] when
     ``per_steradian``, else :math:`d\sigma/d\mu = \sigma\,f(\mu)` [barn].
     Both follow from :math:`\int f\,d\mu = 1`.
+
+    Parameters
+    ----------
+    sigma : float or array_like
+        Cross section in barns.
+    per_steradian : bool
+        True for :math:`d\sigma/d\Omega` (divides by :math:`2\pi`), False for
+        :math:`d\sigma/d\mu`.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``sigma / (2*pi)`` (barn per steradian, since :math:`f` is per unit
+        cosine) or ``sigma`` (barn), of the shape of ``sigma``; 0-d for a scalar.
     """
     return (np.asarray(sigma, dtype=float) / (2.0 * np.pi)) if per_steradian else np.asarray(sigma, dtype=float)
 
@@ -1111,7 +1560,7 @@ def differential_xs_vs_angle(
 
     ``mu`` is interpreted in ``native_frame`` — the frame the MF4 coefficients
     are given in, from the section's LCT flag.  With ``sigma=None`` the
-    normalized PDF is returned instead, which is the panel's "PDF" view.
+    normalized PDF :math:`f(\mu)` (per unit cosine) is returned instead.
 
     When ``output_frame`` differs from ``native_frame`` the curve is moved with
     :func:`transform_angular_curve` (elastic only), so the returned cosine grid
@@ -1119,10 +1568,44 @@ def differential_xs_vs_angle(
 
     ``pdf_values`` short-circuits the reconstruction: a section that stores
     :math:`f(\mu)` as a table can hand its own values in and skip the round
-    trip through a truncated expansion.  Everything after that point -- the
-    cross section factor, the frame transform, the units -- is a property of
-    the view and not of the representation, which is why the two paths meet
-    here rather than in two copies of this function.
+    trip through a truncated expansion.
+
+    Parameters
+    ----------
+    mu : sequence of float
+        Cosines in ``native_frame``.
+    a_coeffs : sequence of float, optional
+        :math:`a_1 \ldots a_L` at the energy of interest, without :math:`a_0`.
+        Not used when ``pdf_values`` is given.
+    sigma : float, optional
+        Cross section in barns. None returns the PDF with no scaling.
+    pdf_values : sequence of float, optional
+        :math:`f(\mu)` at ``mu``, same shape as ``mu``. It takes precedence over
+        ``a_coeffs``.
+    per_steradian : bool
+        True: the scale is :math:`\sigma/2\pi` and the values are
+        :math:`d\sigma/d\Omega` in barn/sr. False: :math:`d\sigma/d\mu` in barn.
+        Ignored when ``sigma`` is None.
+    alpha : float
+        Mass ratio from :func:`frame_alpha`. The frame change needs it positive;
+        with 0 the curve is returned in ``native_frame`` whatever
+        ``output_frame`` says.
+    native_frame : {"cm", "lab"}
+        The frame of ``mu`` and of the coefficients.
+    output_frame : {"cm", "lab"}, optional
+        The frame of the result. None keeps ``native_frame``.
+
+    Returns
+    -------
+    (numpy.ndarray, numpy.ndarray)
+        The cosines (in the output frame) and the values there, both of the
+        shape of ``mu``.
+
+    Raises
+    ------
+    ValueError
+        If neither ``a_coeffs`` nor ``pdf_values`` is given, or ``pdf_values`` does
+        not have the shape of ``mu``.
     """
     mu = np.asarray(mu, dtype=float)
     if pdf_values is not None:
@@ -1174,46 +1657,76 @@ def differential_xs_vs_energy(
     Parameters
     ----------
     energies_ev, coefficients
-        The MF4 incident-energy grid and its :math:`a_l(E)`, in the app's
-        ``{order: [...]}`` wire shape or as an ``(L, n_energies)`` matrix.
-    mu
+        The MF4 incident-energy grid in eV, ascending, and its :math:`a_l(E)`
+        as ``{order: [...]}`` or as an ``(L, n_energies)`` matrix (see
+        :func:`coefficients_at_energies`). With ``pdf_at_energies`` the
+        coefficients are not read.
+    mu : float
         Target cosine, expressed in ``mu_frame``.
     xs_energies_ev, xs_values
-        :math:`\sigma(E)`.  Omit both to get the bare PDF :math:`f(\mu, E)`,
-        which is the useful view when only the *shape*'s energy dependence
-        matters.
-    xs_interpolation
-        The sigma table's ``(NBT, INT)`` pairs. ``None`` is one lin-lin region,
-        which is what a PENDF or an ACE file states; pass an evaluation's MF3
-        regions to read it under its own laws.
-    query_energies_ev
-        Output grid.  Defaults to the MF4 grid; a denser grid is interpolated
-        through :func:`coefficients_at_energies` under ``nbt_int_pairs`` and
-        clipped to the MF4 range.
-    pdf_at_energies
-        ``f(mu_native, energies) -> array``, for a section that stores the
-        distribution itself and would otherwise be routed through a truncated
-        expansion.  Given as a callable rather than an array because the output
-        grid is decided here -- it is clipped to where MF4 has data -- so only
-        this function knows the energies the values have to line up with.
-        Everything downstream (the sigma modes, the frame jacobian, the units)
-        is the same either way, which is why both representations meet here.
-    xs_mode
-        ``'nominal'``, ``'binavg'`` or ``'folded'``.  The two averaged readings
-        average the product :math:`\sigma(E)\,f(\mu, E)` over the window, which
-        is what a detector at a fixed angle counts (:func:`product_reading_nodes`);
+        :math:`\sigma(E)`: energies in eV and cross section in barns.  Omit
+        either to get the bare PDF :math:`f(\mu, E)`, which is the useful view
+        when only the shape's energy dependence matters.
+    mu_frame, native_frame : {"cm", "lab"}
+        The frame of ``mu`` (default LAB) and the frame the coefficients are
+        given in (default CM). When they differ and ``alpha`` is positive,
+        ``mu`` is mapped once to ``mu_native`` and the density is multiplied by
+        the Jacobian (``jacobian`` in the result). With ``alpha`` 0 no
+        conversion is made, whatever the frames say.
+    alpha : float
+        Mass ratio from :func:`frame_alpha`. Elastic scattering only.
+    per_steradian : bool
+        True (default): :math:`d\sigma/d\Omega` in barn/sr. False:
+        :math:`d\sigma/d\mu` in barn.
+    xs_mode : {"nominal", "binavg", "folded"}
+        The reading of :math:`\sigma`. The two averaged readings average the
+        product :math:`\sigma(E)\,f(\mu, E)` over the window, which is what a
+        detector at a fixed angle counts (:func:`product_reading_nodes`);
         ``sigma`` in the result is then :math:`\langle\sigma\rangle`.  A bin is
-        the MF4 bin of the output energy.  Until October 2026 the two factors were
-        averaged separately, which parts from this wherever :math:`\sigma` has
-        structure inside the window.  Pair a fold with
-        :func:`dsigma_vs_energy_grid` for ``query_energies_ev``.
+        the MF4 bin of the output energy, weighted by :math:`1/E`.  ``'folded'``
+        without ``tof`` gives the nominal reading; without a cross-section table
+        no reading applies. Pair a fold with :func:`dsigma_vs_energy_grid`
+        for ``query_energies_ev``.
+    tof : TofResolution, optional
+        The resolution, for ``'folded'``.
+    weighting : {"lethargy", "constant"}
+        Not used: ``'binavg'`` is always weighted by :math:`1/E` here.
+    query_energies_ev : sequence of float, optional
+        Output grid in eV.  Defaults to the MF4 grid; a denser grid is
+        interpolated through :func:`coefficients_at_energies` under
+        ``nbt_int_pairs``, and the energies outside the MF4 range are dropped.
+    nbt_int_pairs : sequence of (int, int), optional
+        The MF4 ``(NBT, INT)`` regions of ``energies_ev``. None is lin-lin.
+    max_order : int, optional
+        Keep orders up to this one. None keeps all.
+    pdf_at_energies : callable, optional
+        ``f(mu_native, energies) -> array`` with one value per energy, for a
+        section that stores the distribution itself: it replaces the
+        coefficients, and ``nbt_int_pairs`` and ``max_order`` are then not read.
+        The sigma modes, the Jacobian and the units are the same either way.
+    xs_interpolation : sequence of (int, int), optional
+        The sigma table's ``(NBT, INT)`` pairs. None is one lin-lin region,
+        which is what a PENDF or an ACE file states; pass an evaluation's MF3
+        regions to read it under its own laws. A fold reads the table linearly.
 
     Returns
     -------
     dict
-        ``energies`` (eV), ``values``, ``mu_native``/``mu_requested``,
-        ``jacobian``, ``y_unit``, and ``sigma`` — the :math:`\sigma(E)` actually
-        used, so a caller can show what the reconstruction mode did.
+        ``energies`` (the output grid, eV), ``values`` (in ``y_unit``, with the
+        Jacobian applied), ``sigma`` (the :math:`\sigma(E)` used in barns, as an
+        array on the output grid; :math:`\langle\sigma\rangle` for an averaged
+        reading; None when no table was given), ``mu_requested`` and
+        ``mu_native`` (the cosines in ``mu_frame`` and ``native_frame``),
+        ``jacobian`` (1.0 when no frame change), ``frame``, ``native_frame``,
+        ``xs_mode`` (as passed) and ``y_unit`` (``"barn/sr"``, ``"barn"``, or
+        ``"Probability Density"`` for the bare PDF).
+
+    Raises
+    ------
+    ValueError
+        If ``energies_ev`` is empty, ``pdf_at_energies`` returns a different
+        number of values from the energies, or a coefficient row does not have
+        one value per grid energy.
     """
     grid = np.asarray(energies_ev, dtype=float)
     if grid.size == 0:
@@ -1410,6 +1923,22 @@ def dsigma_vs_energy_grid(
       :math:`\sigma_E/4` apart.  The folded curve is smooth on the scale of
       the kernel, so a point every quarter width resolves it, and where the
       table is coarser than that every table point is kept.
+
+    Parameters
+    ----------
+    xs_energies_ev : sequence of float
+        The cross-section grid in eV. Only the points inside the MF4 range are
+        used.
+    mf4_energies_ev : sequence of float
+        The MF4 incident-energy grid in eV, ascending.
+    tof : TofResolution, optional
+        None for the nominal grid; with it, the thinned folded grid.
+
+    Returns
+    -------
+    numpy.ndarray
+        Ascending energies in eV, with the two ends of the MF4 grid always
+        present; empty when ``mf4_energies_ev`` is empty.
     """
     xs_grid = np.asarray(xs_energies_ev, dtype=float)
     mf4 = np.asarray(mf4_energies_ev, dtype=float)
