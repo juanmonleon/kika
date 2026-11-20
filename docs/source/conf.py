@@ -147,7 +147,6 @@ _DRAFTS_TOCTREE = """
    drafts/methods/index
    drafts/methods/**
    drafts/user_guide/**
-   drafts/api_reference/**
 """
 
 _DRAFT_BANNER = """
@@ -164,9 +163,8 @@ def _wireDrafts(app, docname, source):
         source[0] += _DRAFTS_TOCTREE
     elif docname == "pdf_index":
         # The PDF is the manual of methods and architecture (WRITING_MANUAL §2):
-        # the user-guide and API drafts stay online.
-        source[0] += (_DRAFTS_TOCTREE.replace("   drafts/user_guide/**\n", "")
-                      .replace("   drafts/api_reference/**\n", ""))
+        # the user-guide drafts stay online.
+        source[0] += _DRAFTS_TOCTREE.replace("   drafts/user_guide/**\n", "")
     elif docname.startswith("drafts/"):
         lines = source[0].split("\n")
         title = next((i for i, line in enumerate(lines) if line.startswith("# ")), -1)

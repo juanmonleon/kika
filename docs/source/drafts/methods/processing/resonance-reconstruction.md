@@ -20,7 +20,7 @@ Limited (LRF=7); the unresolved range is on its own page,
 {py:func}`kika.processing.resonances.attach_reconstruction`; the low-level pieces
 {py:func}`kika.processing.resonances.prepare_resonances` and
 {py:func}`kika.processing.resonances.tabulate_resonances`. Signatures in
-{doc}`../../api_reference/processing-resonances`.
+{doc}`/api_reference/processing-resonances`.
 
 **Status:** experimental — not yet in a release (after 0.4.0).
 ```

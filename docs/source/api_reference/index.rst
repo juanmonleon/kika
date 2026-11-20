@@ -34,3 +34,25 @@ Module Reference
    model
    endf
    sampling
+   sampling-core
+   nuclear-data
+   algebra
+   energy-grids
+   utils-energy-folding
+   endf-checks-and-dcs
+   gnds
+   processing
+   processing-doppler
+   processing-resonances
+   cov-assembly
+   uq-tmc
+   njoy
+   hdf5
+   tsl
+   g4ndl
+   plotting
+   exfor
+   sinbad
+   serpent
+   materials
+   wwinp

@@ -40,7 +40,7 @@ Tolerances of the processing chain
 ----------------------------------
 
 NJOY's thermal rule and the shares of a heated table's tolerance; the method is
-in :doc:`/drafts/methods/processing/processing-chain`.
+in the processing-chain page of the manual.
 
 .. autofunction:: kika.processing.tolerances.thermalFactor
 

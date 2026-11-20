@@ -533,7 +533,7 @@ separately from retained source/result arrays.
 `table` refines and verifies interpolated forms; `suite` prepares semantic input,
 derives sums and attaches an independent Heated copy atomically. Temperature
 styles do not automatically heat every other object in a reaction suite.
-See {doc}`../../user_guide/doppler-broadening` for a worked API workflow and {doc}`../../api_reference/processing-doppler`
+See {doc}`../../user_guide/doppler-broadening` for a worked API workflow and {doc}`/api_reference/processing-doppler`
 for generated contracts.
 
 ## References
