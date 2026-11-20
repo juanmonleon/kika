@@ -721,27 +721,91 @@ def _revision():
 # --------------------------------------------------------------------------- object
 
 class ProcessingReport:
-    """A processing report. Build it with ``EndfProcessing.report_document()``.
+    """A processing report: did the run go well, and what exactly was done.
 
-    ``to_text()``, ``to_html()``, ``to_dict()``, ``to_json()``, ``save(path)``."""
+    Built with :meth:`~kika.endf.EndfProcessing.report_document`;
+    the text, HTML and JSON forms all come from the same data. The data holds the
+    verdict (``summary``: ``status``, ``headline``, ``incomplete``, ``counts``,
+    ``detail``), the ``stages`` with their checks, the ``outputs`` written and how
+    each was verified, the ``choices`` kika made, the ``steps`` in order and the
+    run's provenance. Its ``schema`` is ``kika-processing-report/1``.
+
+    Parameters
+    ----------
+    data : dict
+        The report's data, plain types only, as ``build`` makes it from a run.
+    """
 
     def __init__(self, data: dict):
         self._data = data
 
     def to_dict(self) -> dict:
+        """The report's data as plain types: a deep copy that can be changed freely."""
         return json.loads(json.dumps(self._data))
 
     def to_json(self, **kwargs) -> str:
+        """The report's data as a JSON string.
+
+        Parameters
+        ----------
+        **kwargs
+            Passed to ``json.dumps``; ``indent=1`` unless given.
+
+        Returns
+        -------
+        str
+            The JSON text, with ``summary.status`` and the flat ``checks`` list.
+        """
         return json.dumps(self._data, **({"indent": 1} | kwargs))
 
     def to_text(self, **kwargs) -> str:
+        """The report as plain ASCII text.
+
+        Paragraphs wrap at 100 characters; table rows are not wrapped and can
+        be longer.
+
+        Parameters
+        ----------
+        **kwargs
+            Ignored.
+
+        Returns
+        -------
+        str
+            The text, ending with a newline.
+        """
         return _render_text(self._data)
 
     def to_html(self, **kwargs) -> str:
+        """The report as a self-contained HTML page (a full document with its styles).
+
+        Parameters
+        ----------
+        **kwargs
+            Ignored.
+
+        Returns
+        -------
+        str
+            The HTML document.
+        """
         return _render_html(self._data)
 
     def save(self, path):
-        """Write by extension: ``.html``/``.htm``, ``.json``, anything else as text."""
+        """Write the report to *path*, in the form its extension names.
+
+        Parameters
+        ----------
+        path
+            ``.html`` or ``.htm`` gives HTML, ``.json`` gives JSON and any other
+            extension gives text; the extension is read in lower case. The file is
+            written in UTF-8 and replaces an existing one; its folder must exist.
+
+        Returns
+        -------
+        pathlib.Path
+            *path*.
+        """
         path = Path(path)
         suffix = path.suffix.lower()
         body = (self.to_html() if suffix in (".html", ".htm") else

@@ -47,8 +47,29 @@ def context_from_endf(tape, suite):
 
     RML: the elastic particle pair of the normalized model. Otherwise the AWRI
     of the first MF2 block that declares one, else the MF1 AWR; SPI of the
-    first MF2 range. Returns ``(context or None, source)``; ``None`` when the
-    material has no resonance physics and needs none.
+    first MF2 range.
+
+    Parameters
+    ----------
+    tape
+        The ENDF tape as read (MF1 and MF2 at least).
+    suite
+        The reaction suite decoded from it; its ``resonances`` say whether there
+        is resonance physics.
+
+    Returns
+    -------
+    tuple
+        ``(context, source)``: a ``NeutronContext`` and a string naming where it
+        came from (``"RML elastic pair"``, ``"MF2 AWRI (LRU=1)"`` or ``LRU=2``,
+        ``"MF1 AWR"``). ``(None, "no resonance physics")`` when the material has
+        no resonance parameters and needs none.
+
+    Raises
+    ------
+    ~kika.processing.resonances.UnsupportedResonanceError
+        With ``category`` ``context-missing`` when MF2 declares no target spin,
+        or when neither MF2 nor MF1 gives a mass ratio.
     """
     from kika.processing.resonances import NeutronContext, UnsupportedResonanceError
     resonances = suite.resonances
@@ -77,7 +98,26 @@ def context_from_endf(tape, suite):
 @dataclass(frozen=True)
 class ReconstructedTable:
     """One reaction as a lin-lin table. A repeated energy is a real jump (a
-    range boundary): keep both points, do not deduplicate or sort them away."""
+    range boundary): keep both points, do not deduplicate or sort them away.
+
+    Returned by :meth:`EndfReconstruction.tables_by_mt`, one per MT.
+
+    Attributes
+    ----------
+    energies : numpy.ndarray
+        Energies in eV, increasing; a jump repeats its energy.
+    values : numpy.ndarray
+        Cross sections in b at *energies*, interpolated linearly.
+    qm : float or None
+        The ``QM`` of the MF3 section header in eV, ``None`` when the section
+        states none.
+    qi : float or None
+        The ``QI`` of the MF3 section header in eV; when the header gives none,
+        the reaction's Q value as the model derives it, which may be ``None``.
+    lr : int or None
+        The ``LR`` flag (complex or "breakup" reaction) of the MF3 section,
+        ``None`` when it is not stated.
+    """
     energies: np.ndarray
     values: np.ndarray
     qm: float | None
@@ -87,7 +127,43 @@ class ReconstructedTable:
 
 @dataclass
 class EndfReconstruction:
-    """A reconstructed tape: the model, the result and what produced it."""
+    """A reconstructed tape: the model, the result and what produced it.
+
+    Returned by :func:`reconstruct_endf`; not built by hand. Reconstruction and
+    publication are separate: :meth:`tables_by_mt` gives the tables, and
+    :meth:`write_pendf` writes and verifies the PENDF.
+
+    Attributes
+    ----------
+    path : pathlib.Path
+        The tape that was read.
+    suite
+        The reaction suite decoded from the tape (MF1 to MF3).
+    result
+        The ``SuiteReconstructionResult``: the tabulated cross sections of every
+        reaction (energies in eV, cross sections in b, linear-linear) and the
+        report of the run.
+    context
+        The ``NeutronContext`` (target mass ratio and spin) the reconstruction
+        used, or ``None`` when the material has no resonance physics.
+    context_source : str
+        Where *context* came from, as ``context_from_endf`` returns it.
+    timings : dict
+        Seconds per step: ``read``, ``decode``, ``reconstruct``, and
+        ``write_verify`` once :meth:`write_pendf` has run.
+    engine_version : str
+        Version of the reconstruction engine.
+    evaluation : dict
+        MF1/451 identification and the MF2 ranges as the tape states them.
+    native_kernel : bool or None
+        Whether the compiled kernel was loaded for this run.
+    publication : dict or None
+        ``None`` until :meth:`write_pendf` runs; then ``path``, ``mat`` and the
+        reload verification (``maxima`` and ``worst``).
+    workers : int or None
+        The ``workers`` the reconstruction was asked for; the default of
+        :meth:`write_pendf`.
+    """
     path: Path
     suite: object
     result: object
@@ -107,12 +183,20 @@ class EndfReconstruction:
 
     @property
     def report(self):
+        """The statistics of the run: the read-only mapping ``result.report``.
+
+        Among its entries are ``domain`` (lowest and highest energy, eV),
+        ``points`` and ``stored_points``.
+        """
         return self.result.report
 
     def report_document(self):
-        """The full report as a :class:`~kika.endf.reconstruction_report.ReconstructionReport`
-        (``to_dict()``, ``to_text()``, ``to_html()``, ``save(path)``). Works before
-        and after :meth:`write_pendf`; after it, verification includes the reload."""
+        """The full report as a ``ReconstructionReport``.
+
+        It offers ``to_dict()``, ``to_text()``, ``to_html()`` and ``save(path)``.
+        Works before and after :meth:`write_pendf`; after it, the verification
+        includes the reload.
+        """
         from .reconstruction_report import ReconstructionReport, build
         return ReconstructionReport(build(self))
 
@@ -147,12 +231,44 @@ class EndfReconstruction:
 
     def write_pendf(self, path, *, progress: Progress | None = None, mat=None, workers: int | None = None):
         """Write the PENDF, reload it and verify it; the destination is replaced
-        only if all of that passes. Raises ``ReconstructionConvergenceError``
-        (``verification-failed`` or ``publication-failed``) otherwise.
+        only if all of that passes.
 
-        ``workers``: threads for the verification physics of heavy materials.
-        Default the reconstruction's own (:func:`reconstruct_endf`); 1 keeps
-        it in this thread. The result is the same either way."""
+        The first call attaches the reconstruction to the suite, after verifying
+        it; later calls reuse that. The folder of *path* is created if missing.
+        Afterwards ``publication`` holds the path, the MAT and the reload
+        verification.
+
+        Parameters
+        ----------
+        path
+            The PENDF to write.
+        progress
+            ``progress("write", fraction)``: ``None`` at the start, then a float
+            in (0, 1].
+        mat
+            MAT of the written material; ``None`` takes the evaluation's own.
+        workers
+            Workers for the verification physics, which runs in parallel only
+            when its work (energies times levels) reaches 1e9, on processes or
+            threads by solver and size. ``None`` takes the reconstruction's
+            own (:func:`reconstruct_endf`); 1 keeps it in this thread. The
+            result is the same either way.
+
+        Returns
+        -------
+        ConversionReport
+            The report of the conversion to ENDF-6, clean when the write
+            succeeds.
+
+        Raises
+        ------
+        ~kika.processing.resonances.ReconstructionConvergenceError
+            With ``category`` ``verification-failed`` when a table, sum or the
+            reload falls outside the budget, or ``publication-failed`` when the
+            file cannot be written or reloaded cleanly.
+        ~kika.processing.resonances.UnsupportedResonanceError
+            If the engine refuses the suite when it is attached.
+        """
         from kika.endf.writers.assemble import PUBLICATION_VERIFY_SHARE, writeReconstructedEndfTape
         from kika.processing.resonances import (ReconstructionConvergenceError,
                                                 UnsupportedResonanceError, attach_reconstruction)
@@ -184,12 +300,41 @@ def reconstruct_endf(path, *, options=None, progress: Progress | None = None,
 
     ``progress(stage, fraction)`` is called with stages ``read``, ``decode``
     and ``reconstruct``; ``fraction`` is ``None`` at the start of a stage and a
-    number in (0, 1] as it advances. Raises on any rejection (see module doc).
+    number in (0, 1] as it advances. There is no partial result: any rejection
+    raises.
 
-    ``workers`` threads share the level sums and the verification physics,
-    here and in :meth:`EndfReconstruction.write_pendf`; when not given,
-    ``KIKA_WORKERS`` or ``min(4, cores // 2)`` at below-normal priority
-    (:mod:`kika.processing.workers`). The tables do not depend on it.
+    Parameters
+    ----------
+    path
+        The ENDF-6 tape; only MF1 to MF3 are read.
+    options
+        A ``ReconstructionOptions``. ``None`` takes its defaults (relative
+        tolerance 1e-3, absolute 1e-8 b) with a budget of 4 000 000 stored
+        points.
+    progress
+        ``progress(stage, fraction)``, as above.
+    workers
+        Threads that share the level sums of large batches, and workers for the
+        verification physics, here and in :meth:`EndfReconstruction.write_pendf`.
+        The verification runs in parallel only when its work (energies times
+        levels) reaches 1e9, on processes or threads by solver and size.
+        ``None`` takes ``KIKA_WORKERS`` or ``min(4, cores // 2)`` at
+        below-normal priority (``kika.processing.workers``). The tables do not
+        depend on it.
+
+    Returns
+    -------
+    EndfReconstruction
+        The 0 K reconstruction of every cross section, in memory; nothing is
+        written.
+
+    Raises
+    ------
+    ~kika.processing.resonances.UnsupportedResonanceError
+        If the evaluation uses data the reconstruction does not support.
+    ~kika.processing.resonances.ReconstructionConvergenceError
+        If a budget runs out or a check fails. Both errors carry a ``category``
+        in ``kika.processing.REJECTION_CATEGORIES``.
     """
     from kika.endf.read_endf import read_endf
     from kika.endf.model_adapter import decodeReactionSuite

@@ -39,6 +39,31 @@ class Location:
     The data checks add three: ``k``, the 0-based subsection within a section
     (the partial distribution of MF5, the product of MF6, the photon of MF12),
     ``zap`` the product's ZA, and ``t`` the 0-based temperature of MF7.
+
+    Attributes
+    ----------
+    mat, mf, mt : int or None
+        The material, file and section of the finding.
+    mat1, mt1 : int or None
+        The second material and section of a cross block (the covariance of
+        ``mt`` with ``mt1``).
+    l, l1 : int or None
+        The Legendre orders of an (L, L1) block of MF34.
+    ni, nc : int or None
+        The 0-based sub-subsection, as described above.
+    lb, ls : int or None
+        The LB and LS of the covariance record.
+    lfs, lfs1 : int or None
+        The final states of an MF40 block.
+    band : int or None
+        The 0-based incident-energy band of MF35.
+    range_index, block : int or None
+        The 0-based energy range of MF32 and the LCOMP=1 short-range block.
+    k, zap, t : int or None
+        The data checks' indices, as described above.
+
+    Every attribute is ``None`` where it does not apply; ``str()`` of the
+    location gives the ones that apply, for example ``MF33 MT102 NI[2]``.
     """
 
     mat: Optional[int] = None
@@ -98,9 +123,9 @@ class Location:
     def to_dict(self) -> Dict[str, Optional[int]]:
         """Every index, ``None`` where it does not apply, as plain Python ints.
 
-        The indices only the data checks use (:data:`DATA_ONLY_FIELDS`) are
-        left out when they are ``None``, so a covariance finding reads as it
-        always has.
+        The indices only the data checks use (``k``, ``zap`` and ``t``) are
+        left out when they are ``None``, so a covariance finding carries only
+        the covariance indices.
         """
         out = {}
         for f in fields(self):
@@ -125,7 +150,31 @@ def location_fields(kind: str) -> Tuple[str, ...]:
 
 @dataclass(frozen=True)
 class Finding:
-    """One thing that is true about a section, with its evidence."""
+    """One thing that is true about a section, with its evidence.
+
+    The checks create them; a user reads them from a report. Constructing one
+    with a ``level`` other than ``note``, ``warn`` or ``defect`` raises
+    ``ValueError``.
+
+    Attributes
+    ----------
+    check : str
+        The name of the check (a key of ``kika.endf.checks.CHECKS``, which says
+        what it means and when it gives each level).
+    level : str
+        ``note``: true and worth knowing, but not a fault (rounding, rows with
+        no variance, a grid that stops short of MF3). ``warn``: probably a
+        fault, or one that only matters in some uses. ``defect``: the section
+        is not what ENDF-6 or physics allows, and using it gives a wrong result.
+        The check decides the level, from the thresholds in its description.
+    summary : str
+        One sentence, in ASCII (``|rho|``); ``to_dict`` gives it with Greek
+        letters.
+    location : Location
+        Where in the file.
+    evidence : dict
+        The numbers behind the finding, keyed by name.
+    """
 
     check: str
     level: str
@@ -167,6 +216,26 @@ class CheckReport:
     method and the legend of the pages. Like the pre-flight's report, it
     defines no truthiness: "is the file ok" depends on which levels the caller
     cares about, so ask :attr:`defects`.
+
+    Returned by :func:`~kika.endf.checks.data.check_data` and
+    :func:`~kika.endf.check_covariances`, or by ``kika.check``. ``len()`` is
+    the number of findings and iterating gives them. ``a + b`` joins the
+    findings of two reports of the same file into one ``"evaluation"`` report
+    (the kind stays when both have it). ``str()`` is a title, a tally by level
+    and one line per finding, worst first.
+
+    Attributes
+    ----------
+    findings : tuple of Finding
+        Every finding, in the order the checks found them.
+    source : str or None
+        The tape's path, when it has one.
+    mat : int or None
+        The material of the tape.
+    mf : tuple of int
+        The files that were asked for (and checked where present).
+    kind : str
+        ``"covariance"``, ``"data"`` or ``"evaluation"``.
     """
 
     findings: Tuple[Finding, ...] = ()
@@ -183,23 +252,57 @@ class CheckReport:
         return len(self.findings)
 
     def at_least(self, level: str) -> Tuple[CovarianceFinding, ...]:
-        """Findings at ``level`` or worse."""
+        """The findings at *level* or worse.
+
+        Parameters
+        ----------
+        level : {"note", "warn", "defect"}
+            The lowest level to keep, in the order note, warn, defect.
+
+        Returns
+        -------
+        tuple of Finding
+            In the report's order.
+
+        Raises
+        ------
+        KeyError
+            If *level* is not one of the three.
+        """
         floor = _RANK[level]
         return tuple(f for f in self.findings if _RANK[f.level] >= floor)
 
     @property
     def defects(self) -> Tuple[CovarianceFinding, ...]:
+        """The findings of level ``defect``.
+
+        Using the section they point at gives a wrong result.
+        """
         return tuple(f for f in self.findings if f.level == DEFECT)
 
     @property
     def warnings(self) -> Tuple[CovarianceFinding, ...]:
+        """The findings of level ``warn`` exactly (not the defects)."""
         return tuple(f for f in self.findings if f.level == WARN)
 
     @property
     def notes(self) -> Tuple[CovarianceFinding, ...]:
+        """The findings of level ``note`` exactly."""
         return tuple(f for f in self.findings if f.level == NOTE)
 
     def by_check(self, check: str) -> Tuple[CovarianceFinding, ...]:
+        """The findings of one check, at any level.
+
+        Parameters
+        ----------
+        check
+            A check name, as in ``Finding.check``.
+
+        Returns
+        -------
+        tuple of Finding
+            In the report's order; empty for a name no finding carries.
+        """
         return tuple(f for f in self.findings if f.check == check)
 
     def counts(self) -> Dict[Tuple[str, str], int]:
@@ -241,6 +344,26 @@ class CheckReport:
         counts by level, the summary by (MF, level, check) -- always over every
         finding -- and the findings at *level* or worse, each with its
         ``location_str``. Non-finite numbers in the evidence become ``None``.
+
+        Parameters
+        ----------
+        level : {"note", "warn", "defect"}
+            The lowest level of the findings listed; the default lists every
+            finding. The counts and the summary cover all of them either way.
+
+        Returns
+        -------
+        dict
+            The keys are ``kind``, ``schema``, ``kika_version``, ``tape``,
+            ``totals`` (findings per level), ``counts`` (``mf``, ``level``,
+            ``check`` and ``n`` for each group), ``level``, ``findings`` (worst
+            level first, then by MF and MT) and ``checks`` (what each check that
+            fired means).
+
+        Raises
+        ------
+        KeyError
+            If *level* is not one of the three.
         """
         from .export import report_dict
 
@@ -251,13 +374,42 @@ class CheckReport:
 
         Lists the findings at *level* or worse (notes are only counted by
         default) after the summary, and ends with the method and thresholds.
+
+        Parameters
+        ----------
+        path
+            Where to write the text, in UTF-8; an existing file is replaced.
+            ``None`` writes nothing.
+        level : {"note", "warn", "defect"}
+            The lowest level of the findings listed.
+
+        Returns
+        -------
+        str
+            The Markdown text.
         """
         from .export import report_markdown, write_text
 
         return write_text(report_markdown(self, level), path)
 
     def to_html(self, path=None, *, level: str = WARN) -> str:
-        """The same report as :meth:`to_markdown`, as one HTML page with no external resources."""
+        """The same report as :meth:`to_markdown`, as one HTML page.
+
+        The page has no external resources.
+
+        Parameters
+        ----------
+        path
+            Where to write the page, in UTF-8; an existing file is replaced.
+            ``None`` writes nothing.
+        level : {"note", "warn", "defect"}
+            The lowest level of the findings listed.
+
+        Returns
+        -------
+        str
+            The HTML page.
+        """
         from .export import report_html, write_text
 
         return write_text(report_html(self, level), path)
@@ -292,6 +444,16 @@ class CheckReport:
 
 @dataclass(frozen=True)
 class CovarianceCheckReport(CheckReport):
-    """Every finding of :func:`check_covariances` on one file."""
+    """Every finding of :func:`~kika.endf.check_covariances` on one file.
+
+    A :class:`CheckReport` whose ``kind`` defaults to ``"covariance"``.
+
+    Attributes
+    ----------
+    findings, source, mat, mf
+        As in :class:`CheckReport`.
+    kind : str
+        ``"covariance"``.
+    """
 
     kind: str = "covariance"

@@ -67,12 +67,30 @@ def check_data(source, *, mf: Optional[Sequence[int]] = None, deep: bool = False
     ----------
     source : path or ENDF
         A tape on disk (read lazily: only the files the checks need are
-        parsed) or an :class:`~kika.endf.classes.endf.ENDF` already read.
+        parsed) or an ``ENDF`` object already read.
     mf : sequence of int, optional
-        Check only these files (and nothing about the others); all by default.
+        Check only these files (and nothing about the others); ``None`` checks
+        all of MF1 to MF10, MF12 to MF15, MF23, MF26, MF27 and MF28. Other
+        numbers are ignored; an empty sequence checks nothing. A family of
+        checks runs when *mf* names any file it reads: general (MF1),
+        resonances (MF2), cross sections (MF3), distributions (MF4 to MF6),
+        photons (MF12 to MF15), thermal scattering (MF7), decay and yields
+        (MF8) and photo-atomic (MF23, MF27 and MF28). No family reads MF9,
+        MF10 or MF26, so they are only checked for being readable, except that
+        the general family (run when *mf* is ``None`` or includes 1) compares
+        the HEAD ZA and AWR of every file the tape holds, those three included,
+        with the header (``head_za_mismatch``, ``head_awr_mismatch``).
     deep : bool
-        Also reconstruct the cross sections and check what codes will use
-        (:mod:`.deep`): positivity, sums and 1/v. Needs MF3 asked for.
+        Also reconstruct the cross sections and check what codes will use:
+        positivity, sums and 1/v. It does nothing unless *mf* includes 3 (or is
+        ``None``); the checks then cost a reconstruction.
+
+    Returns
+    -------
+    CheckReport
+        Of kind ``"data"``. Its ``mf`` holds the files asked for that the tape
+        has; a file or section the parser could not read is a ``defect``
+        finding (``file_unreadable`` or ``section_unreadable``).
     """
     from kika.endf import open_endf
 
