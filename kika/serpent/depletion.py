@@ -166,7 +166,7 @@ class DepletionFile:
     days : numpy.ndarray
         The ``DAYS`` vector, one value per step.
     """
-    zai:List[int] = field(default_factory=list)
+    zai: List[int] = field(default_factory=list)
     names: List[str] = field(default_factory=list)
     materials: Dict[str, DepletionMaterial] = field(default_factory=dict)
     totals: Dict[str, np.ndarray] = field(default_factory=dict)

@@ -87,7 +87,7 @@ class HistoryFile:
     n_total : int
         Rows of ``HIS_TIME``: inactive plus active cycles.
     """
-    time: np.ndarray                         # (N, 2) → [cycle, wall_time_seconds]
+    time: np.ndarray                          # (N, 2) → [cycle, wall_time_seconds]
     variables: Dict[str, HistoryVariable] = field(default_factory=dict)
     n_inactive: int = 0                       # number of inactive cycles
     n_total: int = 0                          # total cycles (inactive + active)

@@ -135,7 +135,7 @@ class Response:
         Free label; the parser leaves it None.
     """
 
-    base_name: str             # e.g. "sens_ratio"
+    base_name: str               # e.g. "sens_ratio"
     bin_index: Optional[int]     # None or 0..N-1
     full_name: str               # e.g. "sens_ratio_BIN_0"
     label: Optional[str] = None
