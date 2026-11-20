@@ -26,10 +26,8 @@ kika.endf.remote
 ----------------
 
 Evaluations downloaded from the IAEA Nuclear Data Services, and cached.
-
-.. autofunction:: kika.endf.remote.download_endf
-
-.. autofunction:: kika.endf.remote.fetch_endf
+:func:`kika.endf.download_endf` and :func:`kika.endf.fetch_endf` are listed with the
+package above.
 
 .. autofunction:: kika.endf.remote.get_catalog
 

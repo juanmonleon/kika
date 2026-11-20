@@ -61,7 +61,7 @@ DATA_MF = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 23, 26, 27, 28)
 
 
 def check_data(source, *, mf: Optional[Sequence[int]] = None, deep: bool = False) -> CheckReport:
-    """Check the data of one evaluation; returns a :class:`CheckReport` of kind ``"data"``.
+    """Check the data of one evaluation; returns a :class:`~kika.endf.checks.CheckReport` of kind ``"data"``.
 
     Parameters
     ----------

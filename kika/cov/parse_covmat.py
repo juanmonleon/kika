@@ -738,7 +738,7 @@ def write_coverx(
     title: str = '', endian: str = '>',
 ) -> None:
     """
-    Write a :class:`CrossSectionCovariance` to a COVERX covariance file (text or binary).
+    Write a :class:`~kika.cov.CrossSectionCovariance` to a COVERX covariance file (text or binary).
 
     The file holds its group boundaries in eV, descending: an ascending grid is
     reversed on output, together with both axes of every matrix and the
@@ -768,7 +768,7 @@ def write_coverx(
     Raises
     ------
     TypeError
-        If *data* is a :class:`LegendreCovariance`.
+        If *data* is a :class:`~kika.cov.LegendreCovariance`.
     """
     if isinstance(data, LegendreCovariance):
         raise TypeError(
@@ -1281,7 +1281,7 @@ def write_boxer(
     nvf: int = 10,
 ) -> None:
     """
-    Write a :class:`CrossSectionCovariance` to a BOXER card-image (ASCII) file.
+    Write a :class:`~kika.cov.CrossSectionCovariance` to a BOXER card-image (ASCII) file.
 
     The energy grid is written in the order held (no reordering), in eV (an
     ``energy_unit`` of ``'MeV'`` is converted, with a warning). Each matrix is
@@ -1308,7 +1308,7 @@ def write_boxer(
     Raises
     ------
     TypeError
-        If *data* is a :class:`LegendreCovariance`.
+        If *data* is a :class:`~kika.cov.LegendreCovariance`.
     ValueError
         If an isotope maps to a MAT above 99999 (the field has five characters).
     """
@@ -1719,8 +1719,8 @@ def read_covfil(file_path: str, energy_unit: str = 'eV') -> Union[CrossSectionCo
     """
     Parse an NJOY-generated COVFIL/GENDF covariance file.
 
-    Returns a :class:`CrossSectionCovariance` for MF33 files (cross-section covariances) or an
-    :class:`LegendreCovariance` for MF34 files (angular-distribution covariances).
+    Returns a :class:`~kika.cov.CrossSectionCovariance` for MF33 files (cross-section covariances) or an
+    :class:`~kika.cov.LegendreCovariance` for MF34 files (angular-distribution covariances).
 
     MF3 cross sections are stored in ``CrossSectionCovariance.cross_sections`` (MF33 case only).
 
@@ -1746,9 +1746,9 @@ def read_covfil(file_path: str, energy_unit: str = 'eV') -> Union[CrossSectionCo
     Returns
     -------
     CrossSectionCovariance or LegendreCovariance
-        :class:`CrossSectionCovariance` if the covariance data is MF33 (grid in
+        :class:`~kika.cov.CrossSectionCovariance` if the covariance data is MF33 (grid in
         ``energy_grid``; ``metadata`` holds ``'awr'`` and ``'temperature'``), or
-        :class:`LegendreCovariance` if it is MF34 (grid in every entry of
+        :class:`~kika.cov.LegendreCovariance` if it is MF34 (grid in every entry of
         ``energy_grids``; same ``metadata``).
 
     Raises
@@ -2059,7 +2059,7 @@ def write_covfil(
     awr: Optional[float] = None,
 ) -> None:
     """
-    Write a :class:`CrossSectionCovariance` or :class:`LegendreCovariance` to an NJOY COVFIL/GENDF text file.
+    Write a :class:`~kika.cov.CrossSectionCovariance` or :class:`~kika.cov.LegendreCovariance` to an NJOY COVFIL/GENDF text file.
 
     Parameters
     ----------

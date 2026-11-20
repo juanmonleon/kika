@@ -988,7 +988,7 @@ class Comparison:
         -------
         pandas.DataFrame
             The comparison's table as the file gives it; see
-            :meth:`Table.to_dataframe`.
+            :meth:`~kika.sinbad.Table.to_dataframe`.
 
         Raises
         ------
