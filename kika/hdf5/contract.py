@@ -40,6 +40,29 @@ SUM_LEVELS = {4: range(51, 92), 16: range(875, 892), 103: range(600, 650),
 
 
 def checkNeutronFile(path) -> List[str]:
+    """The violations of the contract found in a neutron file; empty if it keeps it.
+
+    Parameters
+    ----------
+    path
+        The ``.h5`` file, opened lazily and read-only.
+
+    Returns
+    -------
+    list of str
+        One line per violation, with the HDF5 path where there is one. A violation
+        is returned, never raised. Tolerances: a CDF starts within 1e-12 of 0 (unless
+        the table has discrete lines), ends within 1e-6 of 1 and decreases by no more
+        than 1e-12. Temperature names are checked against kT in eV with
+        8.617333262e-05 eV/K, the value that named the official groups.
+
+    Raises
+    ------
+    KeyError
+        If the nuclide's group lacks ``kTs``, ``energy`` or ``reactions``.
+    TypeError
+        If a reaction has no ``mt`` attribute.
+    """
     with R.openFile(path) as tree:
         return checkNeutronTree(tree)
 
@@ -76,6 +99,28 @@ def _tables(node, where, out):
 
 
 def checkNeutronTree(tree) -> List[str]:
+    """:func:`checkNeutronFile` on a tree already in memory.
+
+    Parameters
+    ----------
+    tree
+        The root :class:`~kika.hdf5.records.Group` of a file, from ``readFile`` or
+        ``openFile`` (or built by hand).
+
+    Returns
+    -------
+    list of str
+        The violations, as in :func:`checkNeutronFile`. If the root does not hold
+        exactly one top-level group, the list ends at that violation and nothing
+        below is checked.
+
+    Raises
+    ------
+    KeyError
+        If a group the checks index (``kTs``, ``energy``, ``reactions``) is missing.
+    TypeError
+        If a reaction has no ``mt`` attribute.
+    """
     out: List[str] = []
     version = R.attr(tree, "version")
     if version is None or int(np.asarray(version)[0]) != HDF5_VERSION[0]:
