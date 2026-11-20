@@ -178,6 +178,11 @@ def decodeMF33MT(mf33mt, report: Optional[ConversionReport] = None,
     for index, matrix in enumerate(covmat.matrices):
         rowMT = int(covmat.reaction_rows[index])
         colMT = int(covmat.reaction_cols[index])
+        if covmat.isotope_cols[index] != covmat.isotope_rows[index]:
+            report.lost(f"MF33/MT{rowMT}: block with MT{colMT} of external "
+                        f"MAT1={covmat.isotope_cols[index]} cannot be linked from "
+                        f"this evaluation; not relabelled as local")
+            continue
         grid = covmat.energy_grids[index] if index < len(covmat.energy_grids) else None
 
         sections.append(CovarianceSection(
