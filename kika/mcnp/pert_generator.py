@@ -1,3 +1,10 @@
+"""Writers of the PERT cards of an MCNP sensitivity run and of the perturbed materials.
+
+A PERT card of the generated run points at a perturbed material (``MAT=``) built by
+:func:`~kika.mcnp.pert_generator.perturb_material`, whose fraction of one nuclide
+is doubled.
+"""
+
 import os
 import re
 from typing import List, Optional, Union
@@ -11,43 +18,57 @@ def perturb_material(materials: MaterialCollection, material_id: int, nuclide: U
                      density: Optional[float] = None, pert_mat_id: Optional[int] = None, 
                      in_place: bool = True, fraction_type: Optional[str] = None) -> Union[MaterialCollection, Material]:
     """Creates a perturbed material with 100% increase in the specified nuclide's fraction.
-    
+
     Creates a new material with a 100% increase in the fraction of the specified nuclide.
     The perturbation is applied after normalizing the original material composition.
-    
+
+    The size is fixed: the nuclide's atomic fraction is doubled (``+100 %``). The
+    fractions are renormalised to 1 afterwards. When *density* is given, the
+    atomic density of the perturbed material is the original one times ``1 + f``,
+    with ``f`` the nuclide's atomic fraction, so that the atoms of the nuclide are
+    doubled and those of the other nuclides are unchanged.
+
     Parameters
     ----------
-    materials : MaterialCollection
+    materials
         The material collection containing the material to perturb.
-    material_id : int
+    material_id
         Material ID number to be perturbed.
-    nuclide : int or str
-        ZAID (int, e.g., 26056) or symbol (str, e.g., 'Fe56') of the nuclide to perturb.
-    density : float, optional
-        Density of the original material. If positive, interpreted as atoms/barn-cm,
-        if negative, interpreted as g/cm³. Used for density recalculation info.
-        If None, density calculations are skipped.
-    pert_mat_id : int, optional
-        ID for the perturbed material. If None, uses material_id * 100 + 1.
-    in_place : bool, optional
-        If True, adds the perturbed material to the existing collection.
-        If False, returns a new MaterialCollection with both original and perturbed materials.
-        Default is True.
-    fraction_type : str, optional
-        Output fraction type: 'atomic'/'ao' or 'weight'/'wo'.
-        If None, uses the same format as the original material.
-    
+    nuclide
+        ZAID (int, e.g., 26056) or symbol (str, e.g., 'Fe56') of the nuclide to
+        perturb. It must be in the material.
+    density
+        Density of the original material, in the MCNP convention: positive is
+        atoms/barn-cm, negative is g/cm³. When given, the perturbed material gets
+        its recomputed mass density in g/cm³ and its ``density_info`` metadata
+        records the original and perturbed densities; if the original material
+        has no density it is set to its mass density in g/cm³. None leaves the
+        density of the perturbed material as the copy of the original had it.
+    pert_mat_id
+        ID for the perturbed material. None uses ``material_id * 100 + 1``.
+    in_place
+        If True, adds the perturbed material to *materials*. If False,
+        *materials* gets no new material and a new collection is returned.
+    fraction_type : {None, "atomic", "ao", "weight", "wo"}
+        Fraction type of the perturbed material. None keeps the type of the
+        original. Any other string prints a warning and leaves atomic fractions.
+
     Returns
     -------
-    MaterialCollection or Material
-        If in_place is True, returns the perturbed Material (collection is modified).
-        If in_place is False, returns a new MaterialCollection containing original and perturbed.
-    
+    ~kika.materials.material.Material or ~kika.materials.material.MaterialCollection
+        With *in_place* True, the perturbed material, which is also in
+        *materials*. With False, a new collection holding a copy of the original
+        and the perturbed material, under their IDs. The perturbed material's
+        ``metadata["perturbation"]`` holds ``original_material_id``,
+        ``perturbed_nuclide`` and ``perturbation_factor`` (2.0). Both cases print
+        a message.
+
     Raises
     ------
     ValueError
-        If the material or nuclide is not found.
-        
+        If the material or nuclide is not found, or the ID of the perturbed
+        material is already in *materials*.
+
     Examples
     --------
     >>> # Modify collection in place
@@ -226,14 +247,29 @@ def generate_pert_cards(inputfile, cell, reactions, material, energies=None,
     perturbation calculations. The density (RHO) value is obtained from the material's
     density attribute in the input file.
 
-    Can handle multiple materials by providing lists for cell, density, and material 
-    parameters. When lists are provided, all list parameters must have the same length 
+    Every card has the form ``PERT<n>:n CELL=<cells> MAT=<material> RHO=<density>
+    METHOD=<m> RXN=<mt> [ERG=<e1> <e2>]``, for neutrons, with long lines wrapped
+    at 80 characters with a trailing ``&``. The cards carry no perturbation size:
+    ``MAT=`` names a perturbed material, built beforehand (see
+    :func:`~kika.mcnp.pert_generator.perturb_material`), and ``RHO=`` is its
+    density. The cards are numbered from one more than the highest PERT number already in the file, in
+    the order material, reaction, energy bin, method. For each bin they are
+    METHOD=2, then METHOD=3 when *order* is 2, then, with *errors*, METHOD=-2 and,
+    when *order* is 2, METHOD=-3 and METHOD=1. Without *energies* there is one
+    group per reaction, with no ``ERG=``.
+
+    When *nuclide* is given, each material's cards are preceded by the comment line
+    ``c kika:pert_zaid=<zaid> pert_mat=<material>``, which
+    :func:`~kika.mcnp.parse_input.read_mcnp` reads back.
+
+    Can handle multiple materials by providing lists for cell, density, and material
+    parameters. When lists are provided, all list parameters must have the same length
     as the materials list. The reactions and energies parameters are applied uniformly
     to all materials.
 
     Parameters
     ----------
-    inputfile : str or Path
+    inputfile
         Path to the MCNP input file. The file must contain the material definitions
         with density information for the specified material(s).
     cell : int, str, list[int], or list[list[int]]
@@ -242,7 +278,7 @@ def generate_pert_cards(inputfile, cell, reactions, material, energies=None,
         - Multiple cells for one material: ``[3, 5, 7]``
         - Multiple materials: ``[[3, 5], [7, 9]]`` (one list per material)
     reactions : list[int]
-        Reaction MT numbers to perturb. Common values:
+        Reaction MT numbers to perturb, written as ``RXN=``. Common values:
         - 1: total cross-section
         - 2: elastic scattering
         - 4: inelastic scattering
@@ -254,53 +290,68 @@ def generate_pert_cards(inputfile, cell, reactions, material, energies=None,
         Can be single value or list for multiple materials.
     energies : array-like, optional
         Energy bin boundaries in MeV, the unit of MCNP's ERG keyword; they are
-        written as given, with no conversion. Must be in ascending order. Used in
+        written as given, with no conversion. Must be strictly ascending. Used in
         consecutive pairs to define energy bins. If None, ERG keyword is omitted
         (energy-integrated). Built-in grids, in MeV, are available via
         ``kika.energy_grids`` (e.g., SCALE44, VITAMINJ175).
     energy_range : tuple of (float or None, float or None), optional
-        Filters ``energies`` to only include boundaries within the range [min, max].
+        Filters ``energies`` to only include boundaries within the range [min, max],
+        both included.
         Either bound can be None to leave it open. For example,
         ``energy_range=(0.05, None)`` keeps boundaries >= 0.05 MeV.
         Ignored if ``energies`` is None.
         Raises ValueError if filtering leaves fewer than 2 boundaries.
     density : float or list[float], optional
         Override density value(s) for RHO in PERT cards. If None (default), uses the
-        density from the material definition in the input file. Following MCNP convention:
+        density from the material definition in the input file (negative, mass
+        density, when the material's density is in g/cm³). Following MCNP convention:
         - Negative value: mass density in g/cm³
         - Positive value: atomic density in atoms/barn-cm
+        A value that differs from the material's density by more than 0.1 % is
+        used and a warning is printed.
     order : int or list[int], optional
-        Perturbation order (default: 2):
+        Perturbation order (default: 2). A list is allowed only with several
+        materials, one entry each:
         - 1: First-order only (METHOD=2)
         - 2: First and second order (METHOD=2 and METHOD=3)
+        Any other value behaves as 1.
     errors : bool, optional
         If True, include exact error method cards (METHOD=-2, -3, 1). These are
         typically negligible and computationally expensive. Default is False.
     in_place : bool, optional
-        If True (default), append PERT cards to the original input file.
-        If False, create a new file with suffix ``_pert_cards``.
+        If True (default), append the PERT cards to the input file itself, after a
+        newline if the file does not end with one.
+        If False, write only the PERT cards to ``<name>_pert_cards<ext>`` in the
+        directory of the input file; an existing file of that name is
+        overwritten.
+    nuclide : int or str, optional
+        Nuclide the perturbed material was built for: a ZAID, or a symbol looked
+        up in the first material of *material*. It only labels the cards with the
+        ``kika:pert_zaid`` comment line; it changes no card.
     pert_material : int, list[int], optional
         Perturbed material ID(s) used for ``MAT=`` in PERT cards. When using
         multi-material mode this should be the ID of the perturbed material
-        (e.g. 41 instead of 400000). If None in single-material mode, falls
-        back to using ``material`` for backward compatibility.
+        (e.g. 41 instead of 400000). If None, ``MAT=`` is the entry of
+        *material*.
     pert_density : float, list[float], optional
-        Perturbed density used for ``RHO=`` in PERT cards. When using
-        multi-material mode this should be the recalculated density of the
-        perturbed material. If None, falls back to the resolved original
-        density for backward compatibility.
+        Perturbed density used for ``RHO=`` in PERT cards, in the convention of
+        *density*. When using multi-material mode this should be the recalculated
+        density of the perturbed material. If None, ``RHO=`` is the density
+        resolved from *density* or the material.
 
     Returns
     -------
     None
-        PERT cards are written to the file.
+        The cards are written to the file; the path is printed.
 
     Raises
     ------
     ValueError
-        If energies are not in ascending order, if list parameters have inconsistent
-        lengths, if list-of-lists is provided for reactions/energies, or if material
-        density is not available and not provided.
+        If energies are not strictly ascending, if list parameters have inconsistent
+        lengths, if *density*, *order*, *pert_material* or *pert_density* is a list
+        for a single material, if list-of-lists is provided for reactions/energies,
+        if a material (or the symbol of *nuclide*) is not found in the input file,
+        or if material density is not available and not provided.
 
     Notes
     -----
@@ -680,36 +731,46 @@ def perturb_materials(materials: MaterialCollection, material_ids: List[int],
                       **kwargs) -> List[Material]:
     """Creates perturbed materials for multiple material IDs containing the same nuclide.
 
-    Calls :func:`perturb_material` for each material ID in the list.
+    Calls :func:`~kika.mcnp.pert_generator.perturb_material` for each material ID
+    in the list.
 
     Parameters
     ----------
-    materials : MaterialCollection
+    materials
         The material collection containing the materials to perturb.
-    material_ids : list of int
+    material_ids
         Material ID numbers to perturb.
-    nuclide : int or str
+    nuclide
         ZAID (int) or symbol (str) of the nuclide to perturb.
     density : float or list of float, optional
         Density for each material. If a single float, used for all materials.
         If a list, must match the length of *material_ids*.
     pert_mat_id : int or list of int, optional
-        Perturbed material ID(s). If a single int, used for all materials.
-        If a list, must match the length of *material_ids*.
-        If None, defaults are assigned by :func:`perturb_material`.
+        Perturbed material ID(s). If a single int, used for all materials; with
+        several materials and ``in_place=True`` the second call then fails, as that
+        ID is taken. If a list, must match the length of *material_ids*.
+        If None, defaults are assigned by
+        :func:`~kika.mcnp.pert_generator.perturb_material`.
     **kwargs
-        Additional keyword arguments forwarded to :func:`perturb_material`
-        (e.g., ``in_place``, ``fraction_type``).
+        Additional keyword arguments forwarded to
+        :func:`~kika.mcnp.pert_generator.perturb_material` (e.g., ``in_place``,
+        ``fraction_type``).
 
     Returns
     -------
-    list of Material
-        List of perturbed :class:`Material` objects, one per material ID.
+    list
+        One result of :func:`~kika.mcnp.pert_generator.perturb_material` per
+        material ID, in order: each a perturbed :class:`~kika.materials.material.Material`, or,
+        with ``in_place=False`` in *kwargs*, a new
+        :class:`~kika.materials.material.MaterialCollection` of that material
+        and its original (one collection per ID, not one for all).
 
     Raises
     ------
     ValueError
         If *density* or *pert_mat_id* are lists whose length does not match *material_ids*.
+        Errors of :func:`~kika.mcnp.pert_generator.perturb_material` (material or
+        nuclide not found, ID taken) are raised as they come.
     """
     n = len(material_ids)
     if isinstance(density, list) and len(density) != n:

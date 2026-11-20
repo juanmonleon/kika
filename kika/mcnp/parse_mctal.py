@@ -29,12 +29,27 @@ def read_mctal(filename: Union[str, Path]) -> Mctal:
 
     Every tally, its perturbations (``vals pert``), its fluctuation chart and
     the KCODE block are read. Any tally type, particle and bin structure is
-    accepted.
+    accepted. Values and errors are stored as the file has them: MCNP writes
+    each tally value with its relative error (a fraction of the value, not an
+    absolute error), and kika converts neither.
 
-    :param filename: Path to the MCTAL file.
-    :returns: The parsed file.
-    :raises ValueError: If the file is not a MCTAL file or is inconsistent
-        (e.g. the number of values does not match the bin structure).
+    Parameters
+    ----------
+    filename
+        Path to the MCTAL file. Bytes that are not valid text are replaced.
+
+    Returns
+    -------
+    ~kika.mcnp.mctal.Mctal
+        The tallies keyed by number (``tallies``), the KCODE records (``kcode``,
+        None when the file has none) and the header fields.
+
+    Raises
+    ------
+    ValueError
+        If the file is not a MCTAL file or is inconsistent (e.g. the number of
+        values does not match the bin structure, or a tally listed in ``ntal``
+        is missing).
     """
     with open(filename, "r", errors="replace") as handle:
         lines = handle.read().splitlines()

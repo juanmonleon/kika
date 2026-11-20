@@ -1,3 +1,5 @@
+"""The container that :func:`~kika.mcnp.parse_input.read_mcnp` returns for an MCNP input deck."""
+
 from dataclasses import dataclass
 from kika.materials import MaterialCollection
 from .perturbations import Perturbation
@@ -6,12 +8,17 @@ from kika.energy_grids.utils import _identify_energy_grid
 
 @dataclass
 class Input:
-    """Main class for storing MCNP input data.
+    """The PERT cards and the material cards of an MCNP input deck.
 
-    :ivar perturbation: Container for all perturbation cards in the input
-    :type perturbation: Perturbation
-    :ivar materials: Container for all material cards in the input
-    :type materials: MaterialCollection
+    :func:`~kika.mcnp.parse_input.read_mcnp` returns one. Nothing else of the deck is kept: cells,
+    surfaces, sources and tallies are not parsed and no text of the deck is stored.
+
+    Attributes
+    ----------
+    perturbation : ~kika.mcnp.perturbations.Perturbation
+        The PERT cards, keyed by card number in ``perturbation.pert``.
+    materials : ~kika.materials.material.MaterialCollection
+        The material cards, keyed by material number in ``materials.by_id``.
     """
     perturbation: 'Perturbation' = None
     materials: 'MaterialCollection' = None

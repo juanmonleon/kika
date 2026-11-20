@@ -1,3 +1,12 @@
+"""MCNP input decks, MCTAL and MESHTAL tally files, and PERT cards.
+
+The readers return labelled objects: :func:`~kika.mcnp.parse_input.read_mcnp` keeps
+the PERT cards and the material cards of a deck, and
+:func:`~kika.mcnp.parse_mctal.read_mctal` and
+:func:`~kika.mcnp.parse_meshtal.read_meshtal` the tallies of a run. The generators write the PERT
+cards of a sensitivity run and build the perturbed materials they refer to.
+"""
+
 from .parse_input import read_mcnp
 from .parse_mctal import read_mctal
 from .parse_meshtal import read_meshtal

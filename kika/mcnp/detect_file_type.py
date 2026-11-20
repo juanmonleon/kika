@@ -13,13 +13,32 @@ _MESH_TALLY = re.compile(r'^\s*Mesh Tally Number\s+\d+\s*$')
 def detect_mcnp_file_type(file_path: Optional[str] = None, content: Optional[str] = None) -> str:
     """Detect whether a file is an MCNP input deck, a MCTAL or a MESHTAL file.
 
-    Uses content-based heuristics on the first lines: see :func:`_is_mctal`
-    and :func:`_is_meshtal`. Anything else is taken as an input deck.
+    Only the first non-blank lines are read. A MCTAL file is recognised by its
+    header: the first line ends with three integers (dump number, histories, random
+    numbers used) and ``ntal <n>`` follows on the second or third line. A MESHTAL
+    file is recognised by a ``Mesh Tally Number`` line and the ``Number of histories
+    used for normalizing tallies`` line, both among its first six non-blank lines.
+    Anything else, including an empty file, is reported as an input deck: the
+    function does not parse the deck.
 
-    :param file_path: Path to the file on disk (preferred — avoids loading full content).
-    :param content: File content as a string (used if file_path is not given).
-    :returns: ``'mcnp-input'``, ``'mcnp-mctal'`` or ``'mcnp-meshtal'``
-    :raises ValueError: If neither file_path nor content is provided.
+    Parameters
+    ----------
+    file_path
+        Path to the file. When given, *content* is ignored.
+    content
+        The text of the file, used when *file_path* is None.
+
+    Returns
+    -------
+    str
+        ``"mcnp-mctal"``, ``"mcnp-meshtal"`` or ``"mcnp-input"``.
+
+    Raises
+    ------
+    ValueError
+        If *file_path* and *content* are both None.
+    FileNotFoundError
+        If *file_path* does not exist.
     """
     if file_path is not None:
         lines = _read_first_lines(file_path, n=6)

@@ -1,3 +1,5 @@
+"""Reader of the PERT cards and material cards of an MCNP input deck."""
+
 from .input import Input
 from .perturbations import Perturbation, Pert
 from kika.materials import Material, MaterialCollection
@@ -87,20 +89,39 @@ def _read_PERT(lines, start_index):
     return Pert(id=pert_num, particle=particle, **pert_attrs), i + 1
 
 def read_mcnp(file_path, pert_metadata=None):
-    """Reads and parses an MCNP input file.
+    """Read the PERT cards and the material cards of an MCNP input deck.
 
-    This function reads an MCNP input file and parses its contents, focusing on
-    PERT cards and material definitions. It creates an Input object containing
-    all parsed data.
+    Every other card is skipped. A PERT card is a line that starts with ``PERT``
+    in capitals (continuation with a trailing ``&``); a material card is a line that
+    starts with a lowercase ``m`` followed by the material number. A PERT card takes
+    the keywords ``CELL``, ``MAT``, ``RHO``, ``METHOD``, ``RXN`` and ``ERG``; the
+    first other keyword ends the card. The cards written by
+    :func:`~kika.mcnp.pert_generator.generate_PERTcards` are read back, with the ``zaid`` and
+    ``original_material`` of the ``c kika:pert_zaid=<zaid> pert_mat=<material>``
+    comment line that precedes them (it applies to every PERT card after it, until
+    the next such comment).
 
-    :param file_path: Path to the MCNP input file
-    :type file_path: str
-    :param pert_metadata: Optional list of (start_pert, end_pert, zaid, material) tuples.
-        Assigns zaid and original_material to PERT cards in the range [start_pert, end_pert].
-    :type pert_metadata: list of tuple, optional
+    Parameters
+    ----------
+    file_path
+        Path to the deck, opened with the default text encoding.
+    pert_metadata : list of tuple, optional
+        ``(start_pert, end_pert, zaid, material)`` tuples. Each sets ``zaid`` and
+        ``original_material`` of the PERT cards numbered from *start_pert* to
+        *end_pert*, both included, and replaces what the comment lines gave.
 
-    :returns: An Input object containing all parsed data
-    :rtype: Input
+    Returns
+    -------
+    ~kika.mcnp.input.Input
+        The PERT cards and the materials found, in ``perturbation.pert`` and
+        ``materials.by_id``. Both are empty when the deck has none.
+
+    Raises
+    ------
+    ValueError
+        If a material card mixes positive and negative fractions.
+    FileNotFoundError
+        If *file_path* does not exist.
     """
     inst = Input()  # instance of the input class
     inst.perturbation = Perturbation()

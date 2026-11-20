@@ -3,7 +3,7 @@
 FMESH results never go to MCTAL. MCNP writes them either to the MESHTAL text
 file (MCNP 5 to 6.3, ``out=col``/``cf``/``colsci``/``cfsci``) or, with
 ``out=xdmf`` in MCNP 6.3+, to ``/results/mesh_tally`` in the HDF5 runtape.
-:func:`kika.mcnp.read_meshtal` reads both into the same :class:`MeshTally`.
+:func:`~kika.mcnp.parse_meshtal.read_meshtal` reads both into the same :class:`MeshTally`.
 
 A mesh tally is an array over ``(energy, time, i, j, k)``. ``i j k`` are
 ``x y z`` for a rectangular mesh and ``r z theta`` for a cylindrical one, as on
@@ -14,8 +14,9 @@ labelled views separate them:
 * :meth:`MeshTally.to_xarray` -- the binned values;
 * :meth:`MeshTally.total` -- the total over energy and/or time.
 
-Theta is in revolutions (0 to 1), the unit of the FMESH card and the MESHTAL
-file, in both readers.
+Theta is in revolutions, the unit of the FMESH card and the MESHTAL file. The
+HDF5 reader converts a theta grid written in radians (maximum above 1) to
+revolutions.
 """
 
 from __future__ import annotations
@@ -38,27 +39,56 @@ SPATIAL_DIMS: Dict[str, Tuple[str, str, str]] = {
 class MeshTally:
     """One FMESH tally.
 
-    :ivar id: Tally number.
-    :ivar particle: Particle scored, as MCNP names it (``"neutron"``...).
-    :ivar geometry: ``"rectangular"`` or ``"cylindrical"``.
-    :ivar comment: FC card text (lines joined with newlines), ``""`` if none.
-    :ivar notes: Modifier notes MCNP prints for the tally (e.g. that a dose
-        function applies), verbatim.
-    :ivar bounds: Bin edges of the three spatial axes, keyed by the names in
-        :data:`SPATIAL_DIMS`, in ``i j k`` order. Theta in revolutions.
-    :ivar energy_bounds: Energy bin edges (MeV), ``n_energy + 1`` values.
-    :ivar time_bounds: Time bin edges (shakes), ``n_time + 1`` values.
-    :ivar result: Values, shape ``(n_e, n_t, n_i, n_j, n_k)`` where ``n_e``
-        and ``n_t`` include the total bin when :attr:`has_energy_total` /
-        :attr:`has_time_total`.
-    :ivar error: Relative errors, same shape.
-    :ivar has_energy_total: The last energy index holds the energy total.
-    :ivar has_time_total: The last time index holds the time total.
-    :ivar origin: Mesh origin (cylindrical meshes; ``None`` when unknown).
-    :ivar axis: Cylinder axis direction (cylindrical meshes).
-    :ivar vec: Direction of theta = 0 (cylindrical meshes).
-    :ivar attrs: Extra metadata the source provides (the HDF5 attributes and
-        small datasets: multiplier, dose function, transformation...).
+    :func:`~kika.mcnp.parse_meshtal.read_meshtal` returns them in a
+    :class:`Meshtal`, keyed by number. Values and errors are stored as the
+    file has them: MCNP writes a relative error (a fraction of the value, not an
+    absolute error) and kika does not convert it.
+
+    Attributes
+    ----------
+    id : int
+        Tally number.
+    particle : str
+        Particle scored, as MCNP names it (``"neutron"``...).
+    geometry : str
+        ``"rectangular"`` or ``"cylindrical"``.
+    comment : str
+        FC card text (lines joined with newlines), ``""`` if none.
+    notes : list of str
+        Modifier notes MCNP prints for the tally (e.g. that a dose function
+        applies), verbatim.
+    bounds : dict of str to numpy.ndarray
+        Bin edges of the three spatial axes, keyed by the names in
+        :data:`SPATIAL_DIMS`, in ``i j k`` order. MCNP writes lengths in cm and
+        theta in revolutions; kika does not convert them, except the theta grid
+        of an HDF5 runtape, taken from radians to revolutions when its maximum
+        exceeds 1.
+    energy_bounds : numpy.ndarray
+        Energy bin edges, ``n_energy + 1`` values. MCNP writes MeV; kika does
+        not convert.
+    time_bounds : numpy.ndarray
+        Time bin edges, ``n_time + 1`` values. MCNP writes shakes; kika does
+        not convert.
+    result : numpy.ndarray
+        Values, shape ``(n_e, n_t, n_i, n_j, n_k)``: energy, time, then the mesh
+        cells along ``i j k`` (the order of :attr:`spatial_dims`, ``k``
+        last). ``n_e`` and ``n_t`` include the total bin as one more last index
+        when :attr:`has_energy_total` or :attr:`has_time_total` is set.
+    error : numpy.ndarray
+        Relative errors, same shape as *result*.
+    has_energy_total, has_time_total : bool
+        The last energy (time) index holds the total over the energy (time) bins.
+    origin : numpy.ndarray or None
+        Mesh origin (cylindrical meshes; None when the source does not give it).
+    axis : numpy.ndarray or None
+        Cylinder axis direction (cylindrical meshes).
+    vec : numpy.ndarray or None
+        Direction of theta = 0 (cylindrical meshes).
+    attrs : dict
+        Extra metadata the source provides. From an HDF5 runtape: the group's
+        attributes and every dataset of the group that is not otherwise read. From a
+        text file with a ``Volume`` column: ``"volume"``, the volume of each mesh
+        cell with the shape of the mesh.
     """
 
     id: int
@@ -82,6 +112,7 @@ class MeshTally:
 
     @property
     def spatial_dims(self) -> Tuple[str, str, str]:
+        """Names of the ``i j k`` axes: ``x y z`` or ``r z theta``, by geometry."""
         return SPATIAL_DIMS[self.geometry]
 
     @property
@@ -100,6 +131,24 @@ class MeshTally:
         return tuple(len(self.bounds[d]) - 1 for d in self.spatial_dims)
 
     def centers(self, dim: str) -> np.ndarray:
+        """Midpoints of the bins along one spatial axis.
+
+        Parameters
+        ----------
+        dim
+            One of :attr:`spatial_dims`.
+
+        Returns
+        -------
+        numpy.ndarray
+            One midpoint per mesh cell along *dim*, in the units of
+            :attr:`bounds`.
+
+        Raises
+        ------
+        KeyError
+            If *dim* is not a key of :attr:`bounds`.
+        """
         e = self.bounds[dim]
         return 0.5 * (e[1:] + e[:-1])
 
@@ -122,10 +171,10 @@ class MeshTally:
         """Binned values as a Dataset with ``result`` and ``error``.
 
         Dimensions are ``energy`` and ``time`` (only when there is more than
-        one bin) followed by the three spatial ones. Spatial coordinates are
-        the bin centres, with ``<dim>_low``/``<dim>_high`` edges; ``energy`` and
-        ``time`` carry the upper bound, as MCNP prints them, plus ``_low``.
-        Totals are left out; see :meth:`total`.
+        one bin) followed by the three spatial ones, in ``i j k`` order.
+        Spatial coordinates are the bin centres, with ``<dim>_low``/``<dim>_high``
+        edges; ``energy`` and ``time`` carry the upper bound, as MCNP prints them,
+        plus ``_low``. Totals are left out; see :meth:`total`.
         """
         return self._view(())
 
@@ -133,9 +182,27 @@ class MeshTally:
         """Total over ``"energy"`` and/or ``"time"``, as a Dataset.
 
         A single-bin axis is its own total, so ``total("energy")`` also works
-        on a tally without energy bins.
+        on a tally without energy bins. With several bins and no total bin
+        written, it returns the first bin, not a sum.
 
-        :raises ValueError: For an axis other than energy/time.
+        Parameters
+        ----------
+        *axes
+            ``"energy"`` and/or ``"time"``. Each named axis is removed from the
+            result; the other axes stay as in :meth:`to_xarray`. With no
+            argument the result equals :meth:`to_xarray`.
+
+        Returns
+        -------
+        xarray.Dataset
+            ``result`` and ``error`` (relative) over the axes that remain, with the
+            coordinates of :meth:`to_xarray` and the attribute ``total_over`` (the
+            list of axes given) when there is one.
+
+        Raises
+        ------
+        ValueError
+            For an axis other than ``"energy"`` or ``"time"``.
         """
         for a in axes:
             if a not in ("energy", "time"):
@@ -196,16 +263,31 @@ class MeshTally:
 
 @dataclass
 class Meshtal:
-    """FMESH results of one MCNP run.
+    """FMESH results of one MCNP run, as returned by
+    :func:`~kika.mcnp.parse_meshtal.read_meshtal`.
 
-    :ivar code: Code name as written (``mcnp``, ``mcnp6``...).
-    :ivar version: Code version.
-    :ivar build_date: Build date (``ld=`` of the MESHTAL header).
-    :ivar probid: Date and time of the run (MESHTAL text only).
-    :ivar title: Problem title (MESHTAL text only).
-    :ivar nps: Histories used to normalise the tallies, if the source gives it.
-    :ivar source: ``"text"`` (MESHTAL file) or ``"hdf5"`` (runtape).
-    :ivar tallies: Mesh tallies keyed by number.
+    Indexing with a tally number returns its :class:`MeshTally` (``KeyError`` if
+    absent); iterating yields the mesh tallies and ``len`` counts them.
+
+    Attributes
+    ----------
+    code : str
+        Code name as written (``mcnp``, ``mcnp6``...).
+    version : str
+        Code version.
+    build_date : str
+        Build date (``ld=`` of the MESHTAL header).
+    probid : str
+        Date and time of the run (MESHTAL text only).
+    title : str
+        Problem title (MESHTAL text only).
+    nps : float or None
+        Histories used to normalise the tallies; None if the source does not
+        give it.
+    source : str
+        ``"text"`` (MESHTAL file) or ``"hdf5"`` (runtape).
+    tallies : dict of int to MeshTally
+        Mesh tallies keyed by number.
     """
 
     code: str = ""
