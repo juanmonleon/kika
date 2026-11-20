@@ -45,13 +45,13 @@ is HEATR's (``heatr.f90``):
 
 The mean energies integrate the processed suite's Monte Carlo densities exactly
 for polynomial moments on flat/linear panels (including MF6), from the
-distributions OpenMC samples, rather than from re-reading each ENDF law: one
+distributions OpenMC samples, not from re-reading each ENDF law: one
 integral over a tabulated density covers every MF4/MF5/MF6 law the
 tabulation produced. HEATR's own interpolation between nodes (×1.1 in
 ``disbar``) is not copied; the moments are interpolated between the tables'
 incident energies, lin-lin, as OpenMC interpolates the tables themselves.
 
-Approximations kika keeps from HEATR are listed on :data:`HEATR_APPROXIMATIONS`
+Approximations kika keeps from HEATR are listed in ``HEATR_APPROXIMATIONS``
 and reported. Where HEATR uses the explicit recoil and charged-particle
 distributions of an MF6 section for the damage, kika -- whose processed suite
 keeps only neutrons and photons, as OpenMC's files do -- uses HEATR's own
@@ -133,6 +133,15 @@ class DisplacementModel:
     1084 (2018), eqs. 4-5). ``T_d`` is the Lindhard-Robinson damage energy of the
     recoil; ``ed`` here is the model's threshold on it, not HEATR's threshold on
     the recoil energy that MT444 keeps.
+
+    Attributes
+    ----------
+    name : str
+        ``"nrt"`` or ``"arc-dpa"`` in the models :func:`displacementModels` builds.
+    ed : float
+        Threshold displacement energy in eV, on the damage energy.
+    b, c : float
+        arc-dpa constants. ``b = 0, c = 1`` (the defaults) is NRT.
     """
 
     name: str
@@ -146,6 +155,19 @@ class DisplacementModel:
         return 1 if self.b == 0.0 and self.c == 1.0 else 2
 
     def count(self, T):
+        """Displacements produced by a recoil of damage energy *T* (eV).
+
+        Parameters
+        ----------
+        T
+            Damage energy in eV: a scalar or an array.
+
+        Returns
+        -------
+        numpy.ndarray
+            Displacements, of the shape of *T*: 0 below ``ed``, 1 from ``ed`` up to
+            ``2 ed / 0.8``, and the model's formula above.
+        """
         T = np.asarray(T, dtype=float)
         high = 2.0 * self.ed / 0.8
         n = (0.8 * T) / (2.0 * self.ed)
@@ -162,7 +184,22 @@ ARC_DPA = {26: (40.0, -0.568, 0.286), 29: (33.0, -0.68, 0.16), 28: (39.0, -1.01,
 
 
 def displacementModels(Z: int, ed: float) -> Dict[str, DisplacementModel]:
-    """NRT with the processing's ``ed``; arc-dpa where its constants exist."""
+    """NRT with the processing's ``ed``; arc-dpa where its constants exist.
+
+    Parameters
+    ----------
+    Z
+        Atomic number of the target.
+    ed
+        Threshold displacement energy in eV for the NRT model. The arc-dpa model
+        uses its own tabulated ``E_d`` instead.
+
+    Returns
+    -------
+    dict of str to DisplacementModel
+        ``"nrt"`` always; ``"arc-dpa"`` only for Z of 26, 28, 29, 46, 74 and 78,
+        the elements with constants in ``ARC_DPA``.
+    """
     models = {"nrt": DisplacementModel("nrt", float(ed))}
     if int(Z) in ARC_DPA:
         edArc, b, c = ARC_DPA[int(Z)]
@@ -270,7 +307,41 @@ _GL64 = np.polynomial.legendre.leggauss(64)
 
 @dataclass
 class HeatingResult:
-    """KERMA factors in eV·b on ``grid``, fission excluded."""
+    """KERMA factors in eV·b on ``grid``, fission excluded.
+
+    Returned by :func:`heatingOf`.
+
+    Attributes
+    ----------
+    grid : numpy.ndarray
+        Incident energies in eV.
+    kerma : numpy.ndarray
+        MT301 without fission, in eV·b: the photons are carried away.
+    kermaLocal : numpy.ndarray
+        MT901 without fission, in eV·b: the photons emitted are deposited.
+    damage : numpy.ndarray
+        MT444 damage energy in eV·b, with HEATR's displacement threshold. Unlike
+        the KERMA, it includes the recoil damage of fission.
+    notes : list of str
+        What the computation did that a reader should know: the approximations
+        kept, user Q values, fallbacks.
+    perReaction : dict
+        ``mt -> (kerma, kermaLocal, damage)``, each an array on ``grid`` in eV per
+        reaction (multiply by the cross section for its share).
+    photonEnergy : dict
+        ``mt -> array`` of photon energy per reaction in eV, including photons
+        declared on redundant sums.
+    kinematicUpper : dict
+        ``mt -> array`` in eV: HEATR's diagnostic upper energy per collision.
+        Empty unless ``kinematic=True`` was asked, and absent for MTs whose recoil
+        is not determined.
+    displacements : dict
+        ``model -> array`` of ``sum_r sigma_r N_d,r`` in b (displacements times
+        barn), fission included. Empty unless ``displacements=True``; the models
+        are ``"nrt"`` and, where constants exist, ``"arc-dpa"``.
+    displacementsPerReaction : dict
+        ``model -> mt -> array`` of displacements per reaction on ``grid``.
+    """
 
     grid: np.ndarray
     #: MT301 without fission: the photons carried away (``local = 0``).
@@ -308,10 +379,49 @@ class HeatingResult:
         heating selection containing active fission; this class deliberately
         does not fabricate release energies from neutron spectra. MT443 uses
         HEATR's diagnostic convention (not a rigorous physical upper bound).
-        Undetermined active MF6 recoils raise rather than supplying a zero;
-        fission requires ``fissionKinematicEnergy``. MT442 needs
+        Undetermined active MF6 recoils raise, and no zero is supplied in their
+        place; fission requires ``fissionKinematicEnergy``. MT442 needs
         ``fissionPhotonEnergy`` on active fission channels. When ``local`` is
         true, the supplied fissionKerma must itself include local photon energy.
+
+        Parameters
+        ----------
+        sigma
+            Mapping from MT to the cross section in barn on ``grid`` (finite, not
+            negative, same shape). It must hold every MT of ``perReaction`` and of
+            ``photonEnergy``.
+        requested
+            Response identifiers, integers without repeats: 301, 303 (non-elastic),
+            304 (inelastic, MT 51 to 91), 318 (fission), 401 (capture, MT 102 to 120
+            and 600 to 849), 403 to 407 (charged-particle families), 442
+            (photon energy), 443 (kinematic diagnostic), 444 (damage), 445 (elastic
+            damage), 446 (inelastic damage), 447 (capture damage), 901, and
+            ``300 + MT`` for an MT in ``perReaction`` between 2 and 141.
+        fissionKerma
+            Mapping from each fission MT to its release energy per collision in
+            eV on ``grid``. Required for heating responses where that fission
+            cross section is not zero.
+        fissionPhotonEnergy
+            Mapping from fission MT to photon energy in eV on ``grid``, for 442.
+        fissionKinematicEnergy
+            Mapping from fission MT to the recoil bound in eV on ``grid``, for 443.
+        local
+            If True, the transported photons are deposited too (MT901 convention).
+
+        Returns
+        -------
+        dict of int to numpy.ndarray
+            For each identifier, the response on ``grid`` in eV·b (damage
+            responses in eV·b of damage energy).
+
+        Raises
+        ------
+        ValueError
+            If an identifier is not an integer, is repeated or is not supported; a
+            cross section is missing, has the wrong shape or is not finite and
+            non-negative; or a required fission energy is missing or invalid.
+        NotImplementedError
+            If MT443 is asked for a reaction whose recoil energy is not determined.
         """
         ids = tuple(requested)
         if any(isinstance(mt, (bool, np.bool_)) or not isinstance(mt, (int, np.integer))
@@ -422,7 +532,19 @@ class HeatingResult:
 # ----------------------------------------------------------------------
 
 def displacementEnergy(Z: int) -> float:
-    """HEATR's default displacement threshold ``ed`` in eV (``heatr.f90:329-366``)."""
+    """HEATR's default displacement threshold ``ed`` in eV (``heatr.f90:329-366``).
+
+    Parameters
+    ----------
+    Z
+        Atomic number.
+
+    Returns
+    -------
+    float
+        Threshold in eV: 40 for Z from 22 to 29; the tabulated value for Be, C,
+        Mg, Al, Si, Ca, Zr, Nb, Mo, Ag, Ta, W, Au and Pb; 25 for every other Z.
+    """
     table = {4: 31, 6: 31, 12: 25, 13: 27, 14: 25, 20: 40, 40: 40, 41: 40, 42: 60, 47: 60,
              73: 90, 74: 90, 79: 30, 82: 25}
     if 22 <= Z <= 29:
@@ -450,6 +572,27 @@ def lindhard(E, Zr, Ar, Zl, Al, ed):
     """Damage energy of a recoil ``(Zr, Ar)`` of energy ``E`` in a lattice ``(Zl, Al)`` (``df``).
 
     Under a :class:`DisplacementModel` (``_DISPLACEMENTS``), its displacements instead.
+
+    Parameters
+    ----------
+    E
+        Recoil energy in eV: a scalar or an array.
+    Zr, Ar
+        Atomic number and mass number of the recoil.
+    Zl, Al
+        Atomic number and mass number of the lattice atoms.
+    ed
+        Threshold in eV on the recoil energy: a recoil below it gives zero. It does
+        nothing under a displacement model, which applies its own threshold to the
+        damage energy.
+
+    Returns
+    -------
+    numpy.ndarray
+        Damage energy in eV, in the shape of *E*; zero where ``Zr`` is 0. Under a
+        ``DisplacementModel`` (inside the displacement passes of
+        :func:`heatingOf`) it is instead the number of displacements, from the
+        model's ``count`` of the damage energy.
     """
     E = np.asarray(E, dtype=float)
     if Zr == 0:
@@ -3175,11 +3318,58 @@ def fissionPhotonKerma(suite, grid, sigma: Dict[int, np.ndarray], *, awr: float)
 
 def heatingOf(suite, grid, sigma: Dict[int, np.ndarray], *, workers: Optional[int] = None,
               **options) -> HeatingResult:
-    """Run :func:`_heatingOf` with its damage quadratures on ``workers`` threads.
+    """Compute KERMA and damage with the damage quadratures on ``workers`` threads.
 
     ``workers`` is the processing's own count; when not given, ``KIKA_WORKERS``
-    or ``min(cpus, 8)``, as for the Doppler broadening (:mod:`kika.processing.workers`);
+    or ``min(cpus, 8)`` (``kika.processing.workers``);
     1 keeps every energy on this thread. The result does not depend on it.
+
+    Parameters
+    ----------
+    suite
+        The processed suite: exclusive reactions with their Monte Carlo product
+        distributions.
+    grid
+        Incident energies in eV.
+    sigma
+        Mapping from MT to each reaction's cross section in barn on *grid*, at the
+        processing temperature.
+    workers
+        Threads for the damage quadratures over incident energies. The count is
+        also given to the tabulation of the evaluated suite's charged particles
+        and recoils (when *evaluation* is passed), which runs on that many
+        processes if it is 2 or more and at least 4 tabulations are missing. None
+        is ``KIKA_WORKERS`` when set, else the number of cores, at most 8. 1 uses
+        this thread only.
+    **options
+        Passed to the computation: ``awr`` (target mass ratio) and ``Z`` (atomic
+        number), both required; ``qm`` (MT to ground-state Q in eV, default each
+        reaction's Q); ``ed`` (displacement threshold in eV, default HEATR's per
+        Z, see :func:`displacementEnergy`); ``qa`` (MT to a scalar Q in eV
+        replacing the balance Q); ``qbar`` (MT to a model ``Function1d`` of Q in
+        eV, covering the whole grid, replacing the balance Q); ``evaluation``
+        (the evaluated suite, for charged particles and recoils); ``zaTarget``;
+        ``report``; ``kinematic`` (also compute the MT443 arrays, default False);
+        ``displacements`` (also compute NRT and arc-dpa displacements, default
+        False).
+
+    Returns
+    -------
+    HeatingResult
+        KERMA and damage factors in eV·b on *grid*. The KERMA arrays exclude
+        fission. ``damage`` and the per-reaction damage include the recoil damage
+        of fission (one emission from the prompt-neutron spectrum).
+
+    Raises
+    ------
+    ValueError
+        If a reaction has both ``qa`` and ``qbar``, an auxiliary Q names an absent
+        reaction, or a scalar ``qa`` is not finite.
+    TypeError
+        If a ``qbar`` is not a model ``Function1d``.
+    NotImplementedError
+        If an auxiliary fission Q is given and the suite has no fission-release
+        data.
     """
     from kika.processing.workers import pool_default, resolve
     count = resolve(workers, pool_default())

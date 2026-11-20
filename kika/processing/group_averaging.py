@@ -21,15 +21,11 @@ on an edge is split between two groups, and moving the edges moves the steps.
 along the energy axis instead, giving a continuous curve; at the centre of each
 group of an equal-lethargy grid of that width it *is* the group average.
 
-Until October 2026 the 1/E integral was a trapezoid in ``u = ln E``, which is
-exact only for a constant sigma: on a table of three points
-``[1e5, 1e6, 2e7] -> [1, 10, 1]`` it was 7 % low, and 8e-7 off on a fine one.
-
 Both functions are adapters, not implementations: they name the weight in
 physical terms (lethargy, ``1/E``) and hand the table to :mod:`kika.algebra`,
 whose :func:`~kika.algebra.group_averages` and
 :func:`~kika.algebra.log_window_averages` do the integrals. The comparison of a
-series with these averages is :mod:`kika.algebra.compare`.
+series with these averages is ``kika.algebra.compare``.
 """
 
 from __future__ import annotations
@@ -78,6 +74,15 @@ def resonance_group_average(
         Group-averaged cross sections, length ``n_bins``. Groups that
         fall entirely outside the pointwise energy range, or that have
         a degenerate weight integral, are set to ``NaN``.
+
+    Raises
+    ------
+    ValueError
+        If *energies* or *cross_sections* is not one-dimensional or they differ in
+        shape, there are fewer than 2 energies, *energies* decreases anywhere,
+        *group_boundaries* is not one-dimensional with at least 2 values or is not
+        strictly increasing, *weighting* is not one of the two above, or the
+        weighting is ``"lethargy"`` and the first energy is not positive.
     """
     energies = np.asarray(energies, dtype=float)
     cross_sections = np.asarray(cross_sections, dtype=float)
@@ -149,6 +154,15 @@ def resonance_window_average(
     -------
     np.ndarray
         The average at each centre; ``nan`` where the clipped window is empty.
+
+    Raises
+    ------
+    ValueError
+        If *energies* and *cross_sections* are not one-dimensional arrays of one
+        shape, there are fewer than 2 energies, *energies* decreases anywhere,
+        *centres* is not one-dimensional or holds a value that is not positive,
+        *width* is not finite and positive, *weighting* is not one of the two above,
+        or the weighting is ``"lethargy"`` and the first energy is not positive.
     """
     energies = np.asarray(energies, dtype=float)
     cross_sections = np.asarray(cross_sections, dtype=float)

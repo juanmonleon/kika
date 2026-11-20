@@ -49,7 +49,33 @@ def _flat(form):
 
 def tabulateKalbachMann(form, options: TabulationOptions, *, zaEmitted: int, zaTarget: int,
                         discrete: Optional[Sequence[int]] = None, zaProjectile: int = 1):
-    """KalbachMann(f, r[, a]) → KalbachMann of tables, ``r`` and ``a`` on f's grid."""
+    """KalbachMann(f, r[, a]) → KalbachMann of tables, ``r`` and ``a`` on f's grid.
+
+    Parameters
+    ----------
+    form
+        A model ``KalbachMann`` with ``f`` (outgoing-energy tables, eV) and ``r``
+        and optionally ``a``, each a two-dimensional table per incident energy.
+    options : TabulationOptions
+        Only ``options.negative`` (and ``options.angularSeeds`` for a photon) is
+        used. ``rtol``, ``atol`` and ``maxPoints`` are not: the ``f`` tables keep
+        their own points, and a law other than lin-lin or histogram is converted
+        at a fixed tolerance of 1e-4.
+    zaEmitted, zaTarget
+        ZA of the emitted particle and of the target, for the slope when the
+        evaluation gives no ``a``.
+    discrete
+        Per incident energy, how many leading outgoing points are lines.
+    zaProjectile
+        1 for a neutron (default), 0 for a photon (ENDF-6 Eq. 6.5).
+
+    Returns
+    -------
+    KalbachMann
+        Labelled ``"MonteCarlo"``: ``f`` as normalised tables with cumulative, and
+        ``r`` and ``a`` evaluated on the nodes of ``f``'s outgoing grid (the
+        evaluator's ``a`` interpolated there, else Kalbach's systematics).
+    """
     m = _m()
     rs, as_ = _flat(form.r), (_flat(form.a) if form.a is not None else None)
     lines = {}
@@ -174,7 +200,26 @@ def _jointNodes(surface, options, discrete):
 
 def tabulateEnergyAngular(form, options: TabulationOptions, *,
                           discrete: Optional[Sequence[int]] = None):
-    """energyAngular (Legendre in mu per E') → energyAngularMC."""
+    """energyAngular (Legendre in mu per E') → energyAngularMC.
+
+    Parameters
+    ----------
+    form
+        A model ``EnergyAngular`` whose ``xys3d`` holds, per incident energy (eV)
+        and outgoing energy (eV), a Legendre series or a tabulated density in mu.
+    options : TabulationOptions
+        Tolerances and negative-density policy.
+    discrete
+        Per incident energy, how many leading outgoing points are lines.
+
+    Returns
+    -------
+    EnergyAngularMC
+        Labelled ``"MonteCarlo"``: the outgoing spectrum ``f_0`` as a normalised
+        table per incident energy and, at each outgoing energy, the angular table
+        (the series divided by ``f_0``). Where ``f_0`` is zero the neighbour's
+        shape is used for a Legendre series, else an isotropic table.
+    """
     m = _m()
     # The ordinary tolerances, as ACER's. Caps of 1e-4/1e-6 for this law (13-oct, 78693cf)
     # made Fe-56's ACE 2.7 times larger (U-235's 2.1) and moved no product's <E'> by 1e-4
@@ -251,7 +296,27 @@ def _normalisedNode(node, magnitude):
 
 
 def tabulateAngularEnergy(form, options: TabulationOptions):
-    """angularEnergy (LAW=7, mu outermost) → energyAngularMC (E' outermost)."""
+    """angularEnergy (LAW=7, mu outermost) → energyAngularMC (E' outermost).
+
+    Parameters
+    ----------
+    form
+        A model ``AngularEnergy`` whose ``xys3d`` holds, per incident energy (eV)
+        and cosine, the joint density in outgoing energy (eV).
+    options : TabulationOptions
+        Only ``options.negative`` is used. There is no refinement: the grid is the
+        union of the cosines' grids, ``rtol``, ``atol`` and ``maxPoints`` are not
+        used, and a law other than lin-lin or histogram is converted at a fixed
+        tolerance of 1e-4.
+
+    Returns
+    -------
+    EnergyAngularMC
+        Labelled ``"MonteCarlo"``, laboratory frame. The outgoing grid is the
+        union of the cosines' grids; the spectrum is the integral over mu
+        (trapezoid) and the angular table at each outgoing energy is the joint
+        density there, normalised (isotropic where the spectrum is zero).
+    """
     m = _m()
     xys3d = form.xys3d
     spectra, angular = [], []

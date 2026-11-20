@@ -34,6 +34,30 @@ class ReconstructionResult:
     Coverage is restricted to the prepared resonance domains (RRR and/or URR).
     ``verify_forms`` must be called after serialization/reloading; rounding is
     part of the requested total budget and may cause an explicit failure.
+
+    Returned by :func:`tabulate_resonances`; it is not built by hand.
+
+    Attributes
+    ----------
+    forms
+        Read-only mapping from MT to the tabulated cross section: an ``XYs1d``
+        when the tabulation has one energy segment, a ``Regions1d`` otherwise.
+        Energies in eV, cross sections in barn, linear-linear interpolation,
+        labelled with the *label* given to :func:`tabulate_resonances`. The MTs
+        are those of the prepared regions, of the backgrounds and of the sums.
+    report
+        Read-only mapping that describes the run: ``regions`` (one entry per
+        energy segment with its ``domain`` in eV and its ``points``), ``points``
+        (energies evaluated) and ``stored_points`` (energies kept after exactly
+        constant spans are compacted), ``units``, ``background_mts``,
+        ``sum_graph``, ``preparation_notes``, ``minima`` (the smallest value of
+        each MT, in barn: negative values are kept and reported),
+        ``normalized_sha256`` (a fingerprint of the inputs), ``context`` and
+        ``options``. ``empirical_verification`` is True and
+        ``global_error_bound`` is False: the checks are finite probes, not a
+        proof for all energies.
+    options : ReconstructionOptions
+        The options the tabulation ran with.
     """
     forms: object
     report: object
@@ -45,7 +69,26 @@ class ReconstructionResult:
     _grids: tuple=()
 
     def evaluate(self,energies):
-        """Assembled reference callable, preserving scalar/1D shape and order."""
+        """Evaluate the reference the tables approximate: the physics, not the tables.
+
+        Parameters
+        ----------
+        energies
+            A scalar or a one-dimensional array of energies in eV, finite and
+            positive, inside a reconstructed domain (not in a gap between them).
+
+        Returns
+        -------
+        dict of int to numpy.ndarray
+            For each MT of ``forms``, the cross section in barn in the shape and
+            order of *energies*, with backgrounds added and sums rebuilt.
+
+        Raises
+        ------
+        ValueError
+            If *energies* has more than one dimension, holds a value that is not
+            finite and positive, or lies outside every reconstructed domain.
+        """
         e=np.asarray(energies,dtype=float)
         if e.ndim>1 or np.any(~np.isfinite(e)) or np.any(e<=0):
             raise ValueError('energies must be finite positive scalar or 1D eV array')
@@ -66,6 +109,32 @@ class ReconstructionResult:
 
         Returns per-MT maximum mixed-error ratios (one means the full budget).
         Finite probes cannot establish a mathematical all-energy guarantee.
+
+        Parameters
+        ----------
+        forms
+            The reloaded forms, with the same MTs as ``self.forms`` and the same
+            region structure (energies in eV, cross sections in barn, linear
+            interpolation).
+
+        Returns
+        -------
+        dict of int to float
+            For each MT, the largest mixed-error ratio found against the reference
+            (with the thermal tightening of
+            :func:`~kika.processing.tolerances.thermalFactor` below 0.4999 eV),
+            using ``options.rtol`` and ``options.atol``. One is the full tolerance;
+            the tabulation itself aims at one half.
+
+        Raises
+        ------
+        ValueError
+            If the MTs differ from those of ``self.forms``, a form no longer has the
+            region structure, or its units are not eV and barn.
+        ReconstructionConvergenceError
+            If serialisation moved a region boundary or changed the interpolation
+            law, a reloaded grid is not finite and non-decreasing, a reloaded value
+            is not finite, or any MT's ratio exceeds one.
         """
         from kika.nuclear_data.model import Regions1d
         from kika.nuclear_data.model.functions.regions1d import curvesOnDomains
@@ -315,6 +384,52 @@ def tabulate_resonances(prepared,*,backgrounds=None,sums=None,options=None,label
     values, and background values for a rebuilt sum are rejected as ambiguous.
     Only exactly constant spans are compacted; no approximate thinning,
     clipping, automatic tolerance relaxation or implicit attachment.
+
+    Parameters
+    ----------
+    prepared : PreparedResonances
+        The regions to tabulate, each with a lower energy above zero.
+    backgrounds
+        Mapping from a positive MT to its background: an ``XYs1d``, a
+        ``Regions1d``, a ``Background`` or a ``ResonancesWithBackground`` (one whose
+        resonance link is already resolved). Energies in eV, values in barn, with
+        explicit axes, positive and non-decreasing, interpolation laws 1 to 5.
+        Exactly one piece of each must cover every segment of the tabulation. None
+        means no backgrounds.
+    sums
+        Mapping from an MT to the sequence of MTs it is the sum of. A component is
+        an MT of the regions, of the backgrounds or another sum. None means no
+        sums. A sum may not also have a background, repeat a component, form a cycle
+        or count one component twice through different branches.
+    options : ReconstructionOptions, optional
+        None gives ``ReconstructionOptions()``: ``rtol=1e-3``, ``atol=1e-8`` barn,
+        ``max_points=200000``, ``max_iterations=40``. The points counted against
+        ``max_points`` are those of all segments together.
+    label
+        Non-empty label put on every returned form.
+
+    Returns
+    -------
+    ReconstructionResult
+        The tabulated forms (linear-linear in eV and barn), the report and a
+        reference evaluator.
+
+    Raises
+    ------
+    TypeError
+        If *prepared* is not a ``PreparedResonances`` or *options* is not a
+        ``ReconstructionOptions``.
+    ValueError
+        If *prepared* has no regions or a region starts at or below zero, *label*
+        is empty or not a string, a background or a sum is malformed, a sum
+        component is missing, a background does not uniquely cover a segment, or a
+        sum also has a background.
+    UnsupportedResonanceError
+        If a background is not one of the accepted types, has no eV and barn axes
+        or uses an interpolation law outside 1 to 5.
+    ReconstructionConvergenceError
+        If the point budget or the iteration budget is exhausted, or a panel's
+        error cannot be brought within the tolerance (nothing partial is returned).
     """
     from kika.nuclear_data.model import Axis,Axes,XYs1d,Regions1d
     from kika.algebra import compress_flat

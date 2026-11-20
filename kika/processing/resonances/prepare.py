@@ -37,12 +37,59 @@ class PreparedResonances:
     is included. Returned MT1 sums all physical partials, including competition.
     For ENDF BW, competition already belongs to MF3: assembly must honor
     ``competitive_in_background`` and must not add that partial twice.
+
+    Returned by :func:`prepare_resonances`.
+
+    Attributes
+    ----------
+    context : NeutronContext or None
+        The context the regions were prepared with. None only for a tape with
+        no resonance regions prepared with ``allow_empty=True``.
+    regions
+        The prepared resolved and unresolved regions, sorted by lower energy and
+        not overlapping. Each has ``low`` and ``high`` energies in eV.
+    preparation_notes : tuple of str
+        One sentence for each case where preparation used a value other than the
+        one a reader might expect (a declared AWRI instead of the context's, a
+        total width that differs from the sum of its partials, a negative
+        competitive width rounded to zero, and similar). Empty when nothing was
+        adjusted.
     """
     context: NeutronContext | None
     regions: tuple[PreparedRegion, ...]
     preparation_notes: tuple[str, ...] = ()
 
     def evaluate(self, energies, *, block_size=8192, diagnostics=None):
+        """Resonance contributions to the cross sections at *energies*.
+
+        Parameters
+        ----------
+        energies
+            A scalar or a one-dimensional array of energies in eV, finite and
+            positive, each inside a prepared region (gaps between regions are
+            refused).
+        block_size
+            Energies evaluated per batch; a positive integer. It sets memory and
+            speed, not the values.
+        diagnostics : dict, optional
+            If given, the solvers add counters and error estimates to it (their
+            keys name the solver, for example ``rm_max_solver_residual``). None
+            records nothing.
+
+        Returns
+        -------
+        dict of int to numpy.ndarray
+            For every MT any region produces (1, 2, 18 and 102 for each region,
+            plus the partial MTs it adds, such as a competitive reaction), the contribution in barn, in the
+            shape of *energies*. Empty if there are no regions. A region that does not produce an MT contributes zero to it.
+
+        Raises
+        ------
+        ValueError
+            If *energies* has more than one dimension or holds a value that is
+            not finite and positive, *block_size* is not a positive integer, or
+            an energy lies outside every prepared region.
+        """
         energy = np.asarray(energies, dtype=float)
         if energy.ndim > 1 or np.any(~np.isfinite(energy)) or np.any(energy <= 0):
             raise ValueError("energies must be a scalar or 1D finite positive eV array")
@@ -80,6 +127,49 @@ def prepare_resonances(resonances, context, *, conversion_report=None, allow_emp
     the entire request before evaluation.
     Provenance is inspected only to detect data not yet expressible in the
     canonical model; it never supplies coefficients to the kernel.
+
+    Parameters
+    ----------
+    resonances
+        A ``kika.nuclear_data.model`` ``Resonances``: resolved regions in eV with
+        radii in fm, and optionally an unresolved region.
+    context : NeutronContext
+        Target mass ratio and spin. If a Breit-Wigner region's model carries a
+        target spin, it must equal ``context.target_spin``. A spin group that
+        declares its own AWRI is prepared with that ratio (and a note is kept).
+    conversion_report
+        The report of the conversion that produced *resonances*, if any. A report
+        that is not clean for cross sections (it lists losses, approximations or
+        unsupported data) makes preparation refuse. None skips the check.
+    allow_empty
+        If True, a *resonances* with no resolved region and no unresolved region
+        is accepted, with ``context=None`` too, and gives a result with no
+        regions. If False it raises.
+
+    Returns
+    -------
+    PreparedResonances
+        The prepared regions, with the notes of every adjustment made.
+
+    Raises
+    ------
+    TypeError
+        If *resonances* is not a model ``Resonances`` or *context* is not a
+        ``NeutronContext`` (a None context is allowed only in the empty case
+        above).
+    UnsupportedResonanceError
+        For physics the evaluator does not do, so that nothing is evaluated
+        silently wrong: a dirty *conversion_report*; a mixture of isotopes;
+        a formalism other than Breit-Wigner (single- or multi-level),
+        Reich-Moore or neutral R-matrix; regions that overlap; energy or radius
+        units that are not eV and fm; competitive-channel data without a usable
+        exit L or region ownership; a resonance J incompatible with L and the
+        target spin; a negative width; and the other cases its message names.
+        (It is a ``ValueError``.)
+    ValueError
+        If *resonances* has no regions and *allow_empty* is False, a resolved
+        domain is invalid, a parameter is not finite, the model's target spin
+        disagrees with *context*, or a competitive Q or reaction MT is invalid.
     """
     from kika.nuclear_data.model.resonances import BreitWigner, Resonances, RMatrix
 

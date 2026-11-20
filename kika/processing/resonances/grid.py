@@ -72,6 +72,34 @@ class ReconstructionOptions:
     ``max_work_bytes`` targets temporary batches and seed-panel chunks; retained
     input/output, adaptive chunk growth and backend allocations are additional.
     A dense exceptional solve exceeding its estimated target raises explicitly.
+
+    Attributes
+    ----------
+    rtol : float
+        Relative tolerance as a fraction, strictly between 0 and 1. Default 1e-3.
+    atol : float
+        Absolute tolerance in barn, finite and positive. Default 1e-8. A panel
+        error is measured as ``|actual - linear| / (atol + rtol * max(|actual|,
+        |linear|))``, and the tabulation refines until that is at most one half
+        at every probe; the other half is the headroom left for serialisation.
+    max_points : int
+        Largest number of energies the tabulation may hold, counted over all
+        its energy regions, at least 2. Default 200000. Exceeding it raises
+        ``ReconstructionConvergenceError``.
+    max_iterations : int
+        Largest number of refinement passes. Default 40. Exceeding it raises
+        ``ReconstructionConvergenceError``.
+    block_size : int
+        Energies evaluated per batch of the resonance physics. Default 8192. It
+        sets speed and memory, not the result.
+    max_work_bytes : int
+        Target for the temporary arrays of a batch and for the size of the
+        seed-panel chunks, in bytes. Default 64 MiB. It is not a bound on the
+        process memory, and an exceptional dense solve whose estimated size
+        exceeds it raises ``ReconstructionConvergenceError``.
+
+    A value outside its range, or an integer field that is not an ``int``,
+    raises ``ValueError`` when the options are built.
     """
     rtol: float = 1e-3
     atol: float = 1e-8

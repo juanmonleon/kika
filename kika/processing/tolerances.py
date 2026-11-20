@@ -42,11 +42,36 @@ DOPPLER_SHARE = 0.05
 
 
 def thermalFactor(energies):
-    """The factor each interval's error is multiplied by, from its left node's energy (eV)."""
+    """The factor each interval's error is multiplied by, from its left node's energy.
+
+    Parameters
+    ----------
+    energies : array_like
+        Left-node energies of the intervals, in eV.
+
+    Returns
+    -------
+    numpy.ndarray
+        Float array of the shape of *energies*: 5.0 where the energy is below
+        0.4999 eV, 1.0 elsewhere (an energy of exactly 0.4999 eV gets 1.0).
+    """
     return np.where(np.asarray(energies, dtype=float) < THERMAL_RANGE, THERMAL_FACTOR, 1.0)
 
 
 def heatedShares(tolerance: float):
-    """``(broadening, thinning)`` relative tolerances of a heated table stated to ``tolerance``."""
+    """``(broadening, thinning)`` relative tolerances of a heated table stated to ``tolerance``.
+
+    Parameters
+    ----------
+    tolerance
+        The relative tolerance the heated table is declared to (a fraction).
+
+    Returns
+    -------
+    tuple of float
+        ``(0.05 * tolerance, 0.45 * tolerance)``: the share of the Doppler table and
+        the share of the thinning. The remaining half is the 0 K source's and is not
+        returned.
+    """
     tolerance = float(tolerance)
     return DOPPLER_SHARE * tolerance, (1.0 - SOURCE_SHARE - DOPPLER_SHARE) * tolerance

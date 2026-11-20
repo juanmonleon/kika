@@ -10,8 +10,8 @@ The workflow is:
 
 1. Copy the input ENDF tape into a temporary directory as ``tape20``.
 2. Run NJOY with a minimal ``reconr``-only input deck.
-3. Parse the resulting ``tape21`` PENDF with :func:`kika.endf.read_endf`.
-4. Extract MF3 sections as :class:`CrossSection` objects, keyed by MT.
+3. Parse the resulting ``tape22`` PENDF with :func:`kika.endf.read_endf`.
+4. Extract MF3 sections as :class:`~kika.nuclear_data.CrossSection` objects, keyed by MT.
 """
 
 from __future__ import annotations
@@ -108,15 +108,21 @@ class NjoyReconstructError(RuntimeError):
 class NjoyDecimalLocaleReconstructError(NjoyReconstructError):
     """The reconstruction gave up because NJOY kept misreading its input.
 
-    A :class:`NjoyReconstructError` so every existing caller keeps catching it,
-    with its own type so the app can single this cause out and say something
-    useful instead of quoting NJOY's misleading complaint about the file.
+    A subclass of :class:`NjoyReconstructError`, so a caller that catches the
+    parent catches this too, and one that wants this cause can single it out.
+    It is raised after the run has been repeated eight times and every run
+    misread the deck (the usual cause is a binary that reads a comma as the
+    decimal mark). The detection is in ``kika.njoy.locale_guard``.
 
-    The detection itself lives in :mod:`kika.njoy.locale_guard`, which this
-    module imports inside functions rather than at module scope: importing
-    ``kika.njoy`` runs its ``__init__`` and so pulls ``kika.endf`` onto
-    ``kika.processing``'s import path, which is exactly the cycle the
-    deferred ``read_endf`` import above exists to avoid.
+    Attributes
+    ----------
+    detail : str
+        The mismatches found between the input kika wrote and what NJOY's listing
+        shows it read, joined in one string.
+    returncode : int or None
+        Always None here: the run is not judged by its exit status.
+    stderr_tail : str
+        The last 2000 characters of the NJOY log of the last attempt.
     """
 
     def __init__(
@@ -230,8 +236,45 @@ def njoy_reconstruct(
     the live log output and returns only the final MT→CrossSection map.
 
     On an "ill-behaved threshold" error (common on some JEFF-4.0 files),
-    automatically retries with progressively looser tolerance up to
-    :data:`_MAX_TOLERANCE`.
+    automatically retries with the tolerance doubled each time, up to 0.1; a
+    *tolerance* of 0.1 or more is not retried. A retry is logged as a warning
+    and the loosened tolerance is the one the result holds. If NJOY misreads its
+    own input deck (a decimal-mark fault of the binary) the run is repeated, up to
+    eight times in all, before the failure is raised.
+
+    Parameters
+    ----------
+    endf_path
+        The ENDF tape. It is copied to a temporary directory, never modified.
+    njoy_executable
+        The NJOY binary. It must be an existing file (no ``PATH`` search here; see
+        :func:`~kika.processing.njoy_pendf_cache.find_njoy_executable`), except for a WSL network
+        path, which is not checked.
+    tolerance
+        RECONR's ``err``, a relative tolerance as a fraction. The run also sets
+        ``errmax`` to 10 times it and ``errint`` to ``5e-5`` times it.
+    timeout_s
+        Seconds allowed to one NJOY run; each retry has its own allowance.
+    keep_workdir
+        If True the temporary directory of the run (tape files, ``njoy.inp``,
+        ``njoy.out``) is not deleted. Its path is not returned here; the stream
+        variant reports the PENDF path.
+
+    Returns
+    -------
+    dict of int to ~kika.nuclear_data.CrossSection
+        The MF3 sections of the PENDF NJOY wrote, keyed by MT. A section that
+        cannot be converted to a ``CrossSection`` is left out.
+
+    Raises
+    ------
+    NjoyReconstructError
+        If the ENDF file or the NJOY executable does not exist, the MAT cannot be
+        read from the tape, NJOY fails to start, exits non-zero, times out or
+        writes no PENDF, the PENDF cannot be parsed or has no usable MF3, or the
+        run fails when no looser tolerance is left to try.
+    NjoyDecimalLocaleReconstructError
+        (a subclass of the above) If every one of the eight runs misread its input.
     """
     result: Optional[Dict[int, CrossSection]] = None
     for event in njoy_reconstruct_stream(
@@ -268,9 +311,34 @@ def njoy_reconstruct_stream(
     - ``"warning"`` : a human-readable notice (e.g. tolerance relaxation).
     - ``"result"`` : a ``Dict[int, CrossSection]`` — terminal success event.
 
+    A ``"pendf_path"`` event (the path of the raw ``tape22`` as a string) comes
+    just before ``"result"``. The file is inside a temporary directory that is
+    deleted when the generator finishes (unless *keep_workdir*), so copy it while
+    iterating.
+
     On failure, raises :class:`NjoyReconstructError`.  Consumers can abort
     early by closing the generator (``gen.close()``); any running
     subprocess is killed in that case.
+
+    Parameters
+    ----------
+    endf_path, njoy_executable, tolerance, timeout_s, keep_workdir
+        As in :func:`njoy_reconstruct`, including the retry with a looser
+        tolerance (reported as a ``"warning"`` event) and the repetition when NJOY
+        misreads its input.
+
+    Yields
+    ------
+    tuple of (str, object)
+        ``(kind, payload)`` as above. The ``"warning"`` events also announce each
+        repetition after a misread input.
+
+    Raises
+    ------
+    NjoyReconstructError
+        Under the conditions listed for :func:`njoy_reconstruct`.
+    NjoyDecimalLocaleReconstructError
+        If every one of the eight runs misread its input.
     """
     endf_path = Path(endf_path).expanduser().resolve()
     if not endf_path.is_file():

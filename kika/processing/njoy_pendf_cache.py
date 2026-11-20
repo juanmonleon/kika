@@ -52,7 +52,23 @@ DEFAULT_PENDF_CACHE_DIR = Path(tempfile.gettempdir()) / "kika_pendf_cache"
 
 
 def mf33_needs_pendf(mf33_file, mt: int) -> bool:
-    """True if MF33 for ``mt`` needs σ(E) (NC sum-rule or absolute NI LB)."""
+    """True if MF33 for ``mt`` needs σ(E) (NC sum-rule or absolute NI LB).
+
+    Parameters
+    ----------
+    mf33_file
+        The MF33 file of a parsed tape (it has a ``sections`` mapping by MT), or
+        None.
+    mt
+        The reaction whose covariance section is inspected.
+
+    Returns
+    -------
+    bool
+        True if any subsection of the MT has NC records, or any NI record has an
+        LB that is missing or not one of 1 to 6 (the relative types). False
+        otherwise, and False when *mf33_file* is None or has no section for *mt*.
+    """
     if mf33_file is None or mt not in mf33_file.sections:
         return False
     sec = mf33_file.sections[mt]
@@ -121,6 +137,42 @@ def get_or_create_pendf(
     ``cache_dir`` for the original I/O if needed). The same files are
     always saved next to the cached PENDF as ``<sha>_<tol>.input`` /
     ``.output`` so they are recoverable even after a hit.
+
+    The cache file is named ``<sha256 of the ENDF bytes>_<tolerance>.pendf``, so
+    any edit of the tape or any other *tolerance* is a miss. A cached file that is
+    truncated is deleted and rebuilt. Progress lines go to standard output.
+
+    Parameters
+    ----------
+    endf_path
+        The ENDF tape to reconstruct.
+    tolerance
+        RECONR's relative tolerance, as a fraction (part of the cache key).
+    njoy_exe
+        The NJOY binary, passed as given to
+        :func:`~kika.processing.njoy_reconstruct.njoy_reconstruct_stream`; no
+        search is made.
+    cache_dir
+        Directory of the cache, created if missing. None is
+        ``DEFAULT_PENDF_CACHE_DIR``.
+    timeout_s
+        Seconds allowed to one NJOY run.
+    keep_njoy_io_dir
+        Directory to copy the RECONR input deck and listing to; None copies
+        nothing.
+
+    Returns
+    -------
+    pathlib.Path
+        The cached PENDF file (ASCII, as NJOY writes it as ``tape22``).
+
+    Raises
+    ------
+    RuntimeError
+        If NJOY finishes without emitting a PENDF. A failure of NJOY itself
+        raises :class:`~kika.processing.njoy_reconstruct.NjoyReconstructError`,
+        which is a
+        ``RuntimeError`` too.
     """
     endf_path = Path(endf_path).expanduser().resolve()
     cache_dir = Path(cache_dir).expanduser() if cache_dir is not None else DEFAULT_PENDF_CACHE_DIR
@@ -213,7 +265,24 @@ def _copy_cached_recon_io(
 
 
 def read_pendf_mf3_sections(pendf_path: str | Path) -> Dict[int, object]:
-    """Parse a cached tape22 and return the MT → MF3MT map."""
+    """Parse a cached tape22 and return the MT → MF3MT map.
+
+    Parameters
+    ----------
+    pendf_path
+        A PENDF file; only its MF3 is read.
+
+    Returns
+    -------
+    dict of int to object
+        The MF3 sections of the tape (the parser's section objects, not
+        ``CrossSection``), keyed by MT.
+
+    Raises
+    ------
+    RuntimeError
+        If the tape has no MF3 sections.
+    """
     from kika.endf import read_endf
     pendf = read_endf(str(pendf_path), mf_numbers=[3])
     mf3 = pendf.get_file(3)
@@ -230,6 +299,26 @@ def find_njoy_executable(njoy_executable: str | Path | None = None, *,
     this raises :class:`NjoyNotFoundError` with the three ways to fix it —
     the message is the documentation a user hits at the moment they need it.
     ``why`` says what the reconstruction is for, and goes into the message.
+
+    Parameters
+    ----------
+    njoy_executable
+        A path to the binary, or a command name looked up on ``PATH``. If it
+        names neither, the search goes on to the environment variable, then to
+        ``PATH``.
+    why
+        What the reconstruction is for, quoted in the error message.
+
+    Returns
+    -------
+    pathlib.Path
+        The first of the three that exists. The environment variable is
+        ``NJOY_EXECUTABLE`` and must name a file.
+
+    Raises
+    ------
+    NjoyNotFoundError
+        If none of the three finds an NJOY executable.
     """
     tried = []
     if njoy_executable is not None:
@@ -277,6 +366,35 @@ def attach_pendf(endf, *, endf_path: str | Path | None = None,
     or ``endf_path``), through the SHA256-keyed cache of
     :func:`get_or_create_pendf`, so a second call on the same tape costs a
     file read.
+
+    Parameters
+    ----------
+    endf
+        A parsed tape. Its ``pendf`` attribute is set by this call.
+    endf_path
+        The tape to run NJOY on. None uses ``endf.source_path``.
+    njoy_executable
+        As in :func:`find_njoy_executable`.
+    tolerance
+        RECONR's relative tolerance, as a fraction.
+    cache_dir
+        As in :func:`get_or_create_pendf`.
+    why
+        What the reconstruction is for, quoted in the error messages.
+
+    Returns
+    -------
+    dict of int to object
+        ``endf.pendf``: the MF3 sections of the PENDF keyed by MT.
+
+    Raises
+    ------
+    NjoyNotFoundError
+        If ``endf.pendf`` is not set and no tape path is known (neither
+        *endf_path* nor ``endf.source_path``), or no NJOY executable is found.
+    RuntimeError
+        From :func:`get_or_create_pendf` and :func:`read_pendf_mf3_sections`
+        (including NJOY failures).
     """
     if getattr(endf, "pendf", None):
         return endf.pendf

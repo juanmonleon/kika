@@ -38,7 +38,27 @@ def _m():
 
 
 def mapFunction2d(form, convert):
-    """The same XYs2d / regions2d with every inner function replaced by ``convert(f, k)``."""
+    """The same XYs2d / regions2d with every inner function replaced by ``convert(f, k)``.
+
+    Parameters
+    ----------
+    form
+        A model ``XYs2d`` or ``Regions2d``.
+    convert
+        ``convert(f, k)`` takes an inner function and its running index ``k``
+        (counted from 0 over all regions, in order) and returns its replacement.
+
+    Returns
+    -------
+    XYs2d or Regions2d
+        A new object of the same structure, with the outer coordinates and
+        interpolation of the original.
+
+    Raises
+    ------
+    TypeError
+        If *form* is not a two-dimensional table.
+    """
     m = _m()
     counter = [0]
 
@@ -157,6 +177,38 @@ def tabulateEnergy(form, options: TabulationOptions = TabulationOptions(), *, aw
     ``discrete`` gives, per incident energy, how many leading points are lines
     (ENDF's ND, which the model keeps in provenance). ``awr`` is needed for a
     primary photon.
+
+    Parameters
+    ----------
+    form
+        The evaluated outgoing-energy law: a tabulated ``XYs2d`` or ``Regions2d``
+        (energies in eV), a Maxwell, evaporation or Watt law (kept), a general
+        evaporation or Madland-Nix law (tabulated), a discrete or primary photon, an
+        N-body phase space or an already processed ``LevelEnergy`` or
+        ``DiscretePhotonEnergy`` (kept).
+    options : TabulationOptions
+        Default ``TabulationOptions()``.
+    awr
+        Target mass ratio. Required for a primary photon (ValueError otherwise);
+        a discrete photon without it gets 0.
+    discrete
+        Per incident energy, how many leading points of a table are lines. None
+        means none.
+
+    Returns
+    -------
+    tuple
+        ``(processed form, clipped)``: the form to store and the number of tables
+        that had negative densities set to zero (0 for the forms that are kept or
+        tabulated from a law).
+
+    Raises
+    ------
+    ValueError
+        If a primary photon has no *awr*, or a table cannot be made (see
+        :func:`normalisedTable` and :func:`refine`).
+    TypeError
+        If the energy distribution is of a type with no tabulation.
     """
     m = _m()
     clipped = [0]

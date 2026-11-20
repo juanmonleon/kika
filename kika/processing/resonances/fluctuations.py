@@ -10,7 +10,51 @@ from scipy.integrate import quad,IntegrationWarning
 
 
 def width_products(means,degrees,*,entrance=0,diagnostics=None,accelerated=True):
-    """Return all Q_nc in the same units as finite nonnegative mean widths."""
+    """Return all Q_nc in the same units as finite nonnegative mean widths.
+
+    ``Q_nc`` is the average of ``Gamma_n * Gamma_c / Gamma_total`` over the
+    fluctuating widths, for the entrance channel ``n`` and each channel ``c``. The
+    products add up to the entrance channel's mean width.
+
+    Parameters
+    ----------
+    means
+        One-dimensional array of mean widths, one per channel, finite and not
+        negative, in any one unit (eV in the URR tables). A channel of mean zero is
+        inactive and has a zero product.
+    degrees
+        Real degrees of freedom of each channel's width distribution, finite and
+        not negative, same shape as *means*. Zero is a fixed width.
+    entrance
+        Index of the entrance channel in *means*.
+    diagnostics : dict, optional
+        If given, the keys ``urr_max_quadrature_relative_error``,
+        ``urr_max_width_product_balance_error`` (running maxima) and
+        ``urr_laplace_integrals`` (a running count) are updated in it.
+    accelerated
+        If True, the compiled integrand is used for the quadrature when it is
+        available; the integral computed is the same.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``Q_nc`` for every channel, in the unit of *means*, shape of *means*.
+        All zeros if the entrance mean is zero; the entrance mean in the entrance
+        channel and zero elsewhere if it is the only active channel; the
+        proportional split ``means[entrance] * means / means.sum()`` if every
+        active width is fixed.
+
+    Raises
+    ------
+    ValueError
+        If *means* is not one-dimensional, *degrees* differs in shape, *entrance*
+        is out of range, or a value is not finite and non-negative.
+    FloatingPointError
+        If the ratio of the widths is too extreme for the quadrature, the
+        quadrature does not converge or misses its error check (relative error
+        above 1e-10), or the products do not add up to the entrance mean within a
+        relative 2e-10.
+    """
     m=np.asarray(means,dtype=float);nu=np.asarray(degrees,dtype=float)
     if (m.ndim!=1 or m.shape!=nu.shape or not 0<=entrance<len(m)
             or np.any(~np.isfinite(m)) or np.any(~np.isfinite(nu))
