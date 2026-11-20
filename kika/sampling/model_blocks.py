@@ -691,6 +691,41 @@ def legendre_covariance_index(
     }
 
 
+def _is_sum_statement(form) -> bool:
+    return getattr(form, "summands", None) is not None
+
+
+def _stated_matrix(form, where: str):
+    """The matrix *form* states for its section, or ``None`` if it states only sums.
+
+    ENDF-6 §33.2's NC LTY=0 decodes to a ``Sum`` (and, beside NI, to a ``Mixed``
+    of the NI matrix and that ``Sum``). A ``Sum`` is a statement about other
+    sections, which :mod:`kika.sampling.cross_section_sums` realises on the
+    draw (a derived sum is re-derived, a ``Remainder`` takes the difference),
+    so it contributes no block here. Any other form without one matrix still
+    raises: a GNDS ``mixed`` of matrices, or one holding a
+    ``shortRangeSelfScalingVariance``, is not decided.
+    """
+    if _is_sum_statement(form):
+        return None
+    components = getattr(form, "components", None)
+    if components is not None:
+        explicit = [c for c in components if not _is_sum_statement(c)]
+        if not explicit:
+            return None
+        if len(explicit) == 1 and len(explicit) < len(components):
+            return require_single_matrix(explicit[0], where)
+    return require_single_matrix(form, where)
+
+
+def _states_only_sums(form) -> bool:
+    """Whether *form* is NC LTY=0 alone: a ``Sum``, or a ``Mixed`` of nothing else."""
+    if _is_sum_statement(form):
+        return True
+    components = getattr(form, "components", None)
+    return bool(components) and all(_is_sum_statement(c) for c in components)
+
+
 #: The MFs :func:`_cross_section_entries` serves — the ones whose components are
 #: **reactions on an energy grid**, keyed by ``(ZA, MT)``.
 #:
@@ -756,17 +791,19 @@ def _cross_section_entries(suite, mf: int = 33, mt=None, relative=None):
             continue
         colData = rowData if colData is None else colData
 
-        form = require_single_matrix(
-            getattr(section, "form", None),
-            f"MF{mf} covariance section {getattr(section, 'label', '?')!r}",
-        )
-
-        if relative is not None and bool(form.isRelative) != bool(relative):
-            continue
-
         if mts is not None and not (
             _endf_mt(rowData) in mts and _endf_mt(colData) in mts
         ):
+            continue
+
+        form = _stated_matrix(
+            getattr(section, "form", None),
+            f"MF{mf} covariance section {getattr(section, 'label', '?')!r}",
+        )
+        if form is None:
+            continue
+
+        if relative is not None and bool(form.isRelative) != bool(relative):
             continue
 
         za = _za_of(suite, section)

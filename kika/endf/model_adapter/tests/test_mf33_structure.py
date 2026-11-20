@@ -110,7 +110,10 @@ def test_u235_keeps_all_group_headers_and_nc_rules(u235_b81_tape,tmp_path):
     endf=read_endf(str(u235_b81_tape),mf_numbers=[1,3,33])
     suite,_=decodeReactionSuite(endf)
     suite.covarianceSuite,report=decodeCovarianceSuite(endf,checks=False,reactionSuite=suite)
-    assert not [x for x in report.losses if "MF33" in x]
+    # MT18's correlations with Li-6, Au-197, U-238 and Pu-239 name another MAT.
+    external=[x for x in report.losses if "external MAT1" in x]
+    assert len(external)==5 and all(x.startswith("MF33/MT18:") for x in external)
+    assert not [x for x in report.losses if "MF33" in x and x not in external]
     rows,_=_covarianceSections(suite,9228,ConversionReport())
     from kika.endf.parsers.parse_mf33 import parse_mf33_mt
     actual={mt:parse_mf33_mt(str(s).splitlines(),mt) for mf,mt,s in rows if mf==33}

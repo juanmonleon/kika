@@ -269,8 +269,8 @@ def relativiseAbsoluteSections(suite, binCentral, unionGrid, *, mf: int = 33,
 
     Returns a new list of sections; *suite* is not modified.
     """
-    from kika.sampling.model_blocks import _endf_mt, _is_endf_mf, _lift_matrix
-    from kika._covariance_forms import require_single_matrix
+    from kika.sampling.model_blocks import (_endf_mt, _is_endf_mf, _lift_matrix,
+                                            _stated_matrix)
 
     union = np.asarray(unionGrid, dtype=float)
     kept = []
@@ -280,11 +280,11 @@ def relativiseAbsoluteSections(suite, binCentral, unionGrid, *, mf: int = 33,
             kept.append(section)
             continue
         colData = section.columnData if section.columnData is not None else rowData
-        form = require_single_matrix(
+        form = _stated_matrix(
             getattr(section, "form", None),
             f"MF{mf} covariance section {getattr(section, 'label', '?')!r}",
         )
-        if form.isRelative:
+        if form is None or form.isRelative:
             kept.append(section)
             continue
 
@@ -369,7 +369,7 @@ def relativiseOnAssemblyGrids(suite, central, gridOf, *, mfs=(31, 33), mts=None)
     covariance there is zero.
     """
     from kika._covariance_forms import require_single_matrix
-    from kika.sampling.model_blocks import _endf_mt, _is_endf_mf, _za_of
+    from kika.sampling.model_blocks import _endf_mt, _is_endf_mf, _stated_matrix, _za_of
 
     out, converted, unresolved, inertBins = [], [], [], {}
     for section in getattr(suite, "covarianceSections", suite):
@@ -377,15 +377,17 @@ def relativiseOnAssemblyGrids(suite, central, gridOf, *, mfs=(31, 33), mts=None)
         if mf is None:
             out.append(section)
             continue
-        form = require_single_matrix(
-            getattr(section, "form", None),
-            f"MF{mf} covariance section {getattr(section, 'label', '?')!r}",
-        )
         colData = section.columnData if section.columnData is not None else section.rowData
         mtRow, mtCol = _endf_mt(section.rowData), _endf_mt(colData)
         wanted = None if mts is None else mts.get(mf)
-        if form.isRelative or (wanted is not None
-                               and not (mtRow in wanted and mtCol in wanted)):
+        if wanted is not None and not (mtRow in wanted and mtCol in wanted):
+            out.append(section)
+            continue
+        form = _stated_matrix(
+            getattr(section, "form", None),
+            f"MF{mf} covariance section {getattr(section, 'label', '?')!r}",
+        )
+        if form is None or form.isRelative:
             out.append(section)
             continue
         label = f"MF{mf} MT{mtRow} x MT{mtCol}"
@@ -539,18 +541,17 @@ def loadCrossSectionBlocks(endfObj, mtList, centralSections, *, mf: int = 33,
 
 def _absoluteSections(suite, mf: int):
     """The ``(row MT, column MT)`` of every MF33/MF31 section stated absolute."""
-    from kika._covariance_forms import require_single_matrix
-    from kika.sampling.model_blocks import _endf_mt, _is_endf_mf
+    from kika.sampling.model_blocks import _endf_mt, _is_endf_mf, _stated_matrix
 
     found = []
     for section in getattr(suite, "covarianceSections", suite):
         if not _is_endf_mf(section.rowData, mf):
             continue
         try:
-            form = require_single_matrix(getattr(section, "form", None), "")
+            form = _stated_matrix(getattr(section, "form", None), "")
         except Exception:
             continue
-        if not form.isRelative:
+        if form is not None and not form.isRelative:
             col = (section.columnData if section.columnData is not None
                    else section.rowData)
             found.append((_endf_mt(section.rowData), _endf_mt(col)))

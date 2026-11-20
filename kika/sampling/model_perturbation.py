@@ -1123,7 +1123,7 @@ def _missingReactions(request, entries) -> Dict[int, List[int]]:
     return missing
 
 
-def _dropUnstatedReactions(suite, entries, onMissing, skipped, log):
+def _dropUnstatedReactions(suite, entries, onMissing, skipped, log, lumped=None):
     """The entries whose cross section the evaluation states; refuse or note the rest.
 
     Only reachable with ``covarianceSource``: a covariance from another file
@@ -1139,6 +1139,9 @@ def _dropUnstatedReactions(suite, entries, onMissing, skipped, log):
     if not claimed:
         return entries
     present, _sums = suiteSumLayout(suite)
+    # A lump (MTL) is stated through its members, which its block moves.
+    claimed -= {mtl for mtl, members in (lumped or {}).items()
+                if any(member in present for member in members)}
     unstated = set(unstatedClaims(claimed, present))
     if not unstated:
         return entries
@@ -1172,12 +1175,15 @@ def _statedCrossSectionMTs(covariances) -> set:
     needs it before the request is assembled, and assembling ``{33: None}``
     just to ask the question costs what the run costs.
     """
-    from kika.sampling.model_blocks import _endf_mt, _is_endf_mf
+    from kika.sampling.model_blocks import _endf_mt, _is_endf_mf, _states_only_sums
 
     stated = set()
     for section in getattr(covariances, "covarianceSections", covariances):
         row = section.rowData
         col = section.columnData if section.columnData is not None else row
+        # NC LTY=0 alone states the MT through others: a derived sum or a remainder.
+        if _states_only_sums(getattr(section, "form", None)):
+            continue
         if _is_endf_mf(row, 33) and _endf_mt(row) == _endf_mt(col):
             stated.add(int(_endf_mt(row)))
     return stated
@@ -3045,7 +3051,8 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                 f"{'it' if len(absent) == 1 else 'them'} from the request, or "
                 f"pass onMissing='skip' to perturb the rest and record the "
                 f"omission")
-        entries = _dropUnstatedReactions(suite, entries, onMissing, skipped, log)
+        entries = _dropUnstatedReactions(suite, entries, onMissing, skipped, log,
+                                         lumped)
         sumRecord: Dict[str, Any] = {"mode": sumBlocks}
         if crossSectionSums:
             entries, sumRecord, sumNotes = _screenSumBlocks(

@@ -140,10 +140,13 @@ _TAPES: Dict[str, Sequence[str]] = {
     # and both are needed, because the padding divergence and the outgoing-grid
     # mismatch only show up on ENDF/B-VIII.1.
     "u235_b81": ("endfb81/n-092_U_235.endf", "n-092_U_235.endf",
-                 "endfb81/neutrons/n-092_U_235.endf"),
+                 "endfb81/neutrons/n-092_U_235.endf", "endfb8.1/n/92235.endf"),
+    "u238_b81": ("endfb81/n-092_U_238.endf", "endfb81/neutrons/n-092_U_238.endf",
+                 "endfb8.1/n/92238.endf"),
     "cf252_b81": ("endfb81/n-098_Cf_252.endf", "n-098_Cf_252.endf",
                   "endfb81/neutrons/n-098_Cf_252.endf"),
-    "pu239_b81": ("endfb81/n-094_Pu_239.endf", "n-094_Pu_239.endf"),
+    "pu239_b81": ("endfb81/n-094_Pu_239.endf", "n-094_Pu_239.endf",
+                  "endfb8.1/n/94239.endf"),
     # PF-5: the tape where re-encoding a whole MF5 showed most, because its
     # MT455 spells the HEAD's ZA ``92233.0000`` and the encoder writes
     # ``9.223300+4``. The delta emitter's byte-identity gate runs on it.
@@ -232,7 +235,7 @@ _TAPES: Dict[str, Sequence[str]] = {
     # LB=5 that is indefinite on its own (lambda_min/lambda_max = -1, an element
     # of 111.94 between relative variances of 2.8e-6 and 0.035), verified on the
     # ENDF text without kika.
-    "o16_b81": ("endfb81/n-008_O_016.endf", "n-008_O_016.endf"),
+    "o16_b81": ("endfb81/n-008_O_016.endf", "n-008_O_016.endf", "endfb8.1/n/8016.endf"),
     # The photon witnesses of roadmap E5 (``PHOTON_TAPES`` below; the census
     # that picked them is kika-workspace ``docs/library/endf_photons_e5_plan.md``
     # §2.7). N-14 carries MF12 LO=1, MF13, an anisotropic MF14 and MF15 in one
@@ -652,6 +655,7 @@ u238_tape = _tape_fixture("u238")
 fe56_jeff40_tape = _tape_fixture("fe56_jeff40")
 u238_b80_tape = _tape_fixture("u238_b80")
 u235_b81_tape = _tape_fixture("u235_b81")
+u238_b81_tape = _tape_fixture("u238_b81")
 cf252_b81_tape = _tape_fixture("cf252_b81")
 pu239_b81_tape = _tape_fixture("pu239_b81")
 u233_b81_tape = _tape_fixture("u233_b81")
