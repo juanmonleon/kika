@@ -108,6 +108,46 @@ def rank_benchmarks(
     """Rank benchmarks by absolute sensitivity to an isotope/reaction/region.
 
     Convenience wrapper over :func:`find_sensitive_benchmarks` with no thresholds.
+    The ranking sorts by the absolute value of the integral sensitivity in the
+    region, largest first, over the preferred profile of each benchmark and its
+    system-total reactions. A reaction with an integral of exactly zero in the
+    region is not returned.
+
+    Parameters
+    ----------
+    isotope : str or int
+        ZAID (26056), symbol (``"Fe56"``) or hyphenated symbol (``"Fe-56"``).
+    reaction : str or int, optional
+        An MT, an alias (``"elastic"``, ``"capture"``) or a canonical label
+        (``"(n,el)"``). None ranks every reaction of the isotope, MT 0 (the
+        pseudo-total) excepted, so a benchmark can appear once per reaction.
+    energy_region : {"thermal", "epithermal", "fast", "total"}
+        The region whose integral is ranked: up to 0.625 eV, up to 100 keV,
+        above 100 keV, and all groups.
+    limit
+        Maximum number of rows.
+    db_path : str, optional
+        Database path; None resolves it as :func:`get_db_path` does.
+
+    Returns
+    -------
+    list of dict
+        The rows of :meth:`~kika.benchmarks.BenchmarksDatabase.screen`: the integral
+        sensitivity ``s_region`` is the dimensionless relative sensitivity
+        coefficient summed over the groups of the region, ``fraction`` is
+        ``abs(s_region)`` over the sum of the absolute group values of the same
+        reaction.
+
+    Raises
+    ------
+    ValueError
+        If ``energy_region`` is not one of the four, or ``reaction`` is a string
+        that matches no alias, label or integer.
+    TypeError
+        If ``isotope`` is not an int or a str, or ``reaction`` is not an int, a
+        str or None.
+    ~kika.benchmarks.DatabaseNotConfiguredError
+        If the database file does not exist.
     """
     return find_sensitive_benchmarks(
         isotope,
@@ -121,14 +161,58 @@ def rank_benchmarks(
 
 
 def get_benchmark(benchmark_id: str, db_path: Optional[str] = None) -> dict:
-    """Return a benchmark's metadata and its list of profile variants."""
+    """Return a benchmark's metadata and its list of profile variants.
+
+    Parameters
+    ----------
+    benchmark_id
+        The id as stored, e.g. ``"HEU-COMP-THERM-021-079"``.
+    db_path : str, optional
+        Database path; None resolves it as :func:`get_db_path` does.
+
+    Returns
+    -------
+    dict
+        As :meth:`~kika.benchmarks.BenchmarksDatabase.get_benchmark`: the
+        benchmark's stored row and ``profiles``, the list of its variants.
+
+    Raises
+    ------
+    ~kika.benchmarks.BenchmarkNotFoundError
+        If the id is not in the database.
+    ~kika.benchmarks.DatabaseNotConfiguredError
+        If the database file does not exist.
+    """
     with BenchmarksDatabase(db_path) as db:
         return db.get_benchmark(benchmark_id)
 
 
 def get_benchmark_dashboard(benchmark_id: str, db_path: Optional[str] = None) -> dict:
     """Return the whole per-benchmark record (metadata, keff, vectors, spectrum,
-    balance, input codes) in a single bundle for the app dashboard."""
+    balance, input codes) in a single bundle for the app dashboard.
+
+    Parameters
+    ----------
+    benchmark_id
+        The id as stored.
+    db_path : str, optional
+        Database path; None resolves it as :func:`get_db_path` does.
+
+    Returns
+    -------
+    dict
+        As :meth:`~kika.benchmarks.BenchmarksDatabase.get_benchmark_dashboard`:
+        the dict of :func:`get_benchmark` plus ``experimental_keff``,
+        ``preferred_profile_id``, ``profile_vector`` (of the preferred profile),
+        ``spectrum``, ``balance`` and ``input_codes``.
+
+    Raises
+    ------
+    ~kika.benchmarks.BenchmarkNotFoundError
+        If the id is not in the database.
+    ~kika.benchmarks.DatabaseNotConfiguredError
+        If the database file does not exist.
+    """
     with BenchmarksDatabase(db_path) as db:
         return db.get_benchmark_dashboard(benchmark_id)
 
@@ -139,31 +223,151 @@ def get_profile_vector(
     mt: Optional[int] = None,
     db_path: Optional[str] = None,
 ) -> dict:
-    """Return a profile's full per-group sensitivity vectors (SDFSensitivityData shape)."""
+    """Return a profile's full per-group sensitivity vectors (SDFSensitivityData shape).
+
+    Parameters
+    ----------
+    profile_id
+        The ``profile_id`` of a profile of the database.
+    zaid, mt
+        Keep only the reactions with this ZAID (1000 Z + A) or this ENDF MT.
+        None applies no filter.
+    db_path : str, optional
+        Database path; None resolves it as :func:`get_db_path` does.
+
+    Returns
+    -------
+    dict
+        As :meth:`~kika.benchmarks.BenchmarksDatabase.get_profile_vector`:
+        ``pert_energies`` (group boundaries in MeV, increasing) and
+        ``reactions``, the system-total reactions with their ``sensitivity``
+        (dimensionless relative coefficient per group, in increasing energy)
+        and ``error`` (absolute one-sigma uncertainty of each coefficient;
+        ``None`` when not stored and for ABBN tables, all zeros for the compact
+        TSUNAMI-1D dialect, which has none).
+
+    Raises
+    ------
+    ~kika.benchmarks.BenchmarkNotFoundError
+        If ``profile_id`` is not in the database.
+    ~kika.benchmarks.DatabaseNotConfiguredError
+        If the database file does not exist.
+    """
     with BenchmarksDatabase(db_path) as db:
         return db.get_profile_vector(profile_id, zaid=zaid, mt=mt)
 
 
 def get_sensitivity_profile(profile_id: int, db_path: Optional[str] = None):
-    """Return a profile as a validated format-neutral sensitivity object."""
+    """Return a profile as a validated format-neutral sensitivity object.
+
+    Parameters
+    ----------
+    profile_id
+        The ``profile_id`` of a profile of the database.
+    db_path : str, optional
+        Database path; None resolves it as :func:`get_db_path` does.
+
+    Returns
+    -------
+    ~kika.sensitivities.SensitivityProfile
+        As :meth:`~kika.benchmarks.BenchmarksDatabase.get_sensitivity_profile`:
+        energy boundaries in MeV, dimensionless relative sensitivities with
+        absolute one-sigma uncertainties (``None`` when not stored and for ABBN
+        tables, all zeros for the compact TSUNAMI-1D dialect), and the profile's
+        k-eff and its absolute uncertainty as ``response`` and
+        ``response_uncertainty`` (0.0 when the file's k-eff line has no ``+/-``;
+        both ``None`` for an ABBN table).
+
+    Raises
+    ------
+    ~kika.benchmarks.BenchmarkNotFoundError
+        If ``profile_id`` is not in the database.
+    ValueError
+        If the stored vectors fail the profile's validation.
+    ~kika.benchmarks.DatabaseNotConfiguredError
+        If the database file does not exist.
+    """
     with BenchmarksDatabase(db_path) as db:
         return db.get_sensitivity_profile(profile_id)
 
 
 def get_experimental_keff(benchmark_id: str, db_path: Optional[str] = None) -> dict:
-    """Return a benchmark's experimental keff ``{'keff', 'keff_unc'}`` (empty if unknown)."""
+    """Return a benchmark's experimental keff ``{'keff', 'keff_unc'}`` (empty if unknown).
+
+    Parameters
+    ----------
+    benchmark_id
+        The id as stored.
+    db_path : str, optional
+        Database path; None resolves it as :func:`get_db_path` does.
+
+    Returns
+    -------
+    dict
+        As :meth:`~kika.benchmarks.BenchmarksDatabase.get_experimental_keff`:
+        the experimental k-eff and its uncertainty as the benchmark workbook
+        gives them (kika does not convert them), or an empty dict when none was
+        matched to the benchmark.
+
+    Raises
+    ------
+    ~kika.benchmarks.BenchmarkNotFoundError
+        If the id is not in the database.
+    ~kika.benchmarks.DatabaseNotConfiguredError
+        If the database file does not exist.
+    """
     with BenchmarksDatabase(db_path) as db:
         return db.get_experimental_keff(benchmark_id)
 
 
 def get_spectrum(benchmark_id: str, db_path: Optional[str] = None) -> Optional[dict]:
-    """Return a benchmark's 299-group flux spectrum ``{'energies', 'flux'}`` or None."""
+    """Return a benchmark's 299-group flux spectrum ``{'energies', 'flux'}`` or None.
+
+    Parameters
+    ----------
+    benchmark_id
+        The id as stored.
+    db_path : str, optional
+        Database path; None resolves it as :func:`get_db_path` does.
+
+    Returns
+    -------
+    dict or None
+        As :meth:`~kika.benchmarks.BenchmarksDatabase.get_spectrum`: lists of
+        the upper energy edge of each group in MeV and of the group flux, in the
+        order of the DICE file; ``None`` when no spectrum is stored.
+
+    Raises
+    ------
+    ~kika.benchmarks.DatabaseNotConfiguredError
+        If the database file does not exist.
+    """
     with BenchmarksDatabase(db_path) as db:
         return db.get_spectrum(benchmark_id)
 
 
 def get_balance(benchmark_id: str, db_path: Optional[str] = None) -> Optional[dict]:
-    """Return a benchmark's reaction-rate balance ``{'summary', 'text'}`` or None."""
+    """Return a benchmark's reaction-rate balance ``{'summary', 'text'}`` or None.
+
+    Parameters
+    ----------
+    benchmark_id
+        The id as stored.
+    db_path : str, optional
+        Database path; None resolves it as :func:`get_db_path` does.
+
+    Returns
+    -------
+    dict or None
+        As :meth:`~kika.benchmarks.BenchmarksDatabase.get_balance`: ``summary``
+        (those of ``keff``, ``leakage`` and ``n_zones`` found in the file) and
+        ``text`` (the whole balance file); ``None`` when none is stored.
+
+    Raises
+    ------
+    ~kika.benchmarks.DatabaseNotConfiguredError
+        If the database file does not exist.
+    """
     with BenchmarksDatabase(db_path) as db:
         return db.get_balance(benchmark_id)
 
@@ -171,6 +375,28 @@ def get_balance(benchmark_id: str, db_path: Optional[str] = None) -> Optional[di
 def get_input_deck(
     benchmark_id: str, code: Optional[str] = None, db_path: Optional[str] = None
 ) -> list:
-    """Return a benchmark's raw input deck(s) as ``[{'code', 'text'}]`` (verbatim)."""
+    """Return a benchmark's raw input deck(s) as ``[{'code', 'text'}]`` (verbatim).
+
+    Parameters
+    ----------
+    benchmark_id
+        The id as stored.
+    code
+        ``"KENO"`` or ``"MCNP"`` to return that deck only (exact match); None
+        returns every stored deck.
+    db_path : str, optional
+        Database path; None resolves it as :func:`get_db_path` does.
+
+    Returns
+    -------
+    list of dict
+        As :meth:`~kika.benchmarks.BenchmarksDatabase.get_input_deck`: one dict
+        per deck with its ``code`` and ``text``; empty when nothing matches.
+
+    Raises
+    ------
+    ~kika.benchmarks.DatabaseNotConfiguredError
+        If the database file does not exist.
+    """
     with BenchmarksDatabase(db_path) as db:
         return db.get_input_deck(benchmark_id, code=code)

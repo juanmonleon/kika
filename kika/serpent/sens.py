@@ -15,6 +15,14 @@ from kika._utils import zaid_to_symbol
 
 
 class PertCategory(str, Enum):
+    """Kind of quantity a Serpent sensitivity perturbation acts on.
+
+    ``MT_XS`` is a cross-section, ``LEGENDRE_MOMENT`` a Legendre moment of a
+    scattering angular distribution (the channel is in ``Perturbation.channel``),
+    ``NUBAR`` and ``CHI`` the fission neutron yield and spectrum, and ``OTHER`` a
+    label the parser does not recognise.
+    """
+
     MT_XS = "mt_xs"
     LEGENDRE_MOMENT = "legendre_moment"
     NUBAR = "nubar"
@@ -24,23 +32,80 @@ class PertCategory(str, Enum):
 
 @dataclass(frozen=True)
 class Material:
+    """A material of a Serpent sensitivity file, as listed in ``SENS_MAT_LIST``.
+
+    Built by :class:`SensitivityFile`; a user reads it from ``materials``.
+
+    Attributes
+    ----------
+    index : int
+        Position along the material axis of the sensitivity arrays.
+    name : str
+        Material name as written in the file, stripped of padding.
+    """
+
     index: int
     name: str
 
 
 @dataclass(frozen=True)
 class Nuclide:
+    """A nuclide of a Serpent sensitivity file, as listed in ``SENS_ZAI_LIST``.
+
+    Built by :class:`SensitivityFile`; a user reads it from ``nuclides``.
+
+    Attributes
+    ----------
+    index : int
+        Position along the nuclide axis of the sensitivity arrays.
+    zai : int
+        ZAI code with the trailing zero dropped when the file's code ends in 0
+        (``260560`` becomes ``26056``).
+    """
+
     index: int
     zai: int
 
     @property
     def label(self) -> str:
+        """The ``zai`` as a string, without any prefix."""
         # Return just the nuclide number without "ZAI" prefix
         return str(self.zai)
 
 
 @dataclass(frozen=True)
 class Perturbation:
+    """A perturbed quantity of a Serpent sensitivity file, from ``SENS_PERT_LIST``.
+
+    A user reads it from ``SensitivityFile.perturbations``; the file's parser builds it
+    from the raw label.
+
+    Attributes
+    ----------
+    index : int
+        Position along the perturbation axis of the sensitivity arrays.
+    raw_label : str
+        The label as written in the file.
+    category : PertCategory
+        Kind of quantity perturbed.
+    mt : int or None
+        ENDF MT number: the one in the label for a cross-section; 1 for ``total xs``;
+        4 for an inelastic-scattering label; 452, 456 and 455 for total, prompt and
+        delayed nubar; 1018, 1019 and 1020 for total, prompt and delayed chi (the
+        last two are Serpent extensions, not ENDF numbers); ``4000 + L`` for a
+        Legendre moment of order L (also when the label is ``mt 400L xs``). None for
+        ``OTHER``.
+    channel : str or None
+        Reaction channel of a Legendre-moment label (lower case, as in the label;
+        ``"ela"`` for the ``mt 400L xs`` form). None for the other categories.
+    moment : int or None
+        Legendre order L of a Legendre moment. None for the other categories.
+    short_label : str or None
+        Human-readable label, such as ``"MT 102 (n,γ)"`` (the reaction name comes
+        from the library's MT table) or ``"ela L=1"``. For ``OTHER`` it is the raw
+        label stripped of padding.
+    """
+
     index: int
     raw_label: str
     category: PertCategory
@@ -52,6 +117,24 @@ class Perturbation:
 
 @dataclass(frozen=True)
 class Response:
+    """One response (and response bin) of a Serpent sensitivity file.
+
+    A user reads it from ``SensitivitySet.responses``; the file's parser builds it.
+
+    Attributes
+    ----------
+    base_name : str
+        Response name without the bin suffix.
+    bin_index : int or None
+        Response bin, counted from 0.
+    full_name : str
+        Name that selects the response in ``SensitivityFile.get_energy_dependent`` and
+        its siblings: ``base_name`` plus ``_BIN_<n>``, or ``base_name`` alone when the
+        response has a single bin without a suffix in the file.
+    label : str or None
+        Free label; the parser leaves it None.
+    """
+
     base_name: str               # e.g. "sens_ratio"
     bin_index: Optional[int]     # None or 0..N-1
     full_name: str               # e.g. "sens_ratio_BIN_0"
@@ -59,12 +142,36 @@ class Response:
 
 
 class SensitivitySet:
-    """Holds arrays for one *base* response across all response bins.
+    """Sensitivity arrays of one *base* response across all its response bins.
 
-    Shapes:
-      energy_dependent: (n_bins, M, Z, P, E, 2)
-      integrated:       (n_bins, M, Z, P, 2)
-    where last-axis 2 = [value, relative_error]
+    A user gets one from ``SensitivityFile.data``, keyed by base name. The array axes
+    are response bin, material (M), nuclide (Z), perturbation (P) and energy bin (E),
+    in the order of the file's lists. The last axis holds ``[value, relative_error]``;
+    the error is the relative statistical error of the value.
+
+    Parameters
+    ----------
+    responses : list of Response
+        One per response bin, in the order of axis 0.
+    energy_dependent : array_like
+        Shape ``(n_bins, M, Z, P, E, 2)``: the sensitivity in each energy bin. The
+        value is the one stored in the file, per energy bin and not per unit
+        lethargy (``SensitivityFile.lethargy_widths`` converts).
+    integrated : array_like
+        Shape ``(n_bins, M, Z, P, 2)``: the sensitivity integrated over energy.
+
+    Attributes
+    ----------
+    responses : list of Response
+        As given.
+    energy_dependent, integrated : numpy.ndarray
+        The two arrays, as float.
+
+    Raises
+    ------
+    ValueError
+        If the arrays do not have 6 and 5 dimensions, a last axis of size 2, the same
+        number of bins, the same ``(M, Z, P)``, or as many bins as ``responses``.
     """
 
     def __init__(
@@ -108,6 +215,27 @@ class SensitivitySet:
         pert: Optional[Union[int, Sequence[int]]] = None,
         energy: Optional[Union[int, Sequence[int]]] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
+        """Energy-dependent values and relative errors of one response bin, by index.
+
+        Parameters
+        ----------
+        bin_index : int
+            Response bin, along axis 0.
+        mat, zai, pert, energy : int or sequence of int, optional
+            Positions along the material, nuclide, perturbation and energy axes (not
+            ZAI codes or MT numbers). None keeps the whole axis. An int drops the
+            axis; a list or tuple selects those positions with numpy fancy indexing,
+            so several lists are paired element by element, not crossed.
+
+        Returns
+        -------
+        tuple of numpy.ndarray
+            ``(values, rel_errors)``. With int or None selections the axes are those
+            of ``(M, Z, P, E)`` left after the selection, in that order. A list on
+            ``zai``, ``pert`` or ``energy`` puts the axis of that list first (numpy
+            moves it ahead of the others, because ``bin_index`` and the list are
+            separated by a slice); a list on ``mat`` keeps its place.
+        """
         ed = self.energy_dependent
         # Build slices for (bins, M, Z, P, E, stat)
         sl = [bin_index, slice(None), slice(None), slice(None), slice(None), slice(None)]
@@ -130,6 +258,25 @@ class SensitivitySet:
         zai: Optional[Union[int, Sequence[int]]] = None,
         pert: Optional[Union[int, Sequence[int]]] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
+        """Energy-integrated values and relative errors of one response bin, by index.
+
+        Parameters
+        ----------
+        bin_index : int
+            Response bin, along axis 0.
+        mat, zai, pert : int or sequence of int, optional
+            Positions along the material, nuclide and perturbation axes, selected as
+            in :meth:`get_ed_by_index`.
+
+        Returns
+        -------
+        tuple of numpy.ndarray
+            ``(values, rel_errors)``. With int or None selections the axes are those
+            of ``(M, Z, P)`` left after the selection, in that order. A list on
+            ``zai`` or ``pert`` puts the axis of that list first (numpy moves it
+            ahead of the others, because ``bin_index`` and the list are separated by
+            a slice); a list on ``mat`` keeps its place.
+        """
         it = self.integrated
         sl = [bin_index, slice(None), slice(None), slice(None), slice(None)]
         if mat is not None:
@@ -143,10 +290,53 @@ class SensitivitySet:
 
 
 class SensitivityFile:
-    """Top-level container for a SERPENT .sens file (adjoint perturbation sensitivities).
+    """A Serpent ``.sens`` file: adjoint-perturbation sensitivities of its responses.
 
-    Holds descriptors (materials, nuclides, perturbations), energy grid, and a
-    mapping from base response names to SensitivitySet.
+    A user gets one from :func:`read_sensitivity_file`. It holds the materials,
+    nuclides and perturbations of the file, the energy grid, and the sensitivity
+    arrays of each base response as a :class:`SensitivitySet`.
+
+    Parameters
+    ----------
+    n_materials, n_nuclides, n_perturbations, n_energy_bins : int
+        Sizes of the axes; ``validate`` checks every list and array against them.
+    n_mu_bins : int or None
+        Number of mu bins written by Serpent, kept for information.
+    materials : list of str
+        Material names, in file order; stored as ``Material``.
+    nuclides : list of int
+        ZAI codes, in file order; stored as ``Nuclide``, with the trailing zero
+        of a code ending in 0 dropped.
+    perturbations_raw : list of str
+        Perturbation labels as written in the file.
+    perturbations : list of Perturbation
+        The parsed labels, in the same order.
+    energy_grid : array_like
+        Energy bin edges, ``n_energy_bins + 1`` values, as read from ``SENS_E``: not
+        reordered or converted.
+    lethargy_widths : array_like
+        Lethargy width of each energy bin, ``n_energy_bins`` values.
+    data : dict of str to SensitivitySet
+        Sensitivity arrays by base response name.
+    meta : dict, optional
+        Free-form notes; copied.
+
+    Attributes
+    ----------
+    n_materials, n_nuclides, n_perturbations, n_energy_bins, n_mu_bins
+        As given.
+    materials : list of ``Material``
+    nuclides : list of ``Nuclide``
+    perturbations_raw : list of str
+    perturbations : list of Perturbation
+    energy_grid, lethargy_widths : numpy.ndarray
+    data : dict of str to SensitivitySet
+    meta : dict
+
+    Raises
+    ------
+    ValueError
+        If a list or array does not match the sizes given (see ``validate``).
     """
 
     # Parameters
@@ -212,10 +402,12 @@ class SensitivityFile:
     # ------------------------------
     @property
     def energy_bin_count(self) -> int:
+        """Number of energy bins; the same as ``n_energy_bins``."""
         return self.n_energy_bins
 
     @property
     def responses(self) -> List[str]:
+        """Full names of every response bin, base by base, in file order."""
         out: List[str] = []
         for base, sset in self.data.items():
             for r in sset.responses:
@@ -233,11 +425,38 @@ class SensitivityFile:
 
     # Filtering helpers for perturbations
     def by_mt(self, mt: int) -> List[Perturbation]:
+        """The perturbations whose ``mt`` equals *mt*, in file order.
+
+        Parameters
+        ----------
+        mt : int
+            MT number, as stored in ``Perturbation.mt`` (so 4001 and up for Legendre
+            moments, 452 for total nubar).
+
+        Returns
+        -------
+        list of Perturbation
+            Empty when none matches.
+        """
         return [p for p in self.perturbations if p.mt == mt]
 
     def by_legendre(
         self, channel: Optional[str] = None, moment: Optional[int] = None
     ) -> List[Perturbation]:
+        """The Legendre-moment perturbations, optionally for one channel and order.
+
+        Parameters
+        ----------
+        channel : str, optional
+            Reaction channel, compared without regard to case. None accepts any.
+        moment : int, optional
+            Legendre order. None accepts any.
+
+        Returns
+        -------
+        list of Perturbation
+            Those of category ``LEGENDRE_MOMENT`` that match, in file order.
+        """
         def ok(p: Perturbation) -> bool:
             if p.category != PertCategory.LEGENDRE_MOMENT:
                 return False
@@ -466,6 +685,32 @@ class SensitivityFile:
 
     # DataFrame view
     def to_dataframe(self, response_full: Optional[str] = None, include_edges: bool = True):
+        """Energy-dependent sensitivities as a long pandas DataFrame, one row per bin.
+
+        Parameters
+        ----------
+        response_full : str, optional
+            Full response name. None includes every response.
+        include_edges : bool
+            Add the columns ``E_low`` and ``E_high`` (the edges of the energy bin, in
+            the units of ``energy_grid``).
+
+        Returns
+        -------
+        pandas.DataFrame
+            Columns ``response``, ``material`` (name), ``nuclide`` (``Nuclide.label``),
+            ``pert_index``, ``pert_label`` (the short label, or the raw label if there
+            is none), ``energy_group`` (0-based bin), ``value``, ``rel_err`` (relative
+            statistical error), then the edges. Rows run over material, nuclide,
+            perturbation and energy bin, the last varying fastest.
+
+        Raises
+        ------
+        RuntimeError
+            If pandas is not installed.
+        KeyError
+            If *response_full* is not a response of the file.
+        """
         try:
             import pandas as pd
         except Exception as e:
@@ -515,6 +760,31 @@ class SensitivityFile:
 
     # xarray view
     def to_xarray(self, response_full: Optional[str] = None, include_edges: bool = True):
+        """Sensitivities as an xarray Dataset with named axes.
+
+        Parameters
+        ----------
+        response_full : str, optional
+            Full response name. None includes every response.
+        include_edges : bool
+            Add the coordinates ``E_low`` and ``E_high`` along ``energy`` (the edges
+            of each bin, in the units of ``energy_grid``).
+
+        Returns
+        -------
+        xarray.Dataset
+            Variables ``ed_value`` and ``ed_rel_err`` with dimensions ``(response,
+            material, nuclide, perturbation, energy)``, and ``int_value`` and
+            ``int_rel_err`` without ``energy``. The ``rel_err`` variables hold the
+            relative statistical error. Coordinates are the response names, material
+            names, nuclide labels, perturbation labels (short, or raw if none) and the
+            0-based energy bin.
+
+        Raises
+        ------
+        KeyError
+            If *response_full* is not a response of the file.
+        """
         # Build selection of responses
         selected: list[tuple[str, SensitivitySet, int]] = []
         if response_full is not None:
@@ -567,12 +837,41 @@ class SensitivityFile:
         return ds
 
     def plot_energy_sensitivity(self, *args, **kwargs):
+        """Step-plot energy-dependent sensitivities of this file.
+
+        Parameters
+        ----------
+        *args, **kwargs
+            Passed to the plotting function with this file as its first argument:
+            ``responses`` (a full response name or a list of them), then the options
+            ``materials``, ``nuclides``, ``mt``, ``leg``, ``leg_channel``,
+            ``per_lethargy`` (default True: values are divided by
+            ``lethargy_widths``), ``errorbars``, ``ax``, ``logx``, ``energy_range``,
+            ``legend``, ``label_fmt``, ``title``, ``style`` and ``figsize``. A negative
+            ``mt`` excludes that MT number.
+
+        Returns
+        -------
+        matplotlib axes
+            The matplotlib axes drawn on (a ``matplotlib.axes.Axes`` object).
+        """
         from kika.serpent.plotting import plot_energy_sensitivity as _plot
         return _plot(self, *args, **kwargs)
 
 
     # Validation and summary
     def validate(self) -> None:
+        """Check that every list and array agrees with the sizes of the file.
+
+        Raises
+        ------
+        ValueError
+            If ``materials``, ``nuclides`` or ``perturbations`` differ in length from
+            their counts, ``energy_grid`` is not ``n_energy_bins + 1`` long,
+            ``lethargy_widths`` is not ``n_energy_bins`` long, or a sensitivity array
+            differs from the counts along its material, nuclide, perturbation or
+            energy axis.
+        """
         # Basic sizes
         if len(self.materials) != self.n_materials:
             raise ValueError("materials length != n_materials")
@@ -598,6 +897,10 @@ class SensitivityFile:
                 raise ValueError("E dimension mismatch in ED array")
 
     def summary(self) -> str:
+        """Short text listing of the materials, nuclides, perturbations and responses.
+
+        Perturbations and responses are cut to their first five.
+        """
         lines = []
         lines.append("SERPENT Sensitivity File Summary")
         lines.append("- Materials ({}): {}".format(

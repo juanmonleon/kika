@@ -43,7 +43,18 @@ LIBRARY_TYPES = ("neutron", "thermal", "photon", "wmp")
 
 @dataclass
 class LibraryEntry:
-    """One ``<library>``: the materials one file holds, where it is, and its kind."""
+    """One ``<library>``: the materials one file holds, where it is, and its kind.
+
+    Attributes
+    ----------
+    materials : tuple of str
+        The material names the file holds. A string given at construction is split
+        on whitespace.
+    path : str
+        The file, as written in the index: relative or absolute.
+    type : str
+        One of ``LIBRARY_TYPES``; construction raises ``ValueError`` for any other.
+    """
 
     materials: Tuple[str, ...]
     path: str
@@ -59,7 +70,23 @@ class LibraryEntry:
 
 @dataclass
 class CrossSectionsXml:
-    """The parsed index, kept as written: relative paths stay relative."""
+    """The parsed index, kept as written: relative paths stay relative.
+
+    Built by :meth:`read`, by hand, or returned by :func:`overlay`.
+
+    Attributes
+    ----------
+    entries : list of LibraryEntry
+        The ``<library>`` nodes, in file order.
+    directory : str or None
+        The ``<directory>`` element; ``None`` when absent or empty.
+    depletionChain : str or None
+        The ``path`` of ``<depletion_chain>`` as written, or ``None``.
+    source : pathlib.Path or None
+        The file the index was read from or last written to, which relative paths
+        resolve against when there is no ``directory``; ``None`` for an index
+        built by hand.
+    """
 
     entries: List[LibraryEntry] = field(default_factory=list)
     directory: Optional[str] = None
@@ -69,6 +96,27 @@ class CrossSectionsXml:
 
     @classmethod
     def read(cls, path) -> "CrossSectionsXml":
+        """Parse a ``cross_sections.xml``.
+
+        Parameters
+        ----------
+        path
+            The XML file.
+
+        Returns
+        -------
+        CrossSectionsXml
+            With ``source`` set to ``path``. A ``<library>`` without ``materials``
+            has an empty tuple of them.
+
+        Raises
+        ------
+        HDF5FormatError
+            If the file is not well-formed XML or its root is not
+            ``<cross_sections>``.
+        ValueError
+            If a ``<library>`` has a missing or unknown ``type``.
+        """
         path = Path(path)
         try:
             root = ET.parse(path).getroot()
@@ -90,7 +138,21 @@ class CrossSectionsXml:
         return index
 
     def write(self, path) -> Path:
-        """Write the index in the layout ``DataLibrary.export_to_xml`` produces."""
+        """Write the index in the layout ``DataLibrary.export_to_xml`` produces.
+
+        Parent directories are created and an existing file is replaced. The text is
+        UTF-8 with LF line endings. ``source`` becomes ``path``.
+
+        Parameters
+        ----------
+        path
+            Where to write.
+
+        Returns
+        -------
+        pathlib.Path
+            ``path``.
+        """
         path = Path(path)
         root = ET.Element("cross_sections")
         if self.directory:
@@ -113,7 +175,19 @@ class CrossSectionsXml:
         return path
 
     def base(self) -> Path:
-        """What a relative ``path`` is joined to."""
+        """What a relative ``path`` is joined to.
+
+        Returns
+        -------
+        pathlib.Path
+            ``directory`` when the index has one (as written, so it may itself be
+            relative), otherwise the directory of ``source``.
+
+        Raises
+        ------
+        ValueError
+            If there is no ``directory`` and the index was never read or written.
+        """
         if self.directory:
             return Path(self.directory)
         if self.source is None:
@@ -121,10 +195,44 @@ class CrossSectionsXml:
         return self.source.parent
 
     def resolve(self, entry: LibraryEntry) -> Path:
+        """The path of an entry's file: as written if absolute, else under :meth:`base`.
+
+        Parameters
+        ----------
+        entry
+            An entry of this index.
+
+        Returns
+        -------
+        pathlib.Path
+            Not checked to exist. A relative entry path raises ``ValueError`` as
+            :meth:`base` does when the index has no base.
+        """
         candidate = Path(entry.path)
         return candidate if candidate.is_absolute() else self.base() / candidate
 
     def find(self, material: str, type: str = "neutron") -> LibraryEntry:
+        """The first entry of that ``type`` that lists ``material``.
+
+        The look-up is exact: OpenMC names metastables ``Am242_m1`` and thermal
+        tables ``c_H_in_H2O``.
+
+        Parameters
+        ----------
+        material
+            The name as the index lists it.
+        type
+            One of ``LIBRARY_TYPES``.
+
+        Returns
+        -------
+        LibraryEntry
+
+        Raises
+        ------
+        NuclideNotFoundError
+            If no entry of that type lists the material.
+        """
         for entry in self.entries:
             if entry.type == type and material in entry.materials:
                 return entry
@@ -134,6 +242,18 @@ class CrossSectionsXml:
             f"tables c_H_in_H2O, photon files by element)")
 
     def materials(self, type: str = "neutron") -> List[str]:
+        """The material names of every entry of that ``type``, in index order.
+
+        Parameters
+        ----------
+        type
+            One of ``LIBRARY_TYPES``.
+
+        Returns
+        -------
+        list of str
+            A name that appears in two entries appears twice.
+        """
         return [m for entry in self.entries if entry.type == type for m in entry.materials]
 
 
@@ -142,6 +262,27 @@ def registerFile(path, relativeTo: Optional[Path] = None) -> LibraryEntry:
 
     ``type`` is the root ``filetype`` without its ``data_`` prefix and
     ``materials`` the top-level group names (``library.py:60-75``).
+
+    Parameters
+    ----------
+    path
+        The ``.h5`` file.
+    relativeTo
+        A directory. The entry's ``path`` is then the file's path relative to it, in
+        POSIX form (absolute, also in POSIX form, when the two are on different
+        drives); ``None`` writes ``path`` as given.
+
+    Returns
+    -------
+    LibraryEntry
+
+    Raises
+    ------
+    HDF5FormatError
+        If the root has no ``filetype`` attribute, or it does not start with
+        ``data_``.
+    ValueError
+        If the type that follows ``data_`` is not one of ``LIBRARY_TYPES``.
     """
     import h5py
 
@@ -167,7 +308,16 @@ def _relative(target: Path, start: Path) -> str:
 
 
 class Library:
-    """An opened OpenMC library: its index and the files it names."""
+    """An opened OpenMC library: its index and the files it names.
+
+    Returned by :func:`~kika.hdf5.library.open`; ``index`` is its
+    :class:`CrossSectionsXml`.
+
+    Parameters
+    ----------
+    index
+        The parsed index.
+    """
 
     def __init__(self, index: CrossSectionsXml) -> None:
         self.index = index
@@ -178,13 +328,66 @@ class Library:
         return f"<Library {self.index.source} | {shown or 'empty'}>"
 
     def path(self, material: str, type: str = "neutron") -> Path:
+        """The file that holds ``material`` of that ``type``, resolved against the index.
+
+        Parameters
+        ----------
+        material
+            The name as the index lists it.
+        type
+            One of ``LIBRARY_TYPES``.
+
+        Returns
+        -------
+        pathlib.Path
+            Not checked to exist.
+
+        Raises
+        ------
+        NuclideNotFoundError
+            If the index lists no such material.
+        """
         return self.index.resolve(self.index.find(material, type))
 
     def materials(self, type: str = "neutron") -> List[str]:
+        """The material names of that ``type``, in index order.
+
+        Parameters
+        ----------
+        type
+            One of ``LIBRARY_TYPES``.
+
+        Returns
+        -------
+        list of str
+            As :meth:`CrossSectionsXml.materials`.
+        """
         return self.index.materials(type)
 
     def read(self, material: str, type: str = "neutron", **kwargs):
-        """The material decoded into the model (neutron: a ``ReactionSuite``)."""
+        """The material decoded into the model (neutron: a ``ReactionSuite``).
+
+        Parameters
+        ----------
+        material
+            The exact name the index lists.
+        type
+            The library type to look in, one of ``LIBRARY_TYPES``.
+        **kwargs
+            Passed to :func:`kika.hdf5.api.read`, which ignores them.
+
+        Returns
+        -------
+        ReactionSuite
+            As :func:`kika.hdf5.api.read` returns it for the file.
+
+        Raises
+        ------
+        NuclideNotFoundError
+            If the index lists no such material.
+        HDF5UnsupportedError
+            If the file is a photon or ``wmp`` file, which are not decoded.
+        """
         from .api import read
 
         return read(self.path(material, type), **kwargs)
@@ -234,6 +437,23 @@ def open(path) -> Library:  # noqa: A001 - mirrors kika.g4ndl.open
     """A library from its ``cross_sections.xml``, the directory holding one,
     or a single ``.h5`` file: a library of that one file, indexed in memory
     from the file itself (:func:`registerFile`), as GNDS opens one ``.gnds.xml``.
+
+    Parameters
+    ----------
+    path
+        A ``cross_sections.xml``, a directory that holds one, or a file ending in
+        ``.h5`` or ``.hdf5`` (any case).
+
+    Returns
+    -------
+    Library
+
+    Raises
+    ------
+    FileNotFoundError
+        If ``path`` (or ``cross_sections.xml`` in it, for a directory) is not a file.
+    HDF5FormatError
+        If the XML is malformed, or the ``.h5`` has no valid ``filetype``.
     """
     path = Path(path)
     if path.is_dir():
@@ -256,6 +476,40 @@ def overlay(base, replacements: Mapping[str, object], output, *,
     is not ``neutron``. The new file's own top-level group is checked against the
     material name, because the C++ opens the group named in the index
     (``nuclide.cpp:1104-1170``) and a mismatch fails only at load time.
+
+    The index is written to ``output`` (replacing any file there). Every path in
+    it, to the new files and to the base library's, is relative to the directory of
+    ``output`` in POSIX form, or absolute when they are on different drives; the
+    new index has no ``<directory>``. The depletion chain of the base is kept, its
+    path rewritten the same way.
+
+    Parameters
+    ----------
+    base
+        The library to start from: anything :func:`~kika.hdf5.library.open`
+        takes, or a ``CrossSectionsXml``.
+    replacements
+        ``{material name: path of the .h5 file}``. A material that the base lists
+        with the same type has its entry pointed at the new file; the others are
+        appended.
+    output
+        The ``cross_sections.xml`` to write.
+    types
+        ``{material name: type}`` for the materials that are not ``neutron``.
+
+    Returns
+    -------
+    CrossSectionsXml
+        The new index, with ``source`` set to ``output``.
+
+    Raises
+    ------
+    HDF5FormatError
+        If a replacement file has no top-level group named as its material.
+    NotImplementedError
+        If a base entry holds several materials and one of them is replaced.
+    FileNotFoundError
+        If ``base`` is a path that is not a file.
     """
     import h5py
 

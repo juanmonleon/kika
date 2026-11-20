@@ -1,55 +1,36 @@
 """Perturb on the model, write to whichever format is asked for.
 
-This is the pipeline the four single-quantity ones do not add up to. It reads a
-tape once, assembles whatever covariance the request names -- cross sections,
-angular distributions, multiplicities, fission spectra, in any combination --
-decides from the file which of them have to be drawn together, draws, puts each
-realisation on the model nodes it belongs to, and emits.
+:func:`perturbFromModel` reads a tape once, assembles whatever covariance the
+request names (cross sections, angular distributions, multiplicities, fission
+spectra, in any combination), decides from the file which of them have to be
+drawn together, draws, puts each realisation on the model nodes it belongs to,
+and writes it in the formats asked for.
 
-**Not everything it draws is a factor.** MF35's bands are the absolute
-covariance of group-integrated probabilities, so they are drawn linearly as
-deltas while the other three files are drawn in log space as factors. One
-request may carry both; the draw is split by what each covariance *states*, not
-by what the caller asked for. See :func:`_splitBySemantics`.
+Not everything it draws is a factor. MF35's bands are the absolute covariance of
+group-integrated probabilities, so they are drawn linearly as deltas while the
+other three files are drawn as factors (in log space by default). One request
+may carry both: the draw is split by what each covariance states, not by what
+the caller asked for.
 
-It is a **fork, not a flag.** ``perturb_PENDF_files`` and ``perturb_ENDF_files``
-are untouched, and the reason is risk to a finished result rather than tidiness:
-they are what the thesis ensembles were drawn through, so a mode switch inside
-them would put this code on a path that must not move. Nothing here imports
-them except to compare against in tests.
+Conditioning is a pre-flight (:mod:`kika.cov.conditioning`), not an automatic
+fix. By default the run inspects its own blocks and applies the pre-flight's
+recommendation, which repairs definiteness and nothing else; a caller can hand in
+an edited plan, or ``False`` to draw the blocks as stated. The plan goes in the
+run directory next to the realisations. ``psdMethod`` defaults to ``"none"``
+because the repairs have been made and named before the draw.
 
-Three things it does differently, each of them deliberate:
+Every stage is a timed event with its numbers on a ``RunLog``, written as
+``run.log.jsonl`` with ``report.html`` built from it, also when the run fails or
+is stopped. ``dryRun=True`` does everything but write the samples. Every
+realisation goes to one ``factors.parquet``, with its index in the table's own
+metadata.
 
-* **No ``autofix``.** Conditioning is a pre-flight -- :mod:`kika.cov.conditioning`
-  -- and the plan it produces goes in the run directory next to the
-  realisations. By default the run inspects its own blocks and applies the
-  pre-flight's recommendation, which repairs definiteness and nothing else;
-  a caller can hand in an edited plan, or ``False`` to draw the blocks exactly
-  as stated. A new pipeline starts without autofix so that nobody has to take
-  it away later; ``psd_method`` therefore defaults to ``"none"`` here, because
-  by the time the draw happens the repairs have already been made and named.
-
-* **It keeps a log of events, and it can rehearse.** Every stage is a timed
-  event with its numbers on a :class:`~kika.sampling.run_log.RunLog`, written
-  as ``run.log.jsonl`` with ``report.html`` built from it, also when the run
-  fails or is stopped; ``dryRun=True`` does all of
-  it but the tapes, so a run can be checked on a laptop before it is launched.
-
-* **One factors table per run.** Every realisation goes to ``factors.parquet``
-  with its index in the table's own metadata, rather than a JSON per sample.
-* **One suite, labelled forms, no ``deepcopy``.** §9.1's multi-form container
-  holds the realisation beside the evaluation, which is what it is for; the
-  label is removed again once the sample is written, so memory does not grow
-  with the ensemble.
-* **The emitters declare what they cannot carry.** ``endf-delta`` re-encodes
-  only the files a realisation touched and patches them into the tape that was
-  read, so everything else survives verbatim and ``cmp`` between two samples
-  still means something. ``endf-tape`` and ``gnds`` write the whole model, which
-  can be less than the tape holds -- whatever the decoder kept only as declared
-  bytes (MF1/460, MF8-10) and the covariance a realisation
-  does not restate -- and the report says so rather than the file being quietly
-  shorter. MF7, MF12-15 (LO=1, MF13-15) and MF32 do have a
-  model.
+The emitters declare what they cannot carry. ``endf-delta`` re-encodes only the
+sections a realisation touched and patches them into the tape that was read, so
+everything else survives verbatim (the MF1/MT451 directory is rebuilt). ``endf-tape`` and ``gnds`` write the whole
+model, which can hold less than the tape: whatever the decoder kept only as
+declared bytes (MF1/460, MF8-10) and the covariance a realisation does not
+restate.
 """
 from __future__ import annotations
 
@@ -77,7 +58,8 @@ __all__ = ["perturbFromModel", "RunResult", "EMITTERS", "TAPE_EMITTERS", "AceOpt
 #:     Re-encode only the sections the realisation touched and patch them into
 #:     the source tape. The fidelity option: every section the realisation did
 #:     not touch, modelled or not, survives byte for byte, because it is never
-#:     re-rendered. This is what a propagation run wants.
+#:     re-rendered; only the MF1/MT451 directory is rebuilt. This is what a
+#:     propagation run wants.
 #: ``"endf-tape"``
 #:     ``kika.write(..., format='endf')``: the whole tape assembled from the
 #:     model, under the realisation's label with a fall back to ``eval`` for
@@ -86,18 +68,20 @@ __all__ = ["perturbFromModel", "RunResult", "EMITTERS", "TAPE_EMITTERS", "AceOpt
 #: ``"gnds"``
 #:     ``kika.write(..., format='gnds')``: a ``reactionSuite`` carrying **both**
 #:     forms -- the evaluated one and the realisation, each under its own label,
-#:     which is what §9.3's ``realization`` style is for and what the GNDS writer
-#:     already does with a multi-form container. The covariance is not rewritten:
-#:     a realisation does not restate the matrix it came from.
+#:     as the GNDS writer does with a multi-form container. The covariance is
+#:     not rewritten: a realisation does not restate the matrix it came from.
 #: ``"ace"``
-#:     NJOY on the realisation's ENDF tape, one ACE (and its xsdir line) per
-#:     temperature, under ``NNNN/ace/``; NJOY's own input, listing and output
-#:     under ``NNNN/njoy/``. Needs an :class:`AceOptions` -- which NJOY, which
-#:     temperatures, which library -- and an ENDF tape to feed it: the
-#:     ``endf-delta`` of the sample when the source is a tape, otherwise the
-#:     ``endf-tape`` written from the model, produced on demand if neither was
-#:     asked for. A dry run validates the options (the executable exists, the
-#:     temperatures are given) and runs nothing.
+#:     One ACE (and its xsdir line) per temperature, under ``NNNN/ace/``. With
+#:     ``AceOptions(engine="njoy")``, NJOY runs on the realisation's ENDF tape and
+#:     its own input, listing and output go under ``NNNN/njoy/`` (with
+#:     ``keepNjoyFiles=False`` they go to a temporary folder that is deleted, and
+#:     ``njoy/`` stays empty); the tape is the ``endf-delta`` of the sample if
+#:     that emitter ran, else the ``endf-tape``. If neither was asked for, one is
+#:     produced on demand: the ``endf-delta`` when the source is a tape, otherwise
+#:     the ``endf-tape`` written from the model. With ``engine="kika"`` kika writes the ACE from the model and no
+#:     tape is needed. Needs an :class:`AceOptions`. A dry run validates the
+#:     options and runs nothing; with ``engine="njoy"`` and no NJOY executable
+#:     the engine becomes ``"kika"`` and the run records a warning.
 #: ``"hdf5"``
 #:     OpenMC's HDF5 (:mod:`kika.hdf5`), one ``<nuclide>.h5`` per sample under
 #:     ``NNNN/hdf5/`` with every temperature asked for, and -- when a base
@@ -122,10 +106,33 @@ TAPE_EMITTERS = ("endf-delta", "endf-tape", "gnds")
 class HDF5Options:
     """What the ``"hdf5"`` emitter needs beyond the perturbation.
 
-    ``temperatures`` in kelvin, all in one file per sample. ``baseLibrary``:
-    the ``cross_sections.xml`` (or its directory) each sample's overlay points
-    the other materials at. ``omit``, ``thnmax`` and ``thinning`` as
-    :func:`kika.hdf5.processing.processSuite` takes them.
+    Pass it as the ``hdf5`` argument of :func:`perturbFromModel` when ``"hdf5"`` is
+    among ``formats``; it does nothing otherwise. Each sample is written as one
+    OpenMC HDF5 file holding every temperature.
+
+    Attributes
+    ----------
+    temperatures : tuple of float
+        Temperatures in K, all stored in each sample's file. Must not be empty.
+    baseLibrary : str or None
+        The ``cross_sections.xml`` of a base library, or the directory that holds
+        it. When given, each sample also gets a ``cross_sections.xml`` that sends
+        the sample's nuclide to its new file and every other material to the base
+        library. ``None`` writes no such index.
+    omit : tuple of str
+        Pieces to leave out of the file: any of ``"urr"``, ``"kerma"`` and
+        ``"damage"``. ``"urr"`` also skips the probability tables that the samples
+        share. Each piece left out is recorded as lost in the conversion report,
+        whose summary (counts per kind, as a string) is on
+        ``samples[i]["files"]["hdf5"]["report"]``.
+    thnmax : float or str
+        Upper energy of the Doppler broadening in eV, or ``"njoy"`` to derive it
+        from the first threshold of the reactions with a negative Q value. Above it
+        the 0 K cross sections are used.
+    thinning : float or None
+        Relative tolerance every temperature's cross sections are stated to; see
+        :func:`kika.hdf5.processing.processSuite`. ``None`` keeps the full union
+        grid.
     """
 
     temperatures: Tuple[float, ...] = (293.6,)
@@ -135,6 +142,15 @@ class HDF5Options:
     thinning: Optional[float] = 1.0e-3
 
     def validate(self) -> None:
+        """Check the options and raise on the first one that cannot be used.
+
+        Raises
+        ------
+        ValueError
+            If ``temperatures`` is empty, ``omit`` names a piece other than
+            ``"urr"``, ``"kerma"`` or ``"damage"``, or ``baseLibrary`` is given and
+            does not exist.
+        """
         if not self.temperatures:
             raise ValueError("HDF5Options needs at least one temperature")
         unknown = set(self.omit) - {"urr", "kerma", "damage"}
@@ -149,50 +165,69 @@ class HDF5Options:
 class AceOptions:
     """What producing ACE needs beyond the perturbation itself.
 
+    Pass it as the ``ace`` argument of :func:`perturbFromModel`. It is validated
+    whenever ``"ace"`` is among ``formats`` (a dry run included), and ACE files are
+    written only by a run with an ``outputDir`` that is not a dry run. Without
+    ``"ace"`` in ``formats`` only ``njoyExe`` is read, as the executable for the
+    resonance reconstruction.
+
     Parameters
     ----------
     temperatures
-        Kelvin, one ACE per value. A value below 1.0 is read as MeV, as the
-        NJOY runner has always done.
+        Temperatures in K, one ACE per value; a single number is taken as a
+        one-element tuple. Must not be empty. With ``engine="njoy"``, the NJOY
+        runner reads a value below 1.0 as MeV.
     njoyExe
-        Path to the NJOY executable. Defaults to ``$NJOY_EXECUTABLE``, else
-        ``njoy`` on PATH -- the lookup the resonance reconstruction uses
-        (:func:`~kika.processing.njoy_pendf_cache.find_njoy_executable`); a run
-        that cannot find NJOY is refused before anything is drawn, and a dry
-        run says so too.
+        Path to the NJOY executable. When ``None`` it is taken at construction from
+        ``$NJOY_EXECUTABLE``, else ``njoy`` on PATH
+        (:func:`~kika.processing.njoy_pendf_cache.find_njoy_executable` makes the
+        same lookup), and stays ``None`` if neither exists. Only ``engine="njoy"``
+        uses it for the ACE. :func:`perturbFromModel` does not refuse a missing
+        executable: it switches the ACE of every sample to ``engine="kika"`` and
+        records a warning. ``validate`` alone raises.
     libraryName
-        For the ACE title and the library digit of the suffix -- ``'jeff40'``,
-        ``'endfb81'``, see ``kika._constants.NDLIBRARY_TO_SUFFIX``.
+        For the ACE title and the library digit of the suffix: ``'jeff40'``,
+        ``'endfb81'``, see ``kika._constants.NDLIBRARY_TO_SUFFIX``. Used by
+        ``engine="njoy"`` only.
     extensions
-        One ACE extension per temperature (``'02c'``, ``'06c'`` ...). When
-        given, the ACE is ``<ZAID>.<ext>`` and the xsdir line beside it; when
-        not, the runner's legacy naming from the temperature applies.
+        One ACE extension per temperature (``'02c'``, ``'06c'`` ...), as many as
+        ``temperatures``. When given, the ACE is ``<ZAID>.<ext>`` and its xsdir
+        line is in ``<ZAID>.<ext>.xsdir`` beside it. When ``None``, the name comes
+        from the temperature (with ``engine="njoy"`` also from the library and the
+        sample number) and every temperature must be within 1 K of one that has an
+        ACE suffix, or the run is refused.
     njoyVersion
-        The version string NJOY's title carries.
+        The version string that the title of the NJOY deck carries; kika does not
+        check it against the executable. ``engine="njoy"`` only.
     keepNjoyFiles
-        Keep NJOY's input, output and listing beside the ACE. On by default:
-        an ACE that came out wrong is diagnosed from the listing, and the run
-        that produced it is the only chance to keep one.
+        Keep NJOY's input, output and listing in the sample's ``njoy/`` folder.
+        When ``False`` they are written to a temporary folder and deleted. On by
+        default: an ACE that came out wrong is diagnosed from the listing.
+        ``engine="njoy"`` only.
     fullAceListing
         Let the second ACER pass print the whole table into the listing
-        (``iprint=1``). Off by default: that dump is the ACE itself in another
-        layout and made the listing ~120 MB per sample and temperature for
-        Fe-56, 97 % of it. The consistency checks are printed either way, and
-        the ACE and xsdir are byte for byte the same.
+        (``iprint=1``), which makes the listing far larger. Off by default. The
+        consistency checks are printed either way, and the ACE and xsdir files
+        are the same. ``engine="njoy"`` only.
     engine
-        ``"njoy"`` (the default): each sample's tape through NJOY. ``"kika"``:
-        each realisation processed by kika from its 0 K forms -- multiplied
-        at 0 K, then broadened -- and written by
+        ``"njoy"`` (the default): each sample's ENDF tape goes through NJOY. When
+        the resonance region was reconstructed, NJOY starts from the perturbed
+        PENDF. ``"kika"``: each realisation is processed by kika from its 0 K forms
+        (multiplied at 0 K, then broadened) and written by
         :func:`kika.ace.model_adapter.encodeAce`, the processing
-        :meth:`kika.endf.EndfProcessing.write_ace` uses; no tape, no NJOY. The
-        URR probability tables are computed once, on the unperturbed
-        evaluation, and shared by every sample: their shapes are not
-        perturbed, the sample's MF33 reaches their cross sections. A
-        table without ``extensions`` is ``<ZAID>.<suffix of its
-        temperature>``; ``libraryName``, ``njoyVersion``, ``keepNjoyFiles``
-        and ``fullAceListing`` do not apply.
+        :meth:`kika.endf.EndfProcessing.write_ace` uses; NJOY is not run for the
+        ACE. The URR probability tables are computed once, on the unperturbed
+        evaluation, and shared by every sample: their shapes are not perturbed,
+        and the sample's MF33 reaches their cross sections. A table without
+        ``extensions`` is ``<ZAID>.<suffix of its temperature>``. ``libraryName``,
+        ``njoyVersion``, ``keepNjoyFiles``, ``fullAceListing`` and ``njoyExe`` do
+        not apply to it. Any other string is refused by ``validate``.
     omit, thnmax, thinning
-        ``engine="kika"`` only, as :class:`HDF5Options` takes them.
+        ``engine="kika"`` only. Pieces left out of the table (``"urr"``,
+        ``"kerma"``, ``"damage"``), the upper energy of the Doppler broadening in
+        eV (or ``"njoy"``, derived from the evaluation's first threshold), and the
+        relative tolerance of the stated cross sections (``None`` keeps the full
+        union grid), as :class:`HDF5Options` takes them.
     """
 
     temperatures: Tuple[float, ...] = ()
@@ -224,7 +259,23 @@ class AceOptions:
                                os.environ.get(NJOY_ENV_VAR) or shutil.which("njoy"))
 
     def validate(self) -> None:
-        """Refuse now what NJOY would refuse later, with the reason."""
+        """Check the options and raise on the first one that cannot be used.
+
+        ``perturbFromModel`` calls it before anything is drawn.
+
+        Raises
+        ------
+        ValueError
+            If there is no temperature; ``extensions`` is given and has a different
+            length from ``temperatures``; ``engine`` is neither ``"njoy"`` nor
+            ``"kika"``; with ``engine="kika"``, ``omit`` names a piece other than
+            ``"urr"``, ``"kerma"`` or ``"damage"``, or ``extensions`` is ``None`` and
+            a temperature is not within 1 K of one that has an ACE suffix; with
+            ``engine="njoy"``, ``njoyExe`` is ``None`` (no executable was given or
+            found).
+        FileNotFoundError
+            With ``engine="njoy"``, if ``njoyExe`` is not an existing file.
+        """
         if not self.temperatures:
             raise ValueError("AceOptions needs at least one temperature")
         if self.extensions is not None and len(self.extensions) != len(self.temperatures):
@@ -249,6 +300,15 @@ class AceOptions:
             raise FileNotFoundError(f"NJOY executable not found: {self.njoyExe}")
 
     def to_dict(self) -> Dict[str, Any]:
+        """The fields as a plain dict, with tuples as lists.
+
+        The run metadata (``run_metadata.json``) records this dict.
+
+        Returns
+        -------
+        dict
+            One key per field. ``extensions`` is ``None`` when it is ``None`` or empty.
+        """
         return {"temperatures": list(self.temperatures), "njoyExe": self.njoyExe,
                 "libraryName": self.libraryName,
                 "extensions": list(self.extensions) if self.extensions else None,
@@ -259,7 +319,111 @@ class AceOptions:
 
 @dataclass
 class RunResult:
-    """What a run produced, and what it decided on the way."""
+    """What a run produced, and what it decided on the way.
+
+    :func:`perturbFromModel` returns one; a caller does not build it. A dry run, and
+    a run without ``outputDir``, write no sample files, and ``samples`` is still
+    filled (each ``"files"`` is empty).
+
+    Attributes
+    ----------
+    label : str
+        The ``labelPrefix`` of the run. Sample *i* is labelled ``<label>-NNNN``
+        (*i* from 0, four digits).
+    outputDir : pathlib.Path or None
+        The run directory, ``None`` when none was given.
+    samples : list of dict
+        One dict per realisation, in sample order, with the keys ``"label"``,
+        ``"set"`` (the realisation's ``PerturbationSet``: the factors or deltas it
+        applied, per component and bin), ``"files"``, ``"applied"`` and ``"ace"``.
+        ``"files"`` maps an emitter name to what it wrote in this sample's
+        ``NNNN/`` folder: a path for ``"endf-delta"``, ``"endf-tape"`` and
+        ``"gnds"``; a list of the ACE paths that were written for ``"ace"`` (a
+        temperature that failed has no path, and the key is absent when all
+        failed); a dict with ``"h5"`` (path), ``"cross_sections"`` (path, present
+        only with a ``baseLibrary``) and ``"report"`` (the summary string of the
+        conversion report) for ``"hdf5"``; and a path for ``"perturbation-set"``
+        when ``writeSets`` was on. An ``"ace"`` run
+        with ``engine="njoy"`` also puts the ENDF tape it fed to NJOY here, under
+        ``"endf-delta"`` or ``"endf-tape"``, even when that emitter was not asked
+        for. ``"files"`` is empty without files. ``"applied"`` maps every component
+        the applier moved, including the ones the request did not name (a sum
+        re-derived, a partial that took a sum's block), to its diagnostics.
+        ``"ace"`` has one record per temperature, with the keys ``"temperature"``,
+        ``"extension"``, ``"returncode"``, ``"ace"``, ``"xsdir"`` and
+        ``"listing"``; it is empty unless ``"ace"`` was written.
+    index : dict
+        One entry per drawn block, keyed by the block key. Each value is a dict
+        that holds, among other things, the block's ``"dimension"``, ``"stride"``,
+        ``"components"`` (the ``(ZA, MF, MT, index)`` of each row group),
+        ``"union"`` and ``"quantities"``.
+    grouping : str
+        The ``grouping`` the run used, ``"mf"`` or ``"stated"``.
+    description : str
+        Text saying how many independent draws the blocks make, then one line per
+        draw with its components and dimension.
+    diagnostics : dict
+        The draw's record for each block, keyed like ``index``: ``rank``,
+        ``n_null``, the realised covariance error, the seed and the space, among
+        others. A fission-spectrum block adds how many deltas were clamped and
+        the null threshold used.
+    notes : list of str
+        What is true of every sample and no output file states. Read them: a run
+        with ``crossSectionSums=False`` that perturbs a summed cross section and
+        its partials writes a tape whose total is not the sum of its parts, and
+        only a note says so. A note is added the first time a sample raises it.
+    conditioningPlan : kika.cov.conditioning.ConditioningPlan or None
+        The plan the run applied: the pre-flight's recommendation (mode
+        ``"auto"``) or the plan handed in (mode ``"explicit"``). ``None`` with
+        ``conditioningPlan=False``, where the blocks are drawn as stated.
+    conditioning : tuple of dict
+        One record per step of the plan that was run on the assembled blocks
+        (the block, the remedy, whether it changed anything and why it was chosen).
+        Empty with ``conditioningPlan=False``.
+    conditioningMode : str
+        ``"auto"``, ``"explicit"`` or ``"none"`` (``conditioningPlan=False``).
+    report : kika.cov.conditioning.ConditioningReport or None
+        The pre-flight report of an ``"auto"`` run, so that its findings can be read
+        without inspecting the blocks again. ``None`` in the other modes. It is not
+        the ``report.html`` page.
+    sectionFindings : tuple
+        What the checks of the covariance sections found in the ENDF sections the
+        run perturbs, as written. Empty for a GNDS source.
+    attribution : tuple of dict
+        Each pre-flight finding that blocks or distorts, traced to the pair of
+        components and the section findings that explain it.
+    log : RunLog
+        The run's ``RunLog``: every stage, timed, with its numbers. It is written
+        as ``run.log.jsonl``, with ``report.html`` built from it.
+    dryRun : bool
+        Whether the run was a dry run.
+    request : dict
+        The request as the run drew it, in the MF/MT spelling (a dict keyed by MF
+        number when it was given as one). Named sums were expanded; with
+        ``onMissing="skip"`` unstated selections were dropped; an MF34 selection
+        with no orders was rewritten to orders 1 and up, and one for which the
+        file states only L=0 was removed. When MF33 is also asked for the same
+        MT, the rewritten MF34 selection also carries the cross terms between
+        the cross section and the shape orders.
+    sourceFormat : str
+        ``"endf"`` or ``"gnds"``, the format of the source.
+    aceOptions : AceOptions or None
+        The options the ACE was made with, ``None`` when ``"ace"`` was not in
+        ``formats``. When the run switched to ``engine="kika"`` because NJOY was
+        missing, this holds the switched options.
+    files : dict
+        The run-level files, each a ``pathlib.Path``, present once written (and
+        only with an ``outputDir``): ``"factors"`` (``factors.parquet``, with
+        ``writeFactors`` on), ``"conditioning-plan"`` (``conditioning_plan.json``,
+        present when a plan was applied), ``"log"`` (``run.log.jsonl``),
+        ``"report"`` (``report.html``) and ``"metadata"`` (``run_metadata.json``).
+        The per-sample files are on the entries of ``samples``.
+    spectrumMoments : dict
+        For a run that perturbs a fission spectrum, ``{mt: {band: record}}``: what
+        each band states for the mean outgoing energy ``<E'>`` and the tail
+        fractions, with independent values where kika has them. It is reported, not
+        a gate, and changes nothing that is drawn. Empty otherwise.
+    """
 
     label: str
     outputDir: Optional[Path]
@@ -272,14 +436,14 @@ class RunResult:
     #: that perturbs a summed cross section and its partials writes a tape whose
     #: total is not the sum of its parts, and only this says so.
     notes: List[str] = field(default_factory=list)
-    #: The conditioning plan the run was handed, and one record per step
+    #: The conditioning plan the run applied, and one record per step
     #: :func:`~kika.cov.conditioning.apply_plan` actually ran on the assembled
-    #: blocks. Empty when no plan was given -- which means the blocks were
-    #: drawn exactly as the file states them, under ``psdMethod``.
+    #: blocks. Both are empty with ``conditioningPlan=False``, where the blocks
+    #: were drawn exactly as the file states them, under ``psdMethod``.
     conditioningPlan: Any = None
     conditioning: Tuple[Dict[str, Any], ...] = ()
     #: How the plan came to be: ``"auto"`` (the pre-flight's recommendation,
-    #: the default), ``"explicit"`` (handed in) or ``"none"`` (refused).
+    #: the default), ``"explicit"`` (handed in) or ``"none"`` (``False``).
     conditioningMode: str = "none"
     #: The :class:`~kika.cov.conditioning.ConditioningReport` an ``auto`` run
     #: made, so a caller can read the findings without re-inspecting.
@@ -312,14 +476,31 @@ class RunResult:
 
     @property
     def nSamples(self) -> int:
+        """The number of realisations in ``samples``."""
         return len(self.samples)
 
     def paths(self, emitter: str) -> List[Path]:
         """Every file one emitter wrote, in sample order.
 
-        For ``"ace"`` that is every ACE of every sample, temperatures in order;
-        for ``"hdf5"``, each sample's ``.h5`` (its overlay ``cross_sections.xml``
-        and report summary stay on ``samples[i]["files"]["hdf5"]``).
+        For ``"ace"`` that is every ACE written, sample by sample and temperature
+        by temperature. A temperature whose ACE failed has no entry, so the list is
+        not aligned with ``samples`` (see :meth:`aceFailures`). For ``"hdf5"`` it is
+        each sample's ``.h5`` file; the overlay ``cross_sections.xml`` and the
+        report summary stay on ``samples[i]["files"]["hdf5"]``.
+
+        Parameters
+        ----------
+        emitter
+            A key of the ``"files"`` dict of the entries of ``samples``: one of
+            ``"endf-delta"``, ``"endf-tape"``, ``"gnds"``, ``"ace"``, ``"hdf5"``, or
+            ``"perturbation-set"`` (the per-sample JSON that ``writeSets`` asks for).
+
+        Returns
+        -------
+        list of pathlib.Path
+            Empty when no sample has files of that emitter: it was not asked for,
+            the run was a dry run, or it had no ``outputDir``. An unknown name
+            gives an empty list too.
         """
         out: List[Path] = []
         for sample in self.samples:
@@ -332,7 +513,20 @@ class RunResult:
         return out
 
     def aceFailures(self) -> List[Tuple[int, float, Optional[int]]]:
-        """``(sample, temperature, return code)`` for every NJOY run that failed."""
+        """The ACE runs that failed, as ``(sample, temperature, return code)``.
+
+        *sample* is the index in ``samples``, *temperature* the value of
+        ``AceOptions.temperatures`` (kelvin, as given). A run fails when its return
+        code is not 0 or it produced no ACE. The return code is NJOY's exit code
+        with ``engine="njoy"`` (-1 when the runner reported none) and 1 with
+        ``engine="kika"``, where the error text is in
+        ``samples[i]["ace"][j]["listing"]``.
+
+        Returns
+        -------
+        list of tuple
+            One ``(int, float, int)`` per failed run; empty when none failed.
+        """
         return [(number, record["temperature"], record["returncode"])
                 for number, sample in enumerate(self.samples)
                 for record in sample.get("ace", ())
@@ -2634,200 +2828,372 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                      runLog=None, logger=None) -> RunResult:
     """Draw *nSamples* realisations of *request* and write each one out.
 
+    The run reads *source* once and assembles the covariance blocks the request
+    names. It conditions the blocks (see *conditioningPlan*), draws every block
+    in one pass, and puts each realisation on the model nodes it belongs to. For
+    MF31 (multiplicities), MF33 (cross sections) and MF34 (Legendre coefficients
+    of the angular distribution, where order 0 is the magnitude and lands on the
+    cross section) a drawn relative factor multiplies the evaluated value on its
+    incident-energy bin (energies in eV). MF35 (fission-spectrum bands) is
+    absolute: its deltas are added to the group probabilities. Each realisation is
+    then written in every emitter of *formats*.
+
+    A run with an *outputDir* writes this layout (``NNNN`` is the sample number
+    from 0, four digits; ``<stem>`` is the file stem of the source, or
+    ``perturbed`` for a parsed object)::
+
+        <outputDir>/NNNN/<stem>_NNNN.endf          endf-delta
+        <outputDir>/NNNN/<stem>_NNNN.tape.endf     endf-tape
+        <outputDir>/NNNN/<stem>_NNNN.gnds.xml      gnds
+        <outputDir>/NNNN/ace/  and  NNNN/njoy/     ace
+        <outputDir>/NNNN/njoy-input/               ace through NJOY, after a
+                                                   reconstruction (its inputs)
+        <outputDir>/NNNN/hdf5/<nuclide>.h5         hdf5
+        <outputDir>/NNNN/cross_sections.xml        hdf5 with a base library
+        <outputDir>/NNNN/perturbation.json         with writeSets
+        <outputDir>/factors.parquet                with writeFactors
+        <outputDir>/conditioning_plan.json         unless conditioningPlan=False
+        <outputDir>/run.log.jsonl, report.html, run_metadata.json
+
+    The run does not empty *outputDir*: it creates it when missing, overwrites the
+    files above that already exist and leaves every other file where it is. A
+    dry run and a run without *outputDir* write no sample folders.
+    ``report.html`` is the run's own account, built from the log: what was read,
+    asked for, repaired, drawn and written, with every warning and error.
+
+    What goes wrong is refused or recorded, depending on where. *formats*, *ace*,
+    *hdf5*, *nWorkers*, *space*, *onMissing*, *resonanceRegion* and
+    *reconstructionEngine* are checked first: a bad one raises before the log
+    starts, and leaves no log. Every other failure is after the ``started`` event
+    (*sumBlocks*, *grouping*, *decompositionMethod*, *samplingMethod*,
+    *psdMethod* and *conditioningPlan* are checked there, and *angularPositivity*
+    at the first sample): it is recorded as an error event, ``run.log.jsonl`` and
+    ``report.html`` are written to *outputDir* (the metadata is not), and the
+    exception is raised again.
+    These are recorded and do not raise: a quantity skipped under
+    ``onMissing="skip"``, an ACE run that fails (an error event, and the run goes
+    on to the next sample and temperature; see :meth:`RunResult.aceFailures`), a
+    fall back from NJOY to kika, and every fact in ``RunResult.notes``.
+
     Parameters
     ----------
     source
         A path to an ENDF tape, a path to a GNDS ``reactionSuite`` whose
         covariance sibling sits beside it, or an already parsed ENDF object.
-        ``endf-delta`` needs the ENDF path, because it patches that file. A
-        GNDS source is written to ``endf-tape`` and ``ace`` through the ENDF
-        bookkeeping derived from the model (:mod:`kika.endf.model_adapter.derive`),
-        unless it has resolved or unresolved resonance parameters: those are
-        not written to MF2, and the run refuses instead of writing a tape whose
-        MF3 there is only the background.
+        ``endf-delta``, the resonance reconstruction and ``nWorkers`` above 1 need
+        a path to a tape, because they read or patch that file. A GNDS source is
+        written to ``endf-tape`` and to an NJOY ``ace`` through the ENDF
+        bookkeeping derived from the model, unless it has resolved or unresolved
+        resonance parameters that were not decoded from an ENDF tape: those are
+        not written to MF2, and a tape whose MF3 there is only the background
+        would result, so the run refuses (when files are written).
     request
-        What to perturb, in either spelling
-        :func:`~kika.sampling.joint_blocks.normaliseRequest` accepts. By
-        covariance file: ``{33: None, 34: [2]}`` for "every cross section the
-        file states, and MT2's angular distribution", ``{35: None}`` for every
-        band of the fission spectrum, ``{35: {"index": [0, 1]}}`` for the two
-        lowest. By quantity, naming reactions by MT or by label:
-        ``{"crossSection": None, "angularDistribution": {"reaction": "MT2",
-        "order": [1, 2, 3]}}``.
-    nSamples, seed, decompositionMethod, samplingMethod
-        Passed to :func:`~kika.sampling.core.draw_samples`.
+        What to perturb, in either of two spellings, which may be mixed in one
+        request (``joint_blocks.normaliseRequest`` resolves them). By covariance
+        file: ``{33: None, 34: [2]}`` for "every cross section the file states,
+        and MT2's angular distribution", ``{35: None}`` for every band of the
+        fission spectrum, ``{35: {"index": [0, 1]}}`` for the two lowest. By
+        quantity (``"multiplicity"``, ``"crossSection"``,
+        ``"angularDistribution"``, ``"energyDistribution"``), naming reactions by
+        MT or by label: ``{"crossSection": None, "angularDistribution":
+        {"reaction": "MT2", "order": [1, 2, 3]}}``. Naming one quantity twice is
+        refused. An absolute MF31 or MF33 section of the request is made relative
+        first, by dividing by the central value averaged over each bin; a bin where
+        that value is below the inert floor gets zero relative covariance. An
+        absolute MF34 section is not converted: it is left out, with a warning.
+    nSamples, seed
+        The number of realisations and the base seed. With ``samplingMethod="sobol"``
+        one sequence seeded with *seed* serves every block, each block taking its
+        own columns of it. With the other two methods, block *i* is seeded with
+        ``seed + i * 1009``.
+    outputDir
+        The run directory, created when missing (see the layout above). ``None``
+        (default) writes nothing: the realisations are applied and checked, and
+        ``samples`` is filled without files.
+    formats
+        The emitters to write, any of ``"endf-delta"``, ``"endf-tape"``,
+        ``"gnds"``, ``"ace"`` and ``"hdf5"`` (the strings of ``EMITTERS``); an
+        unknown name is refused. ``"endf-delta"`` (the default) re-encodes only the
+        sections the realisation changed and patches them into the source tape;
+        every other section is copied byte for byte, and the MF1/MT451 directory
+        is rebuilt. It needs a tape path, and a GNDS source is refused (when files
+        are written). ``"endf-tape"`` writes the whole tape from the model, which
+        can hold less than the source tape. ``"gnds"`` writes a ``reactionSuite``
+        that carries the evaluated form and the realisation, each under its own
+        label; the covariance is not rewritten. ``"ace"`` needs *ace* and
+        ``"hdf5"`` needs *hdf5*. ACE through NJOY feeds NJOY the ``endf-delta`` if
+        that emitter ran, else the ``endf-tape``; when neither was asked for, it
+        writes ``endf-delta`` for a tape source and ``endf-tape`` for a GNDS one.
+        Nothing is written without an *outputDir* or in a dry run, but the names and
+        options are still checked.
+    grouping
+        How the requested components are split into blocks that are drawn
+        independently. ``"mf"`` (default) draws one block per MF, merging two MFs
+        only where a section states a covariance across them; MF35 gives one
+        block per band either way. ``"stated"`` makes a block of every set of
+        components that the file connects by a stated covariance, so MT4 and MT16
+        with no cross block between them are drawn independently. The two give
+        the same distribution and different realisations for the same seed.
+        Anything else is refused.
     space
-        ``"log"`` (the default, and what every shipped pipeline draws with) or
-        ``"linear"``, for the whole run; or a **mapping stating it per
-        quantity**, keyed by MF number or by the model's vocabulary::
+        ``"log"`` (the default) or ``"linear"``, for the whole run; or a **mapping
+        stating it per quantity**, keyed by MF number or by the model's
+        vocabulary::
 
             space={33: "log", 34: "linear"}
             space={"crossSection": "log", "angularDistribution": "linear"}
+
+        A quantity the mapping does not name is drawn in log space. With
+        ``"log"`` the factor is ``f = exp(y - d/2)``, with ``y`` normal of
+        covariance ``log1p(Σ)`` (Σ the relative covariance) and ``d`` the diagonal
+        of that matrix, so ``E[f] = 1`` and ``Cov(f) = Σ``. With ``"linear"`` the
+        factor is ``f = 1 + y`` with ``y`` normal of covariance Σ. A block that
+        holds rows of two quantities is drawn once, each row in its own quantity's
+        space.
 
         The distinction is physical and not a preference. A cross section is a
         positive magnitude, so a log draw is what keeps its factor positive. A
         Legendre coefficient is signed, so an evaluation that states one near
         zero states an uncertainty straddling zero, which a log draw cannot
-        represent and a linear one can. See :func:`resolveSpaces` for what a
-        block carrying two quantities gets.
+        represent and a linear one can.
 
         **It does not reach MF35** either way: a band's covariance is absolute
-        and its rows sum to zero, so those blocks are drawn linearly as deltas
-        whatever this says -- see :func:`_splitBySemantics`.
+        and its rows sum to zero, so those blocks are drawn linearly as absolute
+        deltas whatever this says. Each delta is clipped to 5 stated standard
+        deviations of its own group.
+    labelPrefix
+        The prefix of the sample labels (``<labelPrefix>-NNNN``, the label under
+        which each realisation is held in the model while it is written) and the
+        label of the run log.
+    decompositionMethod, samplingMethod
+        How each block is decomposed and sampled. *decompositionMethod* is
+        ``"svd"`` or ``"eigen"`` (any case; ``"cholesky"`` is refused).
+        *samplingMethod* is ``"sobol"`` (scrambled), ``"lhs"`` or ``"random"``
+        (any case). Other strings are refused when the draw starts.
+    psdMethod
+        The repair the draw itself may make to a matrix before it is
+        decomposed: ``"none"`` (default), ``"auto"``, ``"higham"``, ``"clip"`` or
+        ``"clip_rescale"``. The default is ``"none"`` because the repairs a matrix
+        needs are decided before the draw (*conditioningPlan*) and recorded, so
+        that the run can say which projection it used.
     conditioningPlan
         ``None`` (default): inspect the assembled blocks and apply the
         pre-flight's recommendation, which repairs definiteness and nothing
-        else; the plan it produced is written to the run directory as if a
-        human had handed it in. ``False``: touch nothing and draw the blocks
-        as stated, for equivalence gates. A
-        :class:`~kika.cov.conditioning.ConditioningPlan`: apply exactly that.
-    psdMethod
-        ``"none"`` by default, and that is the design rather than a shortcut:
-        the repairs a matrix needs are decided before the draw and recorded,
-        so that a run can say which projection it used instead of a log line
-        recording that one happened.
-    nullTol
-        ``None`` -- every direction retained -- for the relative blocks
-        (MF31/33/34), because that is what the shipped pipelines draw with
-        today, so a comparison against them measures the path and not the
-        truncation. See ``draw_samples``. **MF35 bands are the exception:**
-        ``None`` there means ``mf35_sampling.NULL_TOL`` (1e-10), which is what
-        the shipped PFNS pipeline draws with and what keeps decomposition debris
-        off groups holding 1e-17 of the spectrum -- see :func:`_drawEverything`.
-        A number given here applies to both.
-    maxOutgoingPoints
-        MF35 only: the most points one perturbed outgoing table may hold.
-        ``None`` (default) for no cap. When it bites, the smallest factor steps
-        are dropped first and the run says how many.
-    crossSectionSums
-        Hold MF3's sum rules on every realisation (the default): a partial with
-        its own block is perturbed by it, and every sum with a moved partial is
-        re-derived as ``S + sum (p' - p)`` -- its own block is never applied to
-        it. What a sum's block does instead is *sumBlocks*. Not optional in
-        practice: NJOY's RECONR discards a tape's stated MT1 and MT4 and
-        rebuilds them from the partials (measured 2026-10-07 on ENDF/B-VIII.1
-        Fe-56), so a perturbation put on MT1 alone never reaches the ACE, and
-        MT27/MT101, which RECONR does not rebuild, would reach it stale.
-        ``False`` scales each named MT by its own block and nothing else, and
-        the run notes the sums it left stale; it exists for the equivalence
-        gate against ``perturb_PENDF_files``.
-    sumBlocks
-        What a summed cross section's own covariance block does -- see
-        :mod:`kika.sampling.cross_section_sums`. ``"undecomposed"`` (the
-        default): where nothing under the sum carries a covariance of its own,
-        the sum's block moves all its partials by the same factor; where the
-        file decomposes it, the block is discarded and the partials without a
-        covariance stay as evaluated. ``"fill"`` also carries the block to
-        those (an assumption the file does not make, named in every
-        realisation's notes). ``"never"`` uses no sum's block at all. Whatever
-        the mode, a request naming a sum the file decomposes is a request for
-        the sections that decompose it (:func:`_expandNamedSums`).
-    resonanceRegion
-        ``"reconstructed"`` (the default): on a tape with LRP=1 whose MF2
-        states a resolved or unresolved range, MF3 there is only a background
-        the resonance cross section is added to, and a factor on it perturbs
-        almost nothing (ENDF/B-VIII.1 Fe-56 MT2 is 5e-4 b at 1 keV in MF3 and
-        9.3 b reconstructed). So the region is reconstructed once, at 0 K, by
-        *reconstructionEngine*, the model is decoded from the tape with that MF3
-        and LRP=2, and ACE is made from the perturbed PENDF -- see
-        :mod:`kika.sampling.resonance_region`. Needs a path as *source*; NJOY
-        is looked for in *njoyExe*, else ``AceOptions.njoyExe``, else
-        ``$NJOY_EXECUTABLE``, else ``njoy`` on PATH. ``"evaluated"`` perturbs MF3 as the tape
-        states it, background and all, and says so in a warning; it exists for
-        tapes NJOY cannot process, such as the section-sliced micro-tapes the
-        tests use.
-    reconstructionTolerance
-        The fractional tolerance of the reconstruction; 0.001 is what the ACE
-        chain uses.
-    reconstructionEngine
-        Who rebuilds σ(E) at 0 K wherever the run needs it (the resonance
-        region, and absolute MF33 sections made relative): ``"kika"`` (the
-        default) or ``"njoy"`` (RECONR). NJOY that is missing or fails is
-        replaced by kika for the whole run, with a warning.
-    njoyExe
-        The NJOY executable for the reconstruction.
-    formats
-        Any of :data:`EMITTERS`. ``"ace"`` needs *ace*.
-    ace
-        An :class:`AceOptions` when ``"ace"`` is among *formats*: NJOY, the
-        temperatures, the library. Validated up front, dry run included.
+        else (a ``clip`` step for each block whose definiteness is distorted, a
+        ``none`` step for the others); the plan is written to the run directory
+        as ``conditioning_plan.json`` as if a human had handed it in. ``False``:
+        touch nothing and draw the blocks as stated; no plan is written. A
+        :class:`~kika.cov.conditioning.ConditioningPlan`: apply exactly that. The
+        mode taken is on ``RunResult.conditioningMode``. Anything else raises
+        ``TypeError``, after the covariance blocks are assembled.
     mat
-        ENDF only, and only for a source that carries no MAT (a GNDS file):
-        the material number to stamp the tape with. Defaults to the standard
-        assignment for the target, from the library's own MAT table.
+        The material number that the ``endf-tape`` records are stamped with.
+        ``None`` takes the MAT of the source tape; a GNDS source has none, so the
+        standard assignment for the target, from the library's own MAT table, is
+        used and the log says so. ``endf-delta`` keeps the source tape's records
+        and ignores it.
+    nullTol
+        Directions of a block whose singular value is at or below
+        ``nullTol`` times the largest are left out of the draw. ``None`` retains
+        every direction (a null one then carries a vanishing amplitude) for the
+        relative blocks (MF31, MF33, MF34). **MF35 bands are the exception:**
+        ``None`` there means 1e-10, which keeps decomposition residue off groups
+        that hold a negligible part of the spectrum. A number given here applies
+        to every block.
     dryRun
-        Do everything but write tapes: read, assemble, inspect, condition,
+        Do everything but write the samples: read, assemble, inspect, condition,
         draw, put every realisation on the model and check it, and record it
         all in the log. With an *outputDir* the run-level files still go out
-        -- the log, the metadata, the plan and the factors table -- so a dry
-        run on a laptop is what a full run on the cluster will do, minus the
-        files that take the time.
+        (the log, the report, the metadata, the plan and the factors table), so
+        that a dry run does what a full run will do, minus the files that take
+        the time.
     writeFactors
-        Write every realisation's factors to **one** ``factors.parquet``, its
-        index in the file's metadata -- see
-        :func:`~kika.sampling.perturbation_set.writeFactorsTable`. On by
-        default.
+        Write every realisation's drawn values to **one** ``factors.parquet`` (one
+        row per sample, component and bin: a factor, or a delta for MF35), its
+        index in the file's metadata. On by default; needs an *outputDir*.
     writeSets
-        Also write each realisation's
-        :class:`~kika.sampling.perturbation_set.PerturbationSet` as JSON beside
-        its files. Off by default since the table exists: a thousand samples
-        were a thousand files saying the same bin edges a thousand times.
+        Also write each realisation's ``PerturbationSet`` as
+        ``NNNN/perturbation.json``, when files are written. Off by default, since
+        the factors table holds the same values.
+    ace
+        An :class:`AceOptions`, required when ``"ace"`` is among *formats*:
+        validated before anything is drawn, dry run included. With
+        ``engine="njoy"`` and no NJOY executable (``AceOptions.njoyExe`` is
+        ``None`` or not a file) the ACE of every sample is made by kika instead
+        (``engine="kika"``), and a warning says so. Without ``"ace"`` in
+        *formats* only its ``njoyExe`` is read.
+    hdf5
+        An :class:`HDF5Options`, required when ``"hdf5"`` is among *formats*:
+        validated before anything is drawn, dry run included. It is ignored
+        otherwise.
     nWorkers
-        Worker processes for the per-sample stage -- apply, emit, NJOY. ``1``
-        (the default) does everything in this process. Above 1, the read,
-        the pre-flight and the **draw still happen once, here**, so the
-        factors table is the same whatever the count; the samples are then
-        handed to a ``multiprocessing.Pool`` whose workers each re-read the
-        source tape once and write whole samples, and their log events come
-        back into the run's log in sample order. Needs a path as *source*. A
-        dry run ignores it, since without tapes to write there is nothing
-        worth a process. On a cluster node, pass the CPUs the job was given
-        (``int(os.environ["SLURM_CPUS_PER_TASK"])``); with ``"ace"`` among the
-        formats one NJOY run per worker is what fills them.
-    onMissing
-        What to do when the request names a quantity this evaluation does not
-        state. ``"raise"`` (the default) refuses, which is right for a request
-        written against a known file: asking for something that is not there is
-        a mistake, and perturbing fewer components than were asked for is how
-        an ensemble comes to disagree with its own metadata.
-
-        ``"skip"`` drops those selections and perturbs the rest. It is for a
-        request written against **many** files -- "cross sections and angular
-        distributions", over a directory where only some evaluations state
-        MF34. It is never quiet: every dropped selection is a warning in the
-        log, a line in :attr:`RunResult.notes` and an entry in
-        ``run_metadata.json``. A request where *nothing* matches still raises,
-        because that is a run with no perturbation in it.
-    angularPositivity
-        What to do where a perturbed angular distribution has f(mu) < 0 -- a
-        Legendre series negative somewhere in mu, or a table negative at a
-        node. ``"report"`` (the default) counts it and leaves it. ``"repair"``
-        moves the perturbed orders by the least amount that makes it
-        non-negative (:func:`~kika.sampling.mf4_positivity.project_mf4_to_positive`
-        for a series, :func:`~kika.sampling.mf4_positivity.repair_tabulated_positivity`
-        for a table).
-        A strongly forward-peaked table -- U-238 above 17 MeV, with
-        ``f(-1) ~ 1e-4`` -- goes negative under a few percent on ``a_1``, so
-        on such tapes this is a choice and not a detail.
+        Worker processes for the per-sample stage (apply, emit, NJOY). ``1``
+        (the default) does everything in this process; a smaller number is
+        refused. Above 1, the read, the pre-flight and the **draw still happen
+        once, here**, so the factors table is the same whatever the count; the
+        samples are then handed to a ``multiprocessing.Pool`` whose workers each
+        re-read the source tape once and write whole samples, and their log
+        events come back into the run's log in sample order. This needs a path as
+        *source*: a parsed object is refused when the run goes parallel (more than
+        one sample, an *outputDir*, no dry run). Otherwise *nWorkers* is ignored,
+        with a note. With ``"ace"`` among the formats, one NJOY run per worker is
+        what fills them.
     covarianceSource
         A second ENDF tape to take the covariance from, leaving the model to
         come from *source*. ``None`` (the default) is the normal case: an
         evaluation states its own covariance. Use this only when the
         uncertainty you have lives in a different file from the evaluation you
-        want to perturb, and read :func:`_readCovarianceFrom` first: the run
-        records a warning, because nothing in either file says the two belong
-        together. A covariance for a different nuclide is refused.
+        want to perturb. The run records a warning, because nothing in either
+        file says the two belong together. A missing file is refused, and so is a
+        covariance for a different nuclide; that comparison is not made when
+        *source* is a GNDS file, which carries no ZA to compare with. The MF33
+        sum statements (see *crossSectionSums*) are read from this tape, when
+        *crossSectionSums* is on and the model has sums.
+    onMissing
+        What to do when the request names a quantity this evaluation does not
+        state. ``"raise"`` (the default) refuses a selection that matches
+        nothing, and a cross-section covariance (MF33) asked for by MT that the
+        evaluation does not state. This is right for a request written against a
+        known file: asking for something that is not there is a mistake. Some MTs
+        of an MF other than 33 that are asked for beside others that are stated
+        are not refused in either mode: they are left out and recorded as a
+        warning, a note and an entry in ``run_metadata.json``. The same mode
+        governs an absolute MF31 or MF33 section whose central value is not
+        found, and a reaction that a ``covarianceSource`` states and the
+        evaluation does not.
+
+        ``"skip"`` drops those selections and perturbs the rest. It is for a
+        request written against **many** files ("cross sections and angular
+        distributions", over a directory where only some evaluations state
+        MF34). It is never quiet: every dropped selection is a warning in the
+        log, a line in ``RunResult.notes`` and an entry in ``run_metadata.json``.
+        A request where *nothing* matches still raises, because that is a run
+        with no perturbation in it. Any other string is refused.
+    maxOutgoingPoints
+        MF35 only: the most points one perturbed outgoing table may hold.
+        ``None`` (default) for no cap. When it bites, the smallest factor steps
+        are dropped first (their factors are not written), and the run records
+        how many as a warning.
+    crossSectionSums
+        Hold MF3's sum rules on every realisation (the default): a partial with
+        its own block is perturbed by it, and every sum with a moved partial is
+        re-derived as ``S + sum (p' - p)`` over the partials under it, so the
+        sum moves by exactly what its parts moved. A sum's own block is never
+        applied to the sum; what it does instead is *sumBlocks*. ``False`` scales
+        each named MT by its own block and nothing else, and the run notes the
+        sums it left stating a total that is not the sum of its parts.
+
+        MF33 can state a section's covariance through other sections (NC-type,
+        LTY=0). Such a statement adds no matrix of its own: next to an ordinary
+        matrix, only the matrix is drawn. With the sum rules on and an ENDF
+        source, the run reads three kinds of statement. A sum whose coefficients
+        are all +1 is a derived sum: it is re-derived from its partials, and
+        asking for it asks for the sections that decompose it. A partial stated as
+        a total minus the others, over the energy range the section gives, is
+        moved by the total's move minus the others', so that the total,
+        re-derived, is the total's. A lumped reaction (MT851 to MT870) moves its
+        members by its block. A request that names such a partial, or a member of
+        a lump, is served through the section that carries the covariance, and a
+        note says so. A statement that fits none of these is not applied, and a
+        warning names it.
+    sumBlocks
+        What a summed cross section's own covariance block does, with
+        *crossSectionSums* on (it does nothing otherwise; any other string than
+        the three below is refused). ``"undecomposed"`` (the default): where
+        nothing under the sum carries a covariance of its own, the sum's block
+        moves all its partials by the same factor; where the file decomposes it,
+        the block is discarded and the partials without a covariance stay as
+        evaluated. ``"fill"`` also carries the block to those (an assumption the
+        file does not make, named in every realisation's notes). ``"never"`` uses
+        no sum's block at all: a sum under which no section carries a covariance
+        is then refused if the request names it and ``onMissing="raise"``, and
+        dropped with a warning otherwise. Whatever the mode, a request naming a sum the
+        file decomposes is a request for the sections that decompose it, which the
+        run adds.
+    resonanceRegion
+        ``"reconstructed"`` (the default): on an ENDF tape with LRP=1 whose MF2
+        states a resolved or unresolved range, MF3 there is only a background
+        that the resonance cross section is added to, and a factor on it would
+        perturb almost nothing. The region is then reconstructed once, at 0 K, by
+        *reconstructionEngine*, the model is decoded from the tape with that MF3
+        and LRP=2, and the ENDF outputs carry the reconstructed MF3 (MF2 is kept).
+        An ACE made with NJOY is made from the perturbed PENDF. This applies only
+        when the request moves cross sections: MF33, or MF34 with order 0 named
+        or with no orders named (that is checked before the L=0 order is dropped
+        from the latter), and then needs a path as *source* (a parsed object is
+        refused). NJOY is looked for
+        in *njoyExe*, else ``AceOptions.njoyExe``, else ``$NJOY_EXECUTABLE``, else
+        ``njoy`` on PATH. ``"evaluated"`` perturbs MF3 as the tape states it,
+        background and all, and says so in a warning; it exists for tapes that
+        cannot be reconstructed, such as ones sliced to a few sections. Any other
+        string is refused. Nothing is reconstructed for a GNDS source, for a tape
+        without such a range, or for a request that moves no cross section.
+    reconstructionTolerance
+        The fractional tolerance of the 0 K reconstruction; 0.001 by default.
+    reconstructionEngine
+        Who rebuilds σ(E) at 0 K wherever the run needs it (the resonance
+        region, and absolute MF33 sections made relative): ``"kika"`` (the
+        default) or ``"njoy"``. NJOY that is missing or fails is replaced by kika
+        for the whole run, with a warning. A failed NJOY ACE run does not fall
+        back to kika: it is recorded for that sample and temperature.
+    njoyExe
+        The NJOY executable for the reconstruction, used when
+        ``reconstructionEngine="njoy"``. ``None``: ``AceOptions.njoyExe`` when
+        *ace* is given, else the lookup in *resonanceRegion*. It does not choose
+        the executable of the ACE runs, which is ``AceOptions.njoyExe``.
+    angularPositivity
+        What to do where a perturbed angular distribution has f(mu) < 0: a
+        Legendre series negative somewhere in mu, or a table negative at a
+        node. ``"report"`` (the default) counts it and leaves it. ``"repair"``
+        moves the perturbed orders by the least amount that makes it
+        non-negative (a table by
+        :func:`~kika.sampling.mf4_positivity.repair_tabulated_positivity`). On a
+        strongly forward-peaked distribution a small factor on ``a_1`` can make
+        f(mu) negative, so the choice matters there. Any other string is refused,
+        but only when an angular distribution is perturbed, at the first sample.
     runLog, logger
-        A :class:`~kika.sampling.run_log.RunLog` to record into, or none to
-        make one; a ``logging.Logger`` to forward every event to as a line.
+        A ``RunLog`` to record into, or ``None`` to make one. *logger* is a
+        ``logging.Logger`` (or anything with ``info``, ``warning`` and ``error``)
+        to forward every event to as a line; it is used only when *runLog* is
+        ``None``. A ``RunCancelled`` raised while the run records an event (or a
+        ``KeyboardInterrupt``) ends the run: the log gets a ``cancelled`` event
+        (not an error), its files are written, and the exception is raised again.
 
     Returns
     -------
     RunResult
-        With one entry per sample carrying its label, its
-        :class:`PerturbationSet`, the files written, and the applier's
-        diagnostics; the run's :class:`~kika.sampling.run_log.RunLog`; and the
-        pre-flight report when the run made one.
+        With one entry per sample carrying its label, its ``PerturbationSet``,
+        the files written and the applier's diagnostics; the run's ``RunLog``;
+        and the pre-flight report when the run made one. ``files`` holds the
+        run-level files.
+
+    Raises
+    ------
+    ValueError
+        If *formats* names an unknown emitter, or lacks the *ace* or *hdf5*
+        options it needs, or those options fail their ``validate``; *nWorkers* is
+        below 1; *space*, *onMissing*, *resonanceRegion*, *reconstructionEngine*,
+        *sumBlocks*, *angularPositivity*, *decompositionMethod*, *samplingMethod*
+        or *psdMethod* is not one of its allowed values; the request names a
+        quantity twice, has a key that is neither an MF number nor a quantity, or
+        matches nothing the evaluation states; the source is neither an ENDF
+        tape nor a GNDS ``reactionSuite``, or the GNDS file has no covariance
+        sibling; ``endf-delta`` is asked for a GNDS source, or a GNDS source whose
+        resonance parameters did not come from ENDF for ``endf-tape`` or an NJOY
+        ``ace`` (both only when files are written); a path is needed and *source*
+        is a parsed object (``endf-delta``, the resonance reconstruction,
+        ``nWorkers`` above 1 in a run that goes parallel);
+        *covarianceSource* is missing or is another nuclide's; the pre-flight
+        finds blocks that cannot be sampled and no automatic repair applies; a
+        *conditioningPlan* repairs a fission-spectrum band with a remedy other
+        than ``"none"`` or ``"clip"``; an ACE temperature has no extension and
+        is not within 1 K of one that has an ACE suffix; or an absolute section
+        has no central value under ``onMissing="raise"``.
+    TypeError
+        If *conditioningPlan* is not ``None``, ``False`` or a ``ConditioningPlan``.
+    RuntimeError
+        If a sample fails in a worker process (the message carries the worker's
+        traceback), or patching a section into an ``endf-delta`` tape fails.
     """
     from kika.sampling.joint_blocks import normaliseRequest
     from kika.sampling.perturbation_set import writeFactorsTable

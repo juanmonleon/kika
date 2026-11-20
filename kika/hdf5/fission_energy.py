@@ -1,7 +1,7 @@
 """``fission_energy_release``: the nine functions OpenMC stores, as OpenMC builds them.
 
 The model holds MF1/458 as the evaluation states it
-(:class:`~kika.nuclear_data.model.FissionEnergyRelease`). OpenMC adds two
+(``kika.nuclear_data.model.FissionEnergyRelease``). OpenMC adds two
 processing steps (``fission_energy.py:194-330``), reproduced here:
 
 1. **Sher-Beck.** A component given as one constant (``NPLY = 0``) gets the
@@ -39,7 +39,31 @@ def _m():
 
 
 def evaluate(function, x):
-    """OpenMC's evaluation: a table lin-lin and held at its end values outside."""
+    """OpenMC's evaluation of one release component at incident energies ``x``.
+
+    A tabulated function (``XYs1d``, or ``Regions1d`` through its ENDF regions) is
+    interpolated lin-lin and held at its end values outside its table. A
+    polynomial is evaluated as it is, with no clamping.
+
+    Parameters
+    ----------
+    function
+        A ``Polynomial1d``, ``XYs1d`` or ``Regions1d`` of the model.
+    x
+        Incident neutron energies in eV (the unit the Sher-Beck coefficients are
+        written for; no conversion is made).
+
+    Returns
+    -------
+    numpy.ndarray
+        The function at ``x``, in the function's own unit (eV for the energy
+        components), one value per ``x``.
+
+    Raises
+    ------
+    TypeError
+        If ``function`` is none of the three kinds.
+    """
     m = _m()
     x = np.asarray(x, dtype=float)
     if isinstance(function, m.Polynomial1d):
@@ -53,7 +77,25 @@ def evaluate(function, x):
 
 
 def sumFunctions(functions):
-    """``function.py:19-56``: tables summed on the union grid, else coefficients added."""
+    """The sum of release components: tables on the union grid, else coefficients added.
+
+    If any function is tabulated, every function is evaluated (:func:`evaluate`) on
+    the union of the tabulated functions' grids (polynomials add no points) and the
+    sum is tabulated there. If all are polynomials, their coefficients are added
+    term by term.
+
+    Parameters
+    ----------
+    functions
+        Iterable of ``Polynomial1d``, ``XYs1d`` or ``Regions1d``, all in the same
+        unit (eV for the energy components).
+
+    Returns
+    -------
+    ``XYs1d`` or ``Polynomial1d``
+        An ``XYs1d`` of the model in the first case; in the second, a
+        ``Polynomial1d`` with domain 0 to infinity.
+    """
     m = _m()
     functions = list(functions)
     grids = [f.xs for f in functions if isinstance(f, m.XYs1d)]
@@ -73,7 +115,32 @@ def _minusE():
 
 
 def derivedQ(release) -> Tuple[object, object]:
-    """``(q_prompt, q_recoverable)`` of a release whose seven components are set."""
+    """``(q_prompt, q_recoverable)``: the derived pair OpenMC stores.
+
+    ``q_prompt`` is the prompt fragments, prompt neutrons and prompt photons less
+    the incident energy ``E``; ``q_recoverable`` adds the delayed neutrons,
+    delayed photons and betas. The neutrino energy takes no part. All are
+    functions of the incident energy, in eV.
+
+    Parameters
+    ----------
+    release
+        A release whose ``promptProductKE``, ``promptNeutronKE``,
+        ``delayedNeutronKE``, ``promptGammaEnergy``, ``delayedGammaEnergy`` and
+        ``delayedBetaEnergy`` are set (``neutrinoEnergy`` may be ``None``).
+        Normally the result of :func:`openmcTerms`.
+
+    Returns
+    -------
+    tuple
+        ``(q_prompt, q_recoverable)``, each an ``XYs1d`` or ``Polynomial1d`` as
+        :func:`sumFunctions` returns, in eV.
+
+    Raises
+    ------
+    ValueError
+        If any of those six components is ``None``.
+    """
     t = {name: getattr(release, name) for name in _TERMS}
     missing = [name for name in _TERMS[:6] if t[name] is None]
     if missing:
@@ -89,8 +156,45 @@ def derivedQ(release) -> Tuple[object, object]:
 def openmcTerms(release, promptNu, report=None):
     """The seven components after OpenMC's Sher-Beck step, as a new release.
 
-    ``promptNu`` is the fission neutron multiplicity (prompt, or total when
-    only the total is given -- OpenMC takes whichever ``product_0`` holds).
+    A component that is a polynomial of one coefficient (``NPLY = 0``) is replaced
+    by its Sher-Beck form: ``[c, -0.075]`` for ``delayedGammaEnergy`` and
+    ``delayedBetaEnergy``, ``[c, -0.105]`` for ``neutrinoEnergy``, and for
+    ``promptNeutronKE`` ``c + 1.307 E - 8.07e6 (nu(E) - nu(0))`` (``nu(0)`` is the
+    first tabulated value when ``promptNu`` is a table, and that table's grid is the
+    result's). The other
+    components of one coefficient stay constants. A polynomial of three
+    coefficients whose second-order term is implausibly large for energies in eV
+    (``|c2| * (5e6)**2 > 1e8``) has it divided by 1e6, the ENDF/B-VII.1 MeV/eV
+    slip, and the correction is recorded with ``report.approximated``. Any other
+    polynomial is copied with domain 0 to infinity and a tabulated component is
+    copied as it is. A component that is ``None`` stays unset.
+
+    Parameters
+    ----------
+    release
+        The evaluation's ``FissionEnergyRelease``; not modified.
+    promptNu
+        The fission neutron multiplicity as a function of incident energy in eV
+        (``XYs1d``, ``Polynomial1d`` or ``Regions1d``): prompt, or total when only
+        the total is given, whichever ``product_0`` of the fission reaction holds.
+        Used only for the prompt neutron Sher-Beck form; it may be ``None`` when
+        that component is not a one-coefficient polynomial.
+    report
+        A ``ConversionReport``; ``None`` records nothing.
+
+    Returns
+    -------
+    FissionEnergyRelease
+        A new release labelled ``"MonteCarlo"``, in eV as a function of incident
+        energy in eV.
+
+    Raises
+    ------
+    ValueError
+        If ``promptNeutronKE`` needs the Sher-Beck form and ``promptNu`` is ``None``.
+    TypeError
+        If ``promptNeutronKE`` is a one-coefficient polynomial (the Sher-Beck
+        branch) and ``promptNu`` is of none of the three kinds.
     """
     m = _m()
     out = m.FissionEnergyRelease(label="MonteCarlo")

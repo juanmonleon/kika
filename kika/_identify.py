@@ -64,14 +64,40 @@ _COVARIANCE_MF = {31, 32, 33, 34, 35, 40}
 
 
 def identify(path) -> str:
-    """Which of :data:`KINDS` the file (or directory) at ``path`` is.
+    """Which of ``KINDS`` the file (or directory) at ``path`` is.
+
+    The decision is made on content, not on the name, and no parser runs. It
+    reads the head of the file (the first 64 KiB), with two exceptions: an ENDF
+    tape with a negative N1 in MF1/MT451 (an NJOY group tape) is read on to its
+    first MF33 or MF34, and an HDF5 file is opened with ``h5py`` to look for
+    ``results/mesh_tally``. ``KINDS`` is: ``"endf"``, ``"ace"``,
+    ``"gnds"``, ``"g4ndl"``, ``"covfil"``, ``"coverx"``, ``"boxer"``, ``"sdf"``,
+    ``"mcnp-input"``, ``"mcnp-mctal"``, ``"mcnp-meshtal"``, ``"serpent-input"``,
+    ``"serpent-sens"``, ``"serpent-det"``, ``"serpent-res"``, ``"serpent-his"``,
+    ``"serpent-dep"``, ``"njoy-input"`` and ``"csv"``. Photo-atomic data has no
+    kind of its own: an ACE ``p`` table is ``"ace"`` and an ENDF photo-atomic or
+    relaxation tape is ``"endf"``. An HDF5 file is recognised only when it is an
+    MCNP runtape with FMESH results (``"mcnp-meshtal"``). A directory is
+    ``"g4ndl"`` when :func:`kika.sniff_format` says so.
+
+    Parameters
+    ----------
+    path
+        A file or a directory.
+
+    Returns
+    -------
+    str
+        One of the kinds above.
 
     Raises
     ------
     FileNotFoundError
         Nothing at ``path``.
     UnknownFormatError
-        It matched none of them. The message names what was tried.
+        It matched none of them. The message names what was tried. An empty file,
+        a thermal-scattering ACE table, the text listing of an MCNP or Serpent run
+        and an HDF5 or binary file kika does not read are refused the same way.
     """
     from ._read import UnknownFormatError, sniff_format
 

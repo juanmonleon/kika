@@ -8,8 +8,8 @@ ACE writer if one comes. The format packages only serialise its output.
 
 The forms it produces are GNDS's ``MonteCarlo_cdf`` ones (``xs_pdf_cdf1d``,
 ``energyAngularMC``, the Monte Carlo ``KalbachMann``) plus the two processed
-laws with no GNDS node (:class:`~kika.nuclear_data.model.LevelEnergy`,
-:class:`~kika.nuclear_data.model.DiscretePhotonEnergy`), filed under the
+laws with no GNDS node (``LevelEnergy``,
+``DiscretePhotonEnergy``), filed under the
 ``MonteCarlo`` label.
 
 The rule for a Legendre series that turns negative is ACER's: the negative

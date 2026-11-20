@@ -206,11 +206,125 @@ def perturb_pfns_files(
 ) -> Dict[str, Any]:
     """Perturb MF5/MT18 from its MF35 covariance, optionally regenerating ACE.
 
-    Returns a per-ZAID summary: the bands sampled, their ranks and drift
-    budgets, the acceptance-gate numbers of the realised ensemble, the
-    projection and renormalisation budgets actually spent, and the NJOY
-    outcome. ``dry_run=True`` stops after sampling and reports all of that
-    without writing a tape.
+    MF35 states, for each band of incident energy, an **absolute** covariance of
+    the integrals of the spectrum over the groups of its outgoing grid. Each
+    band is drawn linearly (``delta``, absolute, float64) with
+    :func:`kika.sampling.core.draw_samples`: under Sobol all bands of a call share
+    one sequence (under ``"random"`` and ``"lhs"`` band ``i`` is seeded with
+    ``seed + i × BLOCK_SEED_STRIDE``), null directions (eigenvalue at or below
+    1e-10 of the largest) are
+    left out of the draw, and a direction of negative variance gets zero
+    variance. Every drawn delta is clipped to *sigma_clamp* times its own stated
+    standard deviation.
+
+    A sample is applied to the first tabulated (LF=1) sub-table of MF5/MT18, at
+    every incident-energy node inside a band (a band is ``[E1, E2)``, the last
+    one closed at the top). The ratio of group ``j`` is ``1 + delta_j / P0_j``,
+    with ``P0_j`` the group's integral in the unperturbed table; a group with
+    ``P0_j = 0`` keeps ratio 1. The ratios are projected onto the non-negative
+    ones that keep the covered integral (the ``P0``-weighted Euclidean
+    projection), the table is multiplied by the ratio of the group of each outgoing
+    energy (energies outside the MF35 grid keep 1), and the table is scaled so that
+    its integral is the original one. Nodes are inserted so that the factor steps
+    at group edges and at band edges. MF5/MT455 (delayed) and every other
+    section are written back unchanged, and so is MF35: the perturbed tape states
+    the original covariance beside a spectrum that has moved.
+
+    Failures are logged and recorded, not raised: a tape that cannot be
+    perturbed adds an entry to ``errors``, a sample that cannot be written to
+    ``sample_errors`` of its isotope.
+
+    Parameters
+    ----------
+    endf_files : str or list of str
+        ENDF tape(s) with MF5/MT18 and MF35/MT18.
+    num_samples : int
+        Number of samples per file.
+    mt : int
+        The MT perturbed. MF35 exists for MT 18 only in the libraries checked,
+        so 18 is the useful value.
+    generate_ace : bool
+        Run NJOY on each tape, for each temperature. Does nothing when
+        *njoy_exe* is None (no error).
+    decomposition_method : {"svd", "eigen"}
+        As in :func:`kika.sampling.core.draw_samples`.
+    sampling_method : {"sobol", "lhs", "random"}
+        As in :func:`kika.sampling.core.draw_samples`.
+    psd_method : {"auto", "higham", "clip", "clip_rescale", "none"}
+        As in :func:`kika.sampling.core.draw_samples`.
+    projection_metric : {"probability"}
+        Metric of the projection of the ratios. Any other value raises
+        ``NotImplementedError`` for each sample, which is recorded in
+        ``sample_errors``.
+    sigma_clamp : float, optional
+        Largest drawn delta, in stated standard deviations of that component; None
+        switches the clip off. The number clipped is reported per band.
+    max_outgoing_points : int, optional
+        Cap on the number of outgoing points of a sub-table. Over the cap, the
+        smallest steps of the factor are dropped (and logged, with the count in
+        the summary): the written perturbation is then not the sampled one in
+        those groups. None sets no cap.
+    covariance_override
+        Reserved. Any value but None makes each file fail with a
+        ``NotImplementedError`` recorded in ``errors``.
+    njoy_exe : str, optional
+        NJOY executable, used with *generate_ace*.
+    ace_temperatures : sequence of float, optional
+        Temperatures in K; None gives 293.6 K.
+    ace_extensions : sequence of str, optional
+        ACE extension of each temperature; a list of another length is ignored
+        with a warning.
+    ace_library_name : str, optional
+        Library name handed to NJOY; None gives ``"endfb81"``.
+    ace_njoy_version : str
+        NJOY version string for the metadata and titles.
+    xsdir_file : str, optional
+        Baseline xsdir; for each sample a copy named ``<stem>_<NNNN>`` in
+        ``output_dir/xsdir`` has the entry of each ACE table replaced or added.
+    output_dir : str
+        Root of everything written (created if missing); see *Notes*.
+    seed : int, optional
+        Base seed; None draws a different ensemble at each call.
+    dry_run : bool
+        Draw and report only: no tape, no parquet, no NJOY.
+    verbose_diagnostics : int
+        0 is quiet, 1 prints summaries, 2 adds the messages of the draw and of
+        each perturbed node.
+    log_file : str, optional
+        Log file to append to. None starts ``pfns_perturbation_<timestamp>.log``
+        in *output_dir*.
+
+    Returns
+    -------
+    dict
+        ``timestamp``, ``num_samples``, ``mt``, ``sampling_space`` (``"linear"``),
+        ``dry_run``, ``mf35_unchanged`` (always True) with its note,
+        ``isotopes`` (``{str(zaid): summary}``), ``errors`` (``[{"file", "error"}]``)
+        and, unless *dry_run*, ``matrix_dir`` (the parts directory, which no
+        longer exists once the master parquet is written). A summary has the
+        bands (incident range, group count, rank, null count, seed, clipped
+        components, realised covariance error and acceptance-gate numbers), the
+        residual of the input spectrum's normalisation, ``samples_written``,
+        ``njoy_success``, ``sample_errors`` and, unless *dry_run*, ``applied``:
+        the worst projection shift, renormalisation error and clipped mass over
+        the samples.
+
+    Notes
+    -----
+    Written under *output_dir*, with the sample number ``NNNN`` from 1 and
+    ``symbol`` the element symbol of the ZAID:
+
+    - ``<symbol>_pfns_<NNNN>.endf``: the perturbed tape (overwritten if it
+      exists).
+    - ``perturbation_matrix_<timestamp>_master.parquet`` and
+      ``perturbation_matrix_<timestamp>_metadata.json``: one row per sample, a
+      ``Sample_ID`` column from 1 and one ``float64`` column per outgoing group of
+      each band, ``<symbol>_MT<mt>_b<band>_<lower>-<upper>``. The columns hold the
+      drawn **absolute** deltas of the group integrals (after the clip, before
+      the projection), not factors.
+    - ``pfns_perturbation_<timestamp>.log``, unless *log_file* is given.
+    - With NJOY: ``ace/<NNNN>/`` (ACE files; ``ace/<NNNN>/xsdir/`` for the xsdir
+      lines), ``njoy_files/<NNNN>/`` and, with *xsdir_file*, ``xsdir/<stem>_<NNNN>``.
     """
     global _logger
 

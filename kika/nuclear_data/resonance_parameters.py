@@ -32,8 +32,15 @@ _NAME_TO_LRF = {v: k for k, v in _LRF_TO_NAME.items()}
 class ResonanceRecord:
     """Single resonance level.
 
+    **Deprecated:** this class will be removed in kika-nd 1.0. The canonical model is
+    ``kika.nuclear_data.model``, but it does not yet cover reconstruction, group
+    averaging or covariance collapsing, so there is no drop-in replacement for every
+    use. Accessing the name raises a ``DeprecationWarning`` once per process.
+
     Field semantics match the ENDF ``Resonance`` dataclass so that
-    formula functions (``slbw_cross_sections``, etc.) accept either type.
+    formula functions (``slbw_cross_sections``, etc.) accept either type. An
+    instance is found in ``LGroup.resonances``, as ``ResonanceParameters.from_endf``
+    fills them.
 
     ========  ===============  ===============  ===================
     Field     SLBW (LRF=1)     MLBW (LRF=2)     Reich-Moore (LRF=3)
@@ -43,6 +50,16 @@ class ResonanceRecord:
     c5        GG (gamma Γ)     GG (gamma Γ)     GFA (fission A Γ)
     c6        GF (fission Γ)   GF (fission Γ)   GFB (fission B Γ)
     ========  ===============  ===============  ===================
+
+    Attributes
+    ----------
+    energy : float
+        Resonance energy in eV.
+    spin : float
+        The level's total angular momentum J.
+    c3, c4, c5, c6 : float
+        The four width columns of the ENDF record, in eV, as the table above
+        reads them for each formalism.
     """
 
     energy: float  # Resonance energy (eV)
@@ -57,14 +74,31 @@ class ResonanceRecord:
 class LGroup:
     """Resonances grouped by orbital angular momentum *l*.
 
-    Mirrors ``kika.endf.classes.mf2.mf2mt151.LValueBlock``.
+    **Deprecated:** this class will be removed in kika-nd 1.0 (see
+    ``ResonanceRecord``). Mirrors ``kika.endf.classes.mf2.mf2mt151.LValueBlock``;
+    the items of ``ResonanceParameters.l_groups`` are of this class.
+
+    Attributes
+    ----------
+    awri : float
+        Isotope mass ratio.
+    l : int
+        Orbital angular momentum.
+    resonances : List[ResonanceRecord]
+        The levels of this *l*.
+    ap : float, optional
+        Scattering radius for this *l* alone, in ENDF units (10^-12 cm), when the
+        evaluation gives one
+        (ENDF's APL, Reich-Moore only). None means "use the range-level radius".
+        It is already resolved against the formalism, so unlike
+        ``LValueBlock.apl_or_qx`` it is never a Q value.
     """
 
     awri: float  # Isotope mass ratio
     l: int  # Orbital angular momentum
     resonances: List[ResonanceRecord] = field(default_factory=list)
-    #: Scattering radius for this *l* alone, in fm, when the evaluation gives
-    #: one (ENDF's APL, Reich-Moore only). *None* means "use the range-level
+    #: Scattering radius for this *l* alone, in ENDF units (10^-12 cm), when the
+    #: evaluation gives one (ENDF's APL, Reich-Moore only). *None* means "use the range-level
     #: radius". Already resolved against the formalism by the adapter, so
     #: unlike ``LValueBlock.apl_or_qx`` this is never a Q value.
     ap: Optional[float] = None
@@ -72,7 +106,15 @@ class LGroup:
 
 @dataclass
 class ResonanceParameters:
-    """Format-agnostic resonance parameters for one nuclide.
+    """Format-agnostic resonance parameters for one resolved energy range.
+
+    **Deprecated:** this class will be removed in kika-nd 1.0. The canonical model is
+    ``kika.nuclear_data.model``, but it does not yet cover reconstruction, group
+    averaging or covariance collapsing, so there is no drop-in replacement for every
+    use. Accessing the name raises a ``DeprecationWarning`` once per process.
+
+    Instances come from ``from_endf``, one per resolved range of the section, or are
+    built by hand.
 
     Attributes
     ----------
@@ -81,7 +123,8 @@ class ResonanceParameters:
     spin : float
         Target spin (I).
     scattering_radius : float
-        Scattering radius in ENDF units (10^{-12} cm).
+        Scattering radius in ENDF units (10^-12 cm, that is 10 fm), as the file
+        states it.
     formalism : str
         ``"SLBW"``, ``"MLBW"``, ``"RM"``, or ``"RML"``.
     energy_range : Tuple[float, float]
@@ -90,6 +133,10 @@ class ResonanceParameters:
         Resonances grouped by orbital angular momentum.
     metadata : dict
         Format-specific extras (``"mat"``, ``"awr"``, ``"nlsc"``, etc.).
+    scattering_radius_table : tuple, optional
+        ``(energies_eV, ap_values, interp_regions)`` when the radius depends on
+        energy (ENDF NRO=1): the energies in eV, the radii and the ``(NBT, INT)``
+        interpolation regions. None means the constant ``scattering_radius``.
     """
 
     nuclide_id: int
@@ -110,19 +157,17 @@ class ResonanceParameters:
     def from_endf(cls, mf2: "MF2MT151") -> List[Union["ResonanceParameters", "UnresolvedResonanceParameters"]]:
         """Create ``ResonanceParameters`` from an ENDF ``MF2MT151``.
 
-        **This reads the file through the GNDS model.** The section is
-        decoded once, into ``BreitWigner``/``RMatrix``/``TabulatedWidths`` nodes
-        by formalism, and ``model.interop`` projects each region back into the
-        fields this class has always had. Same fields, same order, same
-        defaults; ``test_flat_class_surface.py`` is the proof and
-        ``test_facade_reproduces_the_old_bodies.py`` compares the values.
+        This reads the file through the GNDS model: the section is decoded once, into
+        ``BreitWigner``/``RMatrix``/``TabulatedWidths`` nodes by formalism, and each
+        region is projected into the fields of this class.
 
-        **LRF=7 still yields nothing, and still warns.** ``ResonanceRecord`` has
-        four width columns; an R-Matrix-Limited spin group has one width per
-        *channel*, five of them for Fe-57 in JEFF-4.0. There is nothing to
-        project into, so the range is omitted — but loudly, which is the half of
-        the defect that is fixed. The model keeps the region;
-        ask ``kika.endf.model_adapter.decodeMF2MT151`` for it.
+        **LRF=7 yields nothing, and warns.** ``ResonanceRecord`` has four width
+        columns; an R-Matrix-Limited spin group has one width per *channel* (five of
+        them for Fe-57 in JEFF-4.0). There is nothing to project into, so the range
+        is omitted with a ``UserWarning``. The model keeps the region: ask
+        ``kika.endf.model_adapter.decodeMF2MT151`` for it. A range that states only
+        a scattering radius (LRU=0), or one the decoder marks unsupported, is
+        omitted without this warning.
 
         Returns a *list* because MF2 may contain multiple isotopes and energy
         ranges, each with a different formalism. Unresolved ranges (LRU=2) come
@@ -136,7 +181,14 @@ class ResonanceParameters:
         Returns
         -------
         List[Union[ResonanceParameters, UnresolvedResonanceParameters]]
-            One entry per (isotope, energy range) combination.
+            One entry per (isotope, energy range) combination, in file order, that
+            the classes can represent.
+
+        Warns
+        -----
+        UserWarning
+            For each resolved range of a formalism ``ResonanceParameters`` cannot
+            represent (LRF=7).
         """
         from kika.endf.model_adapter import decodeMF2MT151
         from kika.nuclear_data.model.interop import (
@@ -212,7 +264,31 @@ class ResonanceParameters:
 
 @dataclass
 class URR_JGroup:
-    """Average parameters for one J-state in the URR."""
+    """Average parameters for one J-state in the URR.
+
+    **Deprecated:** this class will be removed in kika-nd 1.0 (see
+    ``ResonanceRecord``). The items of ``URR_LGroup.j_groups`` are of this class.
+    Each width and spacing is a scalar for energy-independent parameters and an
+    array (aligned with ``UnresolvedResonanceParameters.energy_grid``) when it
+    depends on energy.
+
+    Attributes
+    ----------
+    j : float
+        The J value of the state.
+    amun : float
+        Degrees of freedom of the neutron width distribution.
+    d : float or numpy.ndarray
+        Average level spacing, in eV.
+    gn0 : float or numpy.ndarray
+        Average reduced neutron width, in eV.
+    gg : float or numpy.ndarray
+        Average gamma width, in eV.
+    gf : float or numpy.ndarray
+        Average fission width, in eV.
+    gx : float or numpy.ndarray
+        Average competitive width, in eV.
+    """
     j: float
     amun: float = 1.0                      # degrees of freedom, neutron
     d: Union[float, np.ndarray] = 0.0      # level spacing (eV)
@@ -224,7 +300,21 @@ class URR_JGroup:
 
 @dataclass
 class URR_LGroup:
-    """URR parameters for one l-value."""
+    """URR parameters for one l-value.
+
+    **Deprecated:** this class will be removed in kika-nd 1.0 (see
+    ``ResonanceRecord``). The items of ``UnresolvedResonanceParameters.l_groups``
+    are of this class.
+
+    Attributes
+    ----------
+    awri : float
+        Isotope mass ratio.
+    l : int
+        Orbital angular momentum.
+    j_groups : List[URR_JGroup]
+        The J-states of this *l*.
+    """
     awri: float
     l: int
     j_groups: List[URR_JGroup] = field(default_factory=list)
@@ -234,10 +324,40 @@ class URR_LGroup:
 class UnresolvedResonanceParameters:
     """Format-agnostic URR parameters for one nuclide/energy range.
 
+    **Deprecated:** this class will be removed in kika-nd 1.0. The canonical model is
+    ``kika.nuclear_data.model``, but it does not yet cover reconstruction, group
+    averaging or covariance collapsing, so there is no drop-in replacement for every
+    use. Accessing the name raises a ``DeprecationWarning`` once per process.
+
+    Instances come from ``ResonanceParameters.from_endf``, which returns them beside
+    the resolved ranges, or are built by hand.
+
     For energy-independent parameters (Case A), d/gn0/gg/gf/gx are scalars.
     For energy-dependent parameters (Cases B, C), they are arrays that must
     be interpolated to the evaluation energy grid before calling formulas.
     The energy_grid field stores the tabulation energies for interpolation.
+
+    Attributes
+    ----------
+    nuclide_id : int
+        ZA = 1000*Z + A.
+    spin : float
+        Target spin (I).
+    scattering_radius : float
+        Scattering radius in ENDF units (10^-12 cm).
+    energy_range : Tuple[float, float]
+        ``(E_lo, E_hi)`` in eV.
+    lssf : int
+        ENDF LSSF: 0 means the cross sections are computed from these parameters
+        in the range, 1 that they only supply the self-shielding factor on top of
+        the tabulated cross section.
+    l_groups : List[URR_LGroup]
+        The parameters grouped by orbital angular momentum.
+    energy_grid : numpy.ndarray, optional
+        The energies in eV at which the energy-dependent parameters are tabulated.
+        None when the parameters are energy-independent (Case A).
+    metadata : dict
+        Format-specific extras.
     """
     nuclide_id: int
     spin: float

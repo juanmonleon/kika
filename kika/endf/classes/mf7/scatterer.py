@@ -49,7 +49,35 @@ _FILENAME_PREFIX = re.compile(r"^tsl[-_]", re.IGNORECASE)
 
 @dataclass
 class ThermalScatterer:
-    """The identity of a thermal scattering evaluation."""
+    """The identity of a thermal scattering evaluation.
+
+    Returned by :func:`thermal_scatterer`. Every field is None (or empty) when
+    the tape does not give it.
+
+    Attributes
+    ----------
+    mat : int, optional
+        The MAT of the tape.
+    za : float, optional
+        The ZA field as written, a pseudo-ZA for most TSL materials (126 for
+        beryllium metal in ENDF/B-VIII.1, 4000 in JEFF-4.0). Not a nuclide.
+    awr : float, optional
+        Atomic weight ratio, in neutron masses, as MF1/MT451 or MF7 writes it.
+    zsymam : str, optional
+        The material label of MF1/MT451, stripped.
+    name : str, optional
+        The name kika gives the material, ``<principal>in<compound>`` when it
+        can split the label (``HinH2O``), else the file stem without its
+        ``tsl-`` or ``tsl_`` prefix, else the label.
+    name_source : str, optional
+        Which rule produced ``name``: ``"zsymam"``, ``"filename"`` or
+        ``"zsymam-verbatim"``.
+    principal, compound : str, optional
+        The two parts of a split name (``H`` and ``H2O``); None for the
+        filename and verbatim names.
+    composition : list of TSLIsotope
+        The isotopes of MF7/MT451; empty when the tape has no MF7/MT451.
+    """
 
     mat: Optional[int] = None
     #: The ZA field as written. A *pseudo*-ZA for most TSL materials — 126 for
@@ -114,6 +142,23 @@ def thermal_scatterer(endf, source: Optional[Union[str, Path]] = None
     *source* is the file the tape came from. It is optional but worth passing:
     it is the only thing that can name ``tsl-Be-metal.endf`` or ``tsl-s-CH4.endf``,
     whose ZSYMAM (``Be-Metal``, ``s-CH4``) says nothing about a compound.
+
+    Parameters
+    ----------
+    endf : ENDF
+        A tape read with MF1 and MF7 (a full read, ``read_endf(path,
+        mf_numbers=[1, 7])``, or an ``open_endf`` tape). Without MF1 there is
+        no label, and ZA and AWR come from the first MF7 section that has a ZA;
+        without MF7 the composition is empty.
+    source : str or Path, optional
+        The file the tape came from. Used for the name only when the label
+        cannot be split into principal and compound.
+
+    Returns
+    -------
+    ThermalScatterer
+        With ``mat`` taken from ``endf.mat``. When neither the label nor
+        ``source`` gives a name, ``name`` and ``name_source`` are None.
     """
     mt451 = None
     mf1 = endf.files.get(1)

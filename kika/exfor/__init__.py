@@ -1,43 +1,10 @@
 """
-EXFOR (Experimental Nuclear Reaction Data) utilities for KIKA.
+Experimental EXFOR data, read from an X4Pro database or from JSON files.
 
-This module provides classes and functions for loading, processing, and plotting
-experimental angular distribution data from EXFOR.
-
-Quick Start:
-    >>> import kika.exfor as exfor
-    >>>
-    >>> # Configure database path once at the start
-    >>> exfor.configure(db_path="C:/Data/x4sqlite1.db")
-    >>>
-    >>> # Now load data without specifying path each time
-    >>> data = exfor.read_all_exfor(target="Fe56", mt=2)
-    >>> print(f"Found {len(data)} energy groups")
-
-Primary API:
-    - configure(): Set default database path for the session
-    - read_all_exfor(): Load EXFOR data from database or JSON files
-    - read_exfor(): Load a single EXFOR JSON file
-    - ExforAngularDistribution: Main class for angular distribution data
-
-Example - Loading from Database:
-    >>> import kika.exfor as exfor
-    >>> exfor.configure(db_path="/path/to/x4sqlite1.db")
-    >>>
-    >>> # Load Fe-56 elastic scattering data
-    >>> data = exfor.read_all_exfor(target="Fe56", mt=2)
-    >>>
-    >>> # Load with energy filter
-    >>> data = exfor.read_all_exfor(target="U235", mt=18, energy_range=(1.0, 5.0))
-
-Example - Loading from JSON:
-    >>> exfor_data = exfor.read_exfor('/path/to/27673002.json')
-    >>> print(exfor_data.label)
-    Gkatis et al. (2025)
-
-Legacy API:
-    The functions from AD_utils are still available but deprecated.
-    Please migrate to the new class-based API.
+The classes hold angular distributions, cross-sections and general EXFOR quantities
+with their metadata, convert between the laboratory (LAB) and centre-of-mass (CM)
+frames and between units, and plot the data against an evaluation. The database
+location is set once with :func:`~kika.exfor.configure`.
 """
 
 # Configuration (call configure() to set defaults for the session)

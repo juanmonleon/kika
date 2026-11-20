@@ -67,6 +67,14 @@ def _dominant_interpolation(regions: List[Tuple[int, int]]) -> str:
 class CrossSection:
     """Format-agnostic pointwise cross section σ(E).
 
+    **Deprecated:** this class will be removed in kika-nd 1.0. The canonical model is
+    ``kika.nuclear_data.model``, but it does not yet cover reconstruction, group
+    averaging or covariance collapsing, so there is no drop-in replacement for every
+    use. Accessing the name raises a ``DeprecationWarning`` once per process.
+
+    An instance comes from ``from_endf``, ``from_endf_file``, ``from_ace`` (or the
+    ``all_from_*`` variants), or is built by hand from the fields below.
+
     Attributes
     ----------
     energies : np.ndarray
@@ -106,22 +114,14 @@ class CrossSection:
     def from_endf(cls, mf3mt: "MF3MT") -> "CrossSection":
         """Create a ``CrossSection`` from an ENDF ``MF3MT`` object.
 
-        **This is the one flat class NOT routed through the model,
-        and the reason is a measurement rather than a preference.**
-        ``NuclideInfo``, ``AngularDistribution`` and ``ResonanceParameters`` all
-        build their model and project back. Doing the same here costs 2.5x:
-        ``decodeMF3MT`` alone is 5.4 ms against this body's 3.3 ms for the
-        committed slice's three sections, and the legacy reconstructor (removed
-        2026-10-08) constructed one ``CrossSection`` per MT per call, which the cluster ran
-        per sample per temperature. The gate for the change was a 20% ceiling
-        and its fallback is exactly this: keep the fast constructor,
-        and expose the model lazily through :attr:`model`.
+        Unlike ``NuclideInfo``, ``AngularDistribution`` and ``ResonanceParameters``,
+        this constructor does not read the section through the model: that costs
+        about 2.5 times as much, and a caller may build one ``CrossSection`` per MT per
+        call. The model is available on demand through ``to_model``.
 
-        One thing did change, and it is a fix: ZA
-        is **rounded** rather than truncated. ENDF's fixed-format floats do not
-        round-trip, so Th-232's ``9.023200+4`` reads back as
-        ``90231.99999999999`` and ``int()`` on that named Ac-231 — on all 57 of
-        that tape's sections.
+        The ZA is **rounded**, not truncated. ENDF's fixed-format floats do not
+        round-trip, so Th-232's ``9.023200+4`` reads back as ``90231.99999999999``,
+        and truncating it would name Ac-231.
 
         Parameters
         ----------
@@ -131,6 +131,12 @@ class CrossSection:
         Returns
         -------
         CrossSection
+            With ``energies`` in eV and ``values`` in b as the section holds them,
+            ``reaction`` the MT, ``nuclide_id`` the rounded ZA (0 when the section
+            states none), ``temperature`` 0.0 and ``interpolation`` the scheme that
+            covers the most points. ``metadata`` carries ``mat``, ``awr``, ``qm``,
+            ``qi``, ``lr`` and ``interpolation_regions`` (the raw ``(NBT, INT)``
+            list).
         """
         energies = np.asarray(mf3mt.energies, dtype=float)
         values = np.asarray(mf3mt.cross_sections, dtype=float)
@@ -161,15 +167,23 @@ class CrossSection:
     def to_model(self, mf3mt: "MF3MT"):
         """The GNDS ``Reaction`` for the section this object came from.
 
-        Built on demand, never in ``from_endf``. This is the escape
-        hatch: the constructor is on the cluster's hot path and a model round
-        trip there costs 2.5x, so anything that actually wants the model pays
-        for it at the point of asking rather than everyone paying always.
+        Built on demand, never in ``from_endf``: a caller that wants the model pays
+        for the decode at the point of asking.
 
-        It takes the section rather than reconstructing from ``self`` because
-        the flat fields have already lost what the model would want back — the
-        per-region interpolation survives only in ``metadata``, and a rebuilt
-        model would be a guess dressed as a decode.
+        The section is taken as an argument and the model is not rebuilt from
+        ``self``, because the flat fields have lost what the model needs (the
+        per-region interpolation survives only in ``metadata``).
+
+        Parameters
+        ----------
+        mf3mt : MF3MT
+            The ENDF section this object was made from. ``self`` is not read.
+
+        Returns
+        -------
+        Reaction
+            The model reaction decoded from *mf3mt*; the decode's conversion report
+            is discarded.
         """
         from kika.endf.model_adapter import decodeMF3MT
 
@@ -199,16 +213,19 @@ class CrossSection:
         Returns
         -------
         MF3MT
+            A section with ``energies`` in eV and ``cross_sections`` in b, ZA
+            ``nuclide_id``, AWR from ``metadata`` (0.0 when absent) and the
+            interpolation regions of ``metadata['interpolation_regions']``, or one
+            region of the scheme in ``interpolation`` (lin-lin for an unknown name).
+            A missing ``mat`` is left as None.
 
         Raises
         ------
         ValueError
             If ``qm``/``qi``/``lr`` are neither given nor in ``metadata``.
-            A section built by :meth:`from_ace` still lands here, but for
-            ``qm`` and ``lr`` only: ACE's LQR block carries QI and
-            :meth:`from_ace` reads it. It used to default all three to zero
-            instead, writing a physically wrong MF3 header for every threshold
-            reaction without saying so.
+            A section built by :meth:`from_ace` always lands here for ``qm`` and
+            ``lr``, which ACE has no counterpart for; ACE's LQR block carries QI and
+            :meth:`from_ace` reads it. No value is defaulted to zero.
         """
         from kika.endf.classes.mf3.mf3mt import MF3MT
 
@@ -286,12 +303,17 @@ class CrossSection:
         Returns
         -------
         CrossSection
+            As :meth:`from_endf`.
+
+        Raises
+        ------
+        KeyError
+            If *endf* has no MF3 section for *mt*.
 
         Notes
         -----
-        This used to reconstruct on demand, via an in-Python reconstructor
-        documented as producing incorrect cross sections. It now only consumes
-        what the caller chose::
+        This does not reconstruct resonances. It consumes what the caller chose to
+        put in ``endf.pendf``::
 
             endf.pendf = kika.processing.njoy_reconstruct(path, njoy_executable=...)
         """
@@ -352,6 +374,12 @@ class CrossSection:
         Returns
         -------
         CrossSection
+            With ``energies`` converted from MeV to eV, ``values`` in b,
+            ``nuclide_id`` the header's ZAID (0 when absent), ``temperature`` in K
+            (the header's kT in MeV divided by the Boltzmann constant; 0.0 when the
+            header has none) and ``interpolation`` ``"linlin"``. ``metadata`` carries
+            ``source_format`` (``"ace"``), ``ace_zaid``, ``ace_extension``, ``awr``,
+            ``ace_comment`` and ``ace_date``, and ``qi`` when the MT has one.
 
         Raises
         ------
@@ -360,19 +388,15 @@ class CrossSection:
 
         Notes
         -----
-        **ACE does carry a reaction Q value, and this reads it.** The LQR block
-        holds one QI per reaction, in MeV, positionally aligned with MTR; a
-        section whose MT has an entry there gets ``metadata["qi"]`` in eV. The
-        record said otherwise for a long time, and callers were supplying by hand a number that was in the file.
+        ACE carries a reaction Q value, and this reads it. The LQR block holds one
+        QI per reaction, in MeV, positionally aligned with MTR; a section whose MT
+        has an entry there gets ``metadata["qi"]`` in eV.
 
-        What ACE genuinely has no counterpart for is **QM**, the mass-difference
-        Q, and **LR**. So :meth:`to_endf` still refuses on an ACE-sourced
-        section; it now refuses for the two fields that are really missing
-        rather than for three.
+        ACE has no counterpart for **QM**, the mass-difference Q, and **LR**. So
+        :meth:`to_endf` refuses an ACE-sourced section unless they are passed.
 
-        Composites (MT 4, 18, 101 …) are absent from MTR and get no ``qi``,
-        which is correct rather than a gap: a sum over reactions with different
-        Q values does not have one.
+        Composites (MT 4, 18, 101 …) are absent from MTR and get no ``qi``: a sum
+        over reactions with different Q values does not have one.
         """
         from kika._constants import BOLTZMANN_CONSTANT
         from kika.ace.model_adapter.decode import qValuesByMT
@@ -469,13 +493,16 @@ class CrossSection:
         Parameters
         ----------
         label : str, optional
-            Plot label.
+            Plot label. The default is ``"MT=<reaction>"``, prefixed with the
+            nuclide symbol when ``nuclide_id`` is not 0.
         **styling_kwargs
             Passed to ``CrossSectionPlotData`` (color, linestyle, ...).
 
         Returns
         -------
-        CrossSectionPlotData
+        :class:`~kika.plotting.CrossSectionPlotData`
+            With the energies in eV on x and the cross sections in b on y, and
+            ``energy_range`` the extreme energies (None for an empty table).
         """
         from kika.plotting import CrossSectionPlotData
         from kika._utils import zaid_to_symbol
@@ -513,7 +540,7 @@ class CrossSection:
     ) -> Union[float, np.ndarray]:
         """Interpolate σ(E) at one or more energies.
 
-        Symmetric with :meth:`MF3MT.get_cross_section`. When the underlying
+        Symmetric with ``MF3MT.get_cross_section``. When the underlying
         ENDF interpolation regions are preserved in
         ``metadata['interpolation_regions']`` (set by :meth:`from_endf`),
         the full ENDF interpolation law is honoured. Otherwise the
@@ -546,8 +573,20 @@ class CrossSection:
 
         ``metadata['interpolation_regions']`` (set by :meth:`from_endf`) is the
         tape's own ``(NBT, INT)`` list; without it the single ``interpolation``
-        name applies to the whole table. An unknown name raises rather than
-        being read lin-lin.
+        name applies to the whole table.
+
+        Returns
+        -------
+        numpy.ndarray
+            One ENDF ``INT`` code per interval (``len(energies) - 1`` values; none
+            for a table of fewer than two points).
+
+        Raises
+        ------
+        ValueError
+            If there are no regions and ``interpolation`` is not one of
+            ``"histogram"``, ``"linlin"``, ``"linlog"``, ``"loglin"`` and
+            ``"loglog"`` (an empty name counts as ``"linlin"``).
         """
         from kika.algebra import interval_laws
 

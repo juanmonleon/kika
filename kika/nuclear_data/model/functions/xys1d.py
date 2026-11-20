@@ -21,13 +21,33 @@ class XYs1d(Function1d):
     §6.1.1 stores the pairs interleaved in one ``values`` node
     (``x0 y0 x1 y1 ...``). They are kept as two arrays here because every
     consumer wants them that way and the interleaving is a serialisation
-    detail; :meth:`interleaved` produces the spec's layout when a writer needs
-    it.
+    detail; ``interleaved`` produces the spec's layout when a writer needs it.
 
     One interpolation rule applies to the whole table. A table that needs more
-    than one is a :class:`~kika.nuclear_data.model.functions.regions1d.Regions1d`
-    — which is the honest replacement for the flat classes' "dominant scheme,
-    with the real regions hidden in ``metadata``".
+    than one is a :class:`~kika.nuclear_data.model.functions.regions1d.Regions1d`.
+    ``evaluate(x, outOfRange)`` interpolates by that rule; outside the table it
+    gives 0 (``"zero"``, the default), the end value (``"hold"``) or raises
+    (``"raise"``). At a repeated abscissa the value is right-continuous.
+
+    Attributes
+    ----------
+    xs, ys : numpy.ndarray
+        The abscissae and ordinates, one-dimensional and of the same shape (a
+        ``ValueError`` otherwise). *xs* is expected ascending (not checked); a
+        repeated value is a step. Their units are those stated by *axes* (eV and b
+        in a cross section); kika does not convert them.
+    interpolation : Interpolation
+        The rule between nodes, lin-lin by default.
+    axes
+        The axes object carrying the units of *xs* and *ys*; None when the source
+        states none.
+    label : str, optional
+        The style (form) this table belongs to inside a multi-form container.
+    outerDomainValue : float, optional
+        The coordinate of the next dimension up when the table sits inside a
+        two-dimensional function (the incident energy of an angular table).
+    index : int, optional
+        The position of the table when it is a region of a ``Regions1d``.
     """
 
     xs: np.ndarray

@@ -1,3 +1,9 @@
+"""Run NJOY on an ENDF tape with a fixed deck and keep its ACE file and logs.
+
+The deck is the one of :func:`run_njoy` and :func:`run_njoy_with_pendf`. Each run is
+checked for the decimal-locale misread of NJOY on Windows (see
+:class:`~kika.njoy.locale_guard.NjoyDecimalLocaleError`).
+"""
 import logging
 import os
 import shutil
@@ -271,37 +277,137 @@ def run_njoy(
     njoy_files_dir: str | Path | None = None,
     acer_iprint: int = 0,
 ) -> dict:
-    """
-    Run NJOY once using the provided ENDF file and parameters.
+    """Run NJOY on one ENDF tape at one temperature and keep the ACE file it writes.
+
+    kika copies *endf_path* to ``tape20`` of a temporary directory under
+    *output_dir*, writes the deck there, runs NJOY and moves the results out. The
+    deck runs these modules, in this order:
+
+    1. ``moder``: tape 20 to a binary tape.
+    2. ``reconr``: ``err`` 0.001, ``tempr`` 0 K, ``errmax`` 0.01 and ``errint``
+       5e-8 (NJOY's own field names; the tolerances are fractions).
+    3. ``broadr`` at *temperature*: ``errthn`` 0.001, ``thnmax`` 1e6 eV, and the
+       same ``errmax`` 0.01 and ``errint`` 5e-8.
+    4. ``heatr`` for MT 302, 318, 402, 442 and 444, then a second ``heatr`` pass on
+       the broadened tape with print option 2, whose output tape no later module
+       reads.
+    5. ``purr`` at *temperature*, with 20 bins, 64 ladders and nine sigma-zero
+       values from 1e10 b to 10 b.
+    6. ``gaspr``.
+    7. ``acer`` for fast data, which writes the ACE file with the suffix *suff*.
+    8. A second ``acer`` pass (option 7) that reads that ACE file and checks it. Its
+       output is the final ACE file and the xsdir file.
+
+    Temperatures are in K and energies in eV, as NJOY reads them.
+
+    **Decimal-locale guard.** NJOY on a Windows machine whose decimal separator is
+    not ``.`` can read its own deck wrongly (see
+    :class:`~kika.njoy.locale_guard.NjoyDecimalLocaleError`). After a run kika reads
+    NJOY's listing and compares the three tolerances that ``reconr`` echoes there
+    with the ones in the deck. A deck with no ``reconr`` card is checked against
+    the echo of ``broadr`` instead, which is the case of
+    :func:`run_njoy_with_pendf`. The check passes without a verdict when the
+    listing is missing, has none of the echoes, or the deck's tolerances are not
+    positive. While NJOY runs the listing is also read every 0.5 s, and the run is
+    killed at the first mismatch. A mismatch, or a non-zero exit with
+    ``Error during floating point read`` or ``Bad real number`` in NJOY's output,
+    makes kika run the same deck again on the same tapes, up to 8 runs in all. If
+    the listing of the last run still shows a mismatch, the function raises
+    ``NjoyDecimalLocaleError``. By then the deck, the output and the listing are
+    already saved, and the ACE and xsdir files are not moved. A run that ends in
+    one of the two read errors on the eighth attempt does not raise: it returns
+    with a non-zero ``returncode``.
 
     Parameters
     ----------
-    njoy_exe : str
-        Path to the NJOY executable.
-    endf_path : str | Path
-        Path to the ENDF file (this will be copied to tape20).
-    temperature : float
-        Temperature in Kelvin used in broadr/thermr/acer blocks.
-    library_name : str
-        For the title line, e.g., 'jeff40' or 'endfb81'.
-    suff : str | None
-        Suffix for the ACE file, e.g., '.01c' or '.02c'
-    output_dir : str | Path
-        Base output directory where ace/ and njoy_files/ will be created.
-    njoy_version : str
-        Version string shown in the title.
-    additional_suffix : str | None
-        Optional additional suffix to add to filenames to prevent overwrites.
-        If None and files exist, a unique suffix will be generated automatically.
-    acer_iprint : int
-        Print option of the second (check) ACER pass. ``0`` (the default)
-        prints its consistency checks; ``1`` adds a dump of the whole table,
-        which is the ACE again in another layout -- 97 % of a 122 MB listing
-        for Fe-56. The ACE and xsdir are the same either way.
+    njoy_exe
+        Path of the NJOY executable. On Windows a UNC path into a WSL distribution
+        (``wsl.localhost`` or ``wsl$``) is run through ``wsl.exe``.
+    endf_path
+        ENDF tape. The MAT number, the ZA and the isotope label are read from its
+        headers.
+    temperature
+        Temperature in K, written unchanged on the ``broadr``, ``purr`` and
+        ``acer`` cards. A value below 1.0 is read as MeV for the title, the folder
+        names and the file names, which use the converted value in K.
+    library_name
+        Library label. It goes in the title (in upper case) and in the default
+        folder names. Without *extension* it also picks the library number in the
+        ACE file name: the name is lower-cased and stripped of ``-``, ``/`` and ``.``
+        and looked up in ``NDLIBRARY_TO_SUFFIX``. An unknown name emits a warning
+        and gives ``00``.
+    output_dir
+        Folder for the results and for the temporary run folder. It is created
+        when missing. The run folder is deleted before the function returns,
+        also when it raises.
+    suff
+        Text written in the suffix field of the first ``acer`` card. None writes
+        the suffix of *temperature* (``.02`` for 293.6 K) or, with *extension*, the
+        extension without its ``c`` (``.06`` for ``06c``).
+    njoy_version
+        Text shown in the title of the deck, as ``(NJOY 2016.78)``. kika does not
+        check it against the executable.
+    additional_suffix
+        Used only without *extension*. A text inserted before the temperature
+        suffix in the file names (``260560_81_<additional_suffix>.02``). A file of
+        that name already in the folders is overwritten. None keeps the plain name
+        when it is free, and otherwise inserts ``v01``, ``v02`` ... (the first
+        free one) so that nothing is overwritten.
+    extension
+        ACE extension, such as ``06c``. Selects the fixed file names below.
+        None selects the names built from *library_name* and the temperature.
+    ace_dir, xsdir_dir, njoy_files_dir
+        Folders for the ACE file, the xsdir file and the deck and logs. *ace_dir*
+        defaults to ``<output_dir>/ace/<library_name>/<T>K`` and *njoy_files_dir*
+        to ``<output_dir>/njoy_files/<library_name>/<T>K``, with *T* in K to one
+        decimal. *xsdir_dir* defaults to the ``xsdir`` folder inside *ace_dir*
+        with *extension*, and to *njoy_files_dir* without it. Folders are created
+        when missing.
+    acer_iprint
+        The ``iprint`` field of the second (check) ``acer`` card, written
+        unchanged. In NJOY, 0 prints the consistency checks and 1 also prints a
+        dump of the whole table, which makes the listing much larger. kika
+        takes the ACE and xsdir files from the same tapes either way.
 
     Returns
     -------
-    dict with paths to outputs and the NJOY return code.
+    dict
+        The keys, all paths as ``str``:
+
+        ``returncode``
+            Exit code of the last NJOY run.
+        ``zaid``
+            ZA of the evaluation, from the tape (26056 for Fe-56).
+        ``ace_filename``, ``base_filename``
+            The file name of the ACE file and the stem of the other files. Without
+            *extension* the stem is ``<10*ZA>_<library number><temperature
+            suffix>`` (``260560_81.02``) and the ACE name adds ``c``
+            (``260560_81.02c``). With *extension* the ACE name is
+            ``<ZA>.<extension>`` and is also the stem (``26056.06c``). An existing
+            file of that name is overwritten.
+        ``njoy_input``
+            ``<njoy_files_dir>/<stem>.input``: the deck that was run.
+        ``njoy_output``
+            ``<njoy_files_dir>/<stem>.output``: NJOY's standard output and error.
+        ``njoy_listing``
+            NJOY's own listing (the file ``output`` of its run folder), or None
+            when NJOY wrote none. It is saved under the same name as
+            ``njoy_output``, so when there is a listing it replaces the standard
+            output in that file.
+        ``ace_file``, ``xsdir_file``
+            ``<ace_dir>/<ACE name>`` and ``<xsdir_dir>/<stem>.xsdir``. None when
+            NJOY wrote no such tape, for instance after a failed run: a non-zero
+            ``returncode`` does not raise.
+
+    Raises
+    ------
+    ValueError
+        If the MAT number or the ZA cannot be read from *endf_path*, or if
+        *extension* is None and *temperature* is not within 1 K of one of the
+        temperatures kika has an ACE suffix for (``K_TO_SUFFIX``). Pass
+        *extension* for any other temperature.
+    NjoyDecimalLocaleError
+        If NJOY misread its deck on the last run (see above).
     """
 
     endf_path = Path(endf_path).resolve()
@@ -451,24 +557,46 @@ def run_njoy_with_pendf(
     njoy_files_dir: str | Path | None = None,
     acer_iprint: int = 0,
 ) -> dict:
-    """Run NJOY against a pre-existing (typically perturbed) PENDF, skipping RECONR.
+    """Run NJOY from an existing PENDF tape instead of reconstructing one.
 
-    Same chain and outputs as :func:`run_njoy`, but the resonance-reconstruction
-    step is replaced by a ``moder`` that reads the user-provided ASCII PENDF and
-    routes it into the binary tape (-21) that ``broadr`` consumes downstream.
+    The deck is the one of :func:`run_njoy` without its ``reconr`` step: after the
+    first ``moder`` (ENDF tape to binary), a second ``moder`` converts the ASCII
+    PENDF *pendf_path* to the binary tape that ``broadr`` reads, and the chain
+    continues with ``broadr``, ``heatr``, ``purr``, ``gaspr`` and the two ``acer``
+    passes with the same values. The ENDF tape is still the ENDF input of those
+    modules. The files written, their names, the returned dict and the raised
+    exceptions are those of :func:`run_njoy`.
 
-    Use this when the PENDF has already been generated externally — e.g. the
-    MF3 perturbation pipeline produces a perturbed PENDF, then calls this to
-    chain through broadr/heatr/purr/gaspr/acer to ACE.
+    The decimal-locale guard also applies. With no ``reconr`` card in the deck, the
+    check reads the tolerances echoed by ``broadr`` (``errthn``, ``errmax``,
+    ``errint``). kika does not check the PENDF tape itself.
 
     Parameters
     ----------
-    endf_path : str | Path
-        Original (or, in the future combined pipeline, perturbed) ENDF tape.
-        Provides MF1/MF2/MF4/MF5/MF6 — everything except MF3 σ(E).
-    pendf_path : str | Path
-        Pre-existing ASCII PENDF tape to inject. Replaces RECONR's output.
-    Other parameters: see :func:`run_njoy`.
+    endf_path
+        ENDF tape. The MAT number, the ZA and the isotope label are read from its
+        headers.
+    pendf_path
+        ASCII PENDF tape. It is copied to ``tape26`` of the run folder and takes
+        the place of the output of ``reconr``.
+    njoy_exe, temperature, library_name, output_dir, suff, njoy_version
+        As in :func:`run_njoy`.
+    additional_suffix, extension, ace_dir, xsdir_dir, njoy_files_dir, acer_iprint
+        As in :func:`run_njoy`.
+
+    Returns
+    -------
+    dict
+        As :func:`run_njoy`.
+
+    Raises
+    ------
+    ValueError
+        If the MAT number or the ZA cannot be read from *endf_path*, or if
+        *extension* is None and *temperature* has no ACE suffix (see
+        :func:`run_njoy`).
+    NjoyDecimalLocaleError
+        If NJOY misread its deck on the last run.
     """
     endf_path = Path(endf_path).resolve()
     pendf_path = Path(pendf_path).resolve()

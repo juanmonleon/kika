@@ -94,18 +94,22 @@ class BetaBlock:
 
 @dataclass
 class MF7MT4(MF7MT):
-    """One MF7/MT4 section.
+    """One MF7/MT4 section: the inelastic thermal scattering law S(α, β).
+
+    A user gets one from ``endf[7][4]`` on a thermal-scattering tape read with
+    :func:`kika.endf.read_endf` or :func:`kika.endf.open_endf`. It can also be
+    built by hand: ``number`` has no default and every other field has one.
 
     **What the B array means, and what it does not.** Measured across the
     ENDF/B-VIII.1 TSL sublibrary, three entries are unambiguous and are the only
     ones given names here:
 
-    ``B(1)``  σ_free of the principal scatterer **times** ``B(6)`` — 40.87 for
-              H-in-H₂O and H-in-CH₂ (2 × 20.436), 20.44 for H-in-ZrH (1 ×),
-              6.79 for D-in-D₂O (2 × 3.395), 6.15 for Be.
-    ``B(3)``  the principal scatterer's AWR — matches MF1/451's AWR field in
-              every file checked.
-    ``B(6)``  the number of principal atoms in the compound.
+    - ``B(1)``: σ_free of the principal scatterer **times** ``B(6)`` — 40.87 for
+      H-in-H₂O and H-in-CH₂ (2 × 20.436), 20.44 for H-in-ZrH (1 ×),
+      6.79 for D-in-D₂O (2 × 3.395), 6.15 for Be.
+    - ``B(3)``: the principal scatterer's AWR — matches MF1/451's AWR field in
+      every file checked.
+    - ``B(6)``: the number of principal atoms in the compound.
 
     ``B(2)``, ``B(4)`` and ``B(5)`` are stored verbatim and deliberately not
     given accessors. ``B(5)`` is 0.0 everywhere measured; ``B(2)`` takes values
@@ -113,6 +117,27 @@ class MF7MT4(MF7MT):
     for H-in-ZrH; 450.0 for s-CH₄) that fit no single reading of the manual, and
     naming a field after a guess is worse than leaving the caller to read
     ``b[1]`` knowing they are on their own.
+
+    Attributes
+    ----------
+    number : int
+        The MT number, 4.
+    data : dict
+        A free-form dictionary. The parser does not fill it.
+    num_lines : int
+        The number of lines of the section on the tape, as the parser counted them.
+    pad : PadStyle
+        How the tape filled the unused fields of a short line, kept so that the
+        section writes back in the dialect it came in.
+    b : list of float
+        The B array of the section's first LIST record, as written.
+    beta_interp : list of tuple of int
+        The (NBT, INT) interpolation pairs of the β table.
+    blocks : list of BetaBlock
+        One block per β, each with S(α) for every temperature.
+    teff : list of EffectiveTemperature
+        The effective-temperature tables that follow the β loop: one for the
+        principal scatterer, then one per non-principal scatterer that needs it.
     """
 
     _lat: Optional[int] = None

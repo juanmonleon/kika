@@ -1,3 +1,9 @@
+"""Sensitivities and Taylor coefficients computed from the PERT tallies of an MCNP run.
+
+:class:`SensitivityData` holds, for each detector energy bin and reaction, the
+first-order sensitivities (:class:`Coefficients`) and the Taylor coefficients c1 and c2
+(:class:`TaylorCoefficients`) of the perturbed tallies.
+"""
 from dataclasses import dataclass, field
 from kika._constants import ATOMIC_NUMBER_TO_SYMBOL, MT_TO_REACTION
 from typing import Dict, Union, List, Optional, Tuple
@@ -10,24 +16,36 @@ from kika.energy_grids.utils import _identify_energy_grid
 
 @dataclass
 class TaylorCoefficients:
-    """Container for Taylor series expansion coefficients.
-    
-    :ivar energy: Energy range string in format "lower_upper" (e.g., "0.00e+00_1.00e-01")
-    :type energy: str
-    :ivar reaction: Reaction number
-    :type reaction: int
-    :ivar pert_energies: Perturbation energy boundaries
-    :type pert_energies: List[float]
-    :ivar c1: First-order Taylor coefficients
-    :type c1: List[float]
-    :ivar c2: Second-order Taylor coefficients
-    :type c2: List[float]
-    :ivar ratio: Ratio of c2/c1 for each energy bin
-    :type ratio: List[float]
-    :ivar c2_errors: Errors of second-order Taylor coefficients
-    :type c2_errors: List[float]
-    :ivar c1_errors: Errors of first-order Taylor coefficients
-    :type c1_errors: List[float]
+    """First- and second-order Taylor coefficients of a tally for one reaction.
+
+    The response is expanded as ``R(p) = R0 + c1 * p + c2 * p**2``, with ``p`` the
+    fractional change of the cross-section (the plotting methods use this form). ``c1``
+    and ``c2`` are the values of the METHOD=2 and METHOD=3 PERT tallies, stored as the
+    tallies give them: in tally units, not divided by ``R0``. What those methods
+    return is MCNP's definition (its first- and second-order terms of the
+    perturbation); kika does not check the size of the perturbation. One entry per
+    perturbation bin. A user gets them from ``SensitivityData.coefficients``. The
+    ratio ``c2 / c1`` measures the departure from linearity; no threshold is applied
+    to it.
+
+    Attributes
+    ----------
+    energy : str
+        Detector energy bin, ``"lower_upper"`` in MeV with the format ``.2e`` (for
+        example ``"0.00e+00_1.00e-01"``), or ``"integral"`` for the whole tally.
+    reaction : int
+        Reaction number (MT) of the ``RXN=`` keyword of the PERT cards.
+    pert_energies : list of float
+        Perturbation bin boundaries in MeV, ``len(c1) + 1`` values.
+    c1, c2 : list of float
+        First- and second-order coefficients, one per perturbation bin.
+    ratio : list of float
+        ``c2 / c1`` per bin; ``nan`` where ``c1`` is 0.
+    c1_errors, c2_errors : list of float
+        Relative statistical errors (fractions of the value, one sigma) that MCNP
+        gives for the METHOD=2 and METHOD=3 tallies. A sum over materials stores the
+        propagated relative error instead (see
+        :func:`~kika.sensitivities.sensitivity_processing.compute_total_sensitivity`).
     """
     energy: str
     reaction: int
@@ -39,15 +57,23 @@ class TaylorCoefficients:
     c1_errors: list[float]
     
     def calculate_nonlinearity(self, p: float) -> float:
-        """Calculate the nonlinearity factor at a specific perturbation.
-        
-        The nonlinearity factor is (c2*p)/c1, which represents the ratio of 
-        second-order to first-order term at perturbation magnitude p.
-        
-        :param p: Perturbation magnitude (0 to 100%)
-        :type p: float
-        :returns: Average nonlinearity across all energy bins
-        :rtype: float
+        """Mean over the bins of the nonlinearity factor ``(c2 * p) / c1``, signed.
+
+        The factor is the ratio of the second-order to the first-order term at the
+        perturbation ``p``. It is the mean of ``ratio`` over the bins where it is not
+        ``nan``, times ``p / 100``; the signs of the bins are not removed.
+
+        Parameters
+        ----------
+        p
+            Perturbation size in percent of the cross-section (``p = 20`` is a change
+            of 20 %).
+
+        Returns
+        -------
+        float
+            The mean factor as a fraction (0.05 is 5 %), or ``nan`` when every ratio is
+            ``nan``.
         """
         valid_ratios = [r for r in self.ratio if not np.isnan(r)]
         if not valid_ratios:
@@ -57,34 +83,44 @@ class TaylorCoefficients:
         return np.mean(valid_ratios) * p_fraction
     
     def calculate_nonlinearity_by_bin(self, p: float) -> list:
-        """Calculate the nonlinearity factor for each energy bin at specific perturbation.
-        
-        The nonlinearity factor is (c2*p)/c1, which represents the ratio of 
-        second-order to first-order term at perturbation magnitude p.
-        
-        :param p: Perturbation magnitude (0 to 100%)
-        :type p: float
-        :returns: Nonlinearity factor for each energy bin
-        :rtype: list
+        """Nonlinearity factor ``(c2 * p) / c1`` of every perturbation bin, signed.
+
+        Parameters
+        ----------
+        p
+            Perturbation size in percent of the cross-section.
+
+        Returns
+        -------
+        list of float
+            ``ratio[i] * p / 100`` for each bin, as a fraction; ``nan`` where the ratio
+            is ``nan`` (``c1`` is 0).
         """
         # Convert p from percent to fraction (p/100)
         p_fraction = p / 100.0
         return [r * p_fraction if not np.isnan(r) else np.nan for r in self.ratio]
     
     def plot(self, ax=None, title=None, top_n=5):
-        """Plot the nonlinearity factor vs perturbation magnitude.
-        
-        The nonlinearity factor is plotted using absolute values for better comparison,
-        as the sign of the ratio doesn't provide valuable information in this context.
-        
-        :param ax: Optional existing axis to plot on
-        :type ax: matplotlib.axes.Axes, optional
-        :param title: Optional custom title for the plot
-        :type title: str, optional
-        :param top_n: Number of top absolute ratios to plot (0 means plot all)
-        :type top_n: int, optional
-        :returns: The axis containing the plot
-        :rtype: matplotlib.axes.Axes
+        """Plot ``|c2 / c1| * p`` against ``p`` (percent, 0 to 20), one line per bin.
+
+        The sign of the ratio is dropped. The ``p`` range is fixed. Bins whose ratio
+        is ``nan`` are not drawn.
+
+        Parameters
+        ----------
+        ax : matplotlib.axes.Axes, optional
+            Axis to draw on. None creates a figure of 8 by 4 inches.
+        title : str, optional
+            Title. None gives ``"MT <reaction> - <energy> MeV"``.
+        top_n
+            Number of bins drawn, those with the largest ``|ratio|`` (a ``nan`` counts
+            as 0). 0 draws every bin. The legend names each bin by its perturbation
+            energy range in MeV and its ``|ratio|``.
+
+        Returns
+        -------
+        matplotlib.axes.Axes
+            The axis drawn on.
         """
         if ax is None:
             # Use smaller figure size to match SensitivityData.plot_ratio()
@@ -256,30 +292,45 @@ class TaylorCoefficients:
 
 @dataclass
 class SensitivityData:
-    """Container class for sensitivity analysis data.
+    """Sensitivities of one nuclide to its cross-sections, for each detector energy bin.
 
-    :ivar tally_id: ID of the tally used for sensitivity calculation
-    :type tally_id: int
-    :ivar pert_energies: List of perturbation energy boundaries
-    :type pert_energies: List[float]
-    :ivar zaid: ZAID of the nuclide for which sensitivities were calculated
-    :type zaid: int
-    :ivar label: Label for the sensitivity data set
-    :type label: str
-    :ivar tally_name: Name of the tally
-    :type tally_name: str
-    :ivar data: Nested dictionary containing sensitivity coefficients organized by energy and reaction number
-    :type data: Dict[str, Dict[int, Coefficients]]
-    :ivar coefficients: Dictionary containing Taylor series coefficients organized by energy and reaction number
-    :type coefficients: Dict[str, Dict[int, TaylorCoefficients]]
-    :ivar lethargy: List of lethargy intervals between perturbation energies
-    :type lethargy: List[float]
-    :ivar energies: List of energy values used as keys in the data dictionary
-    :type energies: List[str]
-    :ivar reactions: Sorted list of unique reaction numbers found in the data
-    :type reactions: List[int]
-    :ivar nuclide: Nuclide symbol for the ZAID
-    :type nuclide: str
+    A user gets one from
+    :func:`~kika.sensitivities.sensitivity_processing.compute_sensitivity` or
+    :func:`~kika.sensitivities.sensitivity_processing.compute_total_sensitivity`. A
+    sensitivity is the relative coefficient ``(dR/R) / (d sigma / sigma)`` of the tally
+    result ``R`` (see :class:`~kika.sensitivities.sensitivity.Coefficients`), per
+    perturbation energy bin and not per unit lethargy. ``data`` and ``coefficients`` are keyed first by detector energy bin
+    (``"lower_upper"`` in MeV, formatted ``.2e``, the first lower bound being 0.0; or
+    ``"integral"`` for the tally's total energy bin, present only when the tally has
+    one) and then by reaction number (MT).
+
+    Attributes
+    ----------
+    tally_id : int
+        Tally number the sensitivities come from.
+    pert_energies : list of float
+        Perturbation bin boundaries in MeV, the ``ERG=`` values of the PERT cards in
+        ascending order.
+    zaid : int
+        ZAID of the perturbed nuclide.
+    label : str
+        Free label of the data set.
+    tally_name : str, optional
+        Comment of the tally in the MCTAL file; None when built by hand.
+    data : dict of str to dict of int to Coefficients
+        First-order sensitivities by detector energy bin and MT. With None,
+        ``energies`` and ``reactions`` are empty.
+    coefficients : dict of str to dict of int to TaylorCoefficients
+        The Taylor coefficients by detector energy bin and MT. Empty when the PERT
+        cards have no METHOD=3 cards.
+    lethargy : list of float
+        ``ln(E[i+1] / E[i])`` of each perturbation bin. Set on construction.
+    energies : list of str
+        The keys of ``data``. Set on construction.
+    reactions : list of int
+        Sorted MT numbers present under any key of ``data``. Set on construction.
+    nuclide : str
+        Symbol of ``zaid``, such as ``"Fe-56"``. Set on construction.
     """
     tally_id: int
     pert_energies: list[float]
@@ -417,24 +468,28 @@ class SensitivityData:
             plt.show()
 
     def plot_ratio(self, energy: Union[str, List[str]] = None, reaction: Union[List[int], int] = None, top_n: int = 5):
-        """Plot ratio of second-order to first-order sensitivity coefficients.
-        
-        The ratio is calculated as:
-            R = (c2 * p) / c1
-        
-        Where:
-            - c2 is the second-order coefficient
-            - c1 is the first-order coefficient
-            - p is the perturbation fraction
+        """Plot the nonlinearity ``|c2 / c1| * p`` of the Taylor coefficients.
 
-        :param energy: Energy string(s) to plot. If None, plots all energies
-        :type energy: Union[str, List[str]], optional
-        :param reaction: Reaction number(s) to plot. If None, plots all reactions
-        :type reaction: Union[List[int], int], optional
-        :param top_n: Number of top absolute ratios to plot with labels (0 means plot all)
-        :type top_n: int, optional
-        :raises ValueError: If sensitivity data does not contain Taylor coefficients
-        :raises ValueError: If specified energies are not found in the data
+        One figure per detector energy, with one panel per reaction, each drawn by
+        :meth:`TaylorCoefficients.plot` (``p`` from 0 to 20 %). A reaction missing
+        from a detector energy gets a panel saying so. The figures are shown, and
+        nothing is returned.
+
+        Parameters
+        ----------
+        energy : str or list of str, optional
+            Detector energy keys of ``coefficients`` to plot. None plots all of them.
+        reaction : int or list of int, optional
+            MT numbers to plot. None plots every MT found under any detector energy
+            of ``coefficients``, in ascending order.
+        top_n
+            Bins drawn per panel, those with the largest ``|c2 / c1|``; 0 draws all.
+
+        Raises
+        ------
+        ValueError
+            If ``coefficients`` is empty (no METHOD=3 results), or an *energy* is not
+            a key of ``coefficients``.
         """
         if not self.coefficients:
             raise ValueError("Taylor coefficients are required for ratio plots. Please recompute sensitivity with include_second_order=True.")
@@ -509,20 +564,27 @@ class SensitivityData:
             plt.show()
             
     def to_dataframe(self) -> pd.DataFrame:
-        """Export sensitivity data as a pandas DataFrame for plotting.
+        """Sensitivities as a long table, one row per detector bin, reaction and bin.
 
-        :returns: DataFrame with the following columns:
-            - det_energy: Detector energy range string (e.g., "0.00e+00_1.00e-01") or 'integral'
-            - energy_lower: Lower energy boundary parsed from det_energy string (None for 'integral')
-            - energy_upper: Upper energy boundary parsed from det_energy string (None for 'integral')
-            - reaction: Reaction number (MT)
-            - e_lower: Lower boundary of perturbation energy bin
-            - e_upper: Upper boundary of perturbation energy bin
-            - sensitivity: Sensitivity per lethargy value
-            - error: Relative error value for the sensitivity
-            - label: Sensitivity data label
-            - tally_name: Name of the tally
-        :rtype: pd.DataFrame
+        Returns
+        -------
+        pandas.DataFrame
+            Columns:
+
+            - ``det_energy``: detector energy key, ``"lower_upper"`` or ``"integral"``.
+            - ``energy_lower``, ``energy_upper``: the two bounds of ``det_energy`` in
+              MeV; ``"integral"`` rows have None, which becomes ``nan`` when the
+              frame also has ``"lower_upper"`` rows.
+            - ``reaction``: MT number.
+            - ``e_lower``, ``e_upper``: perturbation bin bounds in MeV.
+            - ``sensitivity``: the sensitivity **per unit lethargy**, the stored value
+              divided by the bin's ``ln(e_upper / e_lower)``.
+            - ``error``: the one-sigma error on ``sensitivity`` as an absolute value
+              per unit lethargy, ``value * relative error / lethargy``. It carries the
+              sign of ``value``, so it is negative where the sensitivity is.
+            - ``label``, ``tally_name``: those of this object.
+
+            An object with no data gives an empty frame without columns.
         """
         data_records = []
 
@@ -741,31 +803,47 @@ class SensitivityData:
                             e_bins: List[int] = None,
                             n_sigma: float = 1.0,
                             print_coefficients: bool = False):
-        """Plot perturbed response as a function of perturbation magnitude.
-        
-        Compares first-order approximation R(p) = R0 + c1*p with 
-        second-order approximation R(p) = R0 + c1*p + c2*p^2.
-        
-        :param energy: Energy string(s) to plot. If None, plots all energies
-        :type energy: Union[str, List[str]], optional
-        :param reaction: Reaction number(s) to plot. If None, plots all reactions
-        :type reaction: Union[List[int], int], optional
-        :param p_range: Range of perturbation magnitudes as (min%, max%) in percent
-        :type p_range: tuple, optional
-        :param n_points: Number of points to evaluate for plotting
-        :type n_points: int, optional
-        :param top_n: Number of perturbation energy bins with highest nonlinearity to show.
-                    If 0, shows all bins.
-        :type top_n: int, optional
-        :param e_bins: Specific indices of perturbation energy bins to plot.
-                      Overrides top_n if provided.
-        :type e_bins: List[int], optional
-        :param n_sigma: Number of standard deviations to show in error bands
-        :type n_sigma: float, optional
-        :param print_coefficients: Whether to print detailed coefficient info to console instead of on plot
-        :type print_coefficients: bool, optional
-        :raises ValueError: If sensitivity data does not contain Taylor coefficients
-        :raises ValueError: If specified energies are not found in the data
+        """Plot the first-order and second-order response against the perturbation.
+
+        Draws ``R(p) = R0 + c1 * p`` and ``R(p) = R0 + c1 * p + c2 * p**2``, with
+        ``p`` the fractional change of the cross-section, for each selected
+        perturbation bin: one figure per (detector energy, reaction), one panel per
+        bin. The bands are ``n_sigma`` times the propagated one-sigma error, from the
+        absolute errors of ``R0``, ``c1`` and ``c2`` added in quadrature (``c1`` and
+        ``c2`` errors scaled by ``p`` and ``p**2``). A reaction missing from a
+        detector energy is skipped. The figures are shown, and nothing is returned.
+
+        Parameters
+        ----------
+        energy : str or list of str, optional
+            Detector energy keys of ``coefficients`` to plot. None plots all of them.
+        reaction : int or list of int, optional
+            MT numbers to plot. None plots every MT found in ``coefficients``.
+        p_range
+            ``(min, max)`` of ``p`` in percent.
+        n_points
+            Number of ``p`` values, evenly spaced over *p_range*.
+        top_n
+            Bins drawn, those where the second-order term is the largest share of the
+            second-order response at the largest ``|p|`` of *p_range*; 0 draws all.
+            Ignored when *e_bins* is given.
+        e_bins : list of int, optional
+            Indices of the perturbation bins to draw (indices past the last bin are
+            dropped).
+        n_sigma
+            Half-width of the error bands, in standard deviations.
+        print_coefficients
+            If True, print ``R0``, ``c1``, ``c2`` and ``c2 / c1`` with their errors for
+            each bin, instead of writing them on the panel.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        ValueError
+            If ``coefficients`` is empty, or an *energy* is not a key of it.
         """
         # Use internal helper method to handle the common parts of plotting
         return self._plot_perturbed_data(energy, reaction, p_range, n_points, top_n, 
@@ -780,31 +858,48 @@ class SensitivityData:
                             e_bins: List[int] = None,
                             n_sigma: float = 1.0,
                             print_coefficients: bool = False):
-        """Plot the contribution of second-order term as percentage of the total response.
-        
-        This shows how much of the total second-order response comes from the second-order term (c2*p²),
-        which indicates the error introduced when using only first-order approximation.
-        
-        :param energy: Energy string(s) to plot. If None, plots all energies
-        :type energy: Union[str, List[str]], optional
-        :param reaction: Reaction number(s) to plot. If None, plots all reactions
-        :type reaction: Union[List[int], int], optional
-        :param p_range: Range of perturbation magnitudes as (min%, max%) in percent
-        :type p_range: tuple, optional
-        :param n_points: Number of points to evaluate for plotting
-        :type n_points: int, optional
-        :param top_n: Number of perturbation energy bins with highest second-order contribution to show.
-                    If 0, shows all bins.
-        :type top_n: int, optional
-        :param e_bins: Specific indices of perturbation energy bins to plot.
-                      Overrides top_n if provided.
-        :type e_bins: List[int], optional
-        :param n_sigma: Number of standard deviations to show in error bands
-        :type n_sigma: float, optional
-        :param print_coefficients: Whether to print detailed coefficient info to console instead of on plot
-        :type print_coefficients: bool, optional
-        :raises ValueError: If sensitivity data does not contain Taylor coefficients
-        :raises ValueError: If specified energies are not found in the data
+        """Plot the share of the second-order term in the second-order response.
+
+        Draws ``100 * c2 * p**2 / (R0 + c1 * p + c2 * p**2)`` in percent against ``p``,
+        the fractional change of the cross-section, for each selected perturbation bin:
+        one figure per (detector energy, reaction), one panel per bin. The band is
+        ``+/- |share| * n_sigma * sqrt(rc**2 + (n_sigma * rs)**2)``, with ``rc`` the
+        relative error of ``c2`` and ``rs`` the relative error of the second-order
+        response (assumed independent). ``n_sigma`` therefore enters twice, the second
+        time inside the root, and the band is not ``n_sigma`` standard deviations
+        unless ``n_sigma`` is 1. A reaction missing from a detector energy is
+        skipped. The figures are shown, and nothing is returned.
+
+        Parameters
+        ----------
+        energy : str or list of str, optional
+            Detector energy keys of ``coefficients`` to plot. None plots all of them.
+        reaction : int or list of int, optional
+            MT numbers to plot. None plots every MT found in ``coefficients``.
+        p_range
+            ``(min, max)`` of ``p`` in percent.
+        n_points
+            Number of ``p`` values, evenly spaced over *p_range*.
+        top_n
+            Bins drawn, those with the largest share at the largest ``|p|`` of
+            *p_range*; 0 draws all. Ignored when *e_bins* is given.
+        e_bins : list of int, optional
+            Indices of the perturbation bins to draw (indices past the last bin are
+            dropped).
+        n_sigma
+            Half-width of the error band, in standard deviations.
+        print_coefficients
+            If True, print ``R0``, ``c1``, ``c2`` and ``c2 / c1`` with their errors for
+            each bin, instead of writing them on the panel.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        ValueError
+            If ``coefficients`` is empty, or an *energy* is not a key of it.
         """
         # Use internal helper method with 'difference' plot type
         return self._plot_perturbed_data(energy, reaction, p_range, n_points, top_n, 
@@ -1074,26 +1169,40 @@ class SensitivityData:
 
 @dataclass
 class Coefficients:
-    """Container for sensitivity coefficients for a specific energy and reaction.
+    """First-order sensitivities of one detector energy bin to one reaction.
 
-    :ivar energy: Energy range string in format "lower_upper" (e.g., "0.00e+00_1.00e-01")
-    :type energy: str
-    :ivar reaction: Reaction number
-    :type reaction: int
-    :ivar pert_energies: Perturbation energy boundaries
-    :type pert_energies: List[float]
-    :ivar values: Sensitivity coefficient values (first-order)
-    :type values: List[float]
-    :ivar errors: Relative errors for the sensitivity coefficients (first-order)
-    :type errors: List[float]
-    :ivar r0: Unperturbed tally result
-    :type r0: float
-    :ivar e0: Unperturbed tally error
-    :type e0: float
-    :ivar values_second: Second-order sensitivity coefficient values
-    :type values_second: List[float], optional
-    :ivar errors_second: Relative errors for the second-order sensitivity coefficients
-    :type errors_second: List[float], optional
+    A user reads them from ``SensitivityData.data``. Each value is ``c1 / R0``: the
+    METHOD=2 PERT value ``c1`` of one perturbation bin (MCNP's first-order term)
+    divided by the unperturbed result ``R0``. It is the relative sensitivity
+    ``(dR/R) / (d sigma / sigma)`` only for the +100 % perturbation that
+    :func:`~kika.mcnp.pert_generator.perturb_material` writes; nothing checks the size
+    of other cards. It is a value per bin, not per unit lethargy
+    (:attr:`values_per_lethargy` divides by the bin's lethargy width).
+
+    Attributes
+    ----------
+    energy : str
+        Detector energy bin, ``"lower_upper"`` in MeV (for example
+        ``"0.00e+00_1.00e-01"``), or ``"integral"``.
+    reaction : int
+        Reaction number (MT).
+    pert_energies : list of float
+        Perturbation bin boundaries in MeV, ``len(values) + 1`` values.
+    values : list of float
+        Sensitivity of each perturbation bin, dimensionless.
+    errors : list of float
+        Relative one-sigma error of each value (a fraction of the value). From
+        :func:`~kika.sensitivities.sensitivity_processing.compute_sensitivity` it is
+        the relative errors of ``c1`` and of ``R0`` added in quadrature, which treats
+        them as independent.
+    r0 : float, optional
+        Unperturbed tally result ``R0``, in tally units.
+    e0 : float, optional
+        Relative one-sigma error of ``r0`` (a fraction, not an absolute error).
+    values_second, errors_second : list of float, optional
+        Second-order values and their relative errors. kika neither fills nor reads
+        them; the second-order terms are in
+        :class:`~kika.sensitivities.sensitivity.TaylorCoefficients`.
     """
     energy: str
     reaction: int
@@ -1107,34 +1216,33 @@ class Coefficients:
 
     @property
     def lethargy(self):
-        """Calculate lethargy intervals between perturbation energies.
+        """Lethargy width of each perturbation bin, ``ln(E[i+1] / E[i])``.
 
-        :returns: List of lethargy intervals
-        :rtype: List[float]
+        One dimensionless value per bin, from ``pert_energies``; positive for an
+        ascending grid.
         """
         return [np.log(self.pert_energies[i+1]/self.pert_energies[i]) for i in range(len(self.pert_energies)-1)]
     
     @property
     def values_per_lethargy(self):
-        """Calculate sensitivity coefficients per unit lethargy.
+        """Sensitivity of each bin per unit lethargy, ``values[i] / lethargy[i]``.
 
-        :returns: Sensitivity coefficients normalized by lethargy intervals
-        :rtype: List[float]
+        One value per perturbation bin. The relative errors are unchanged by the
+        division.
         """
         lethargy_vals = self.lethargy
         return [self.values[i]/lethargy_vals[i] for i in range(len(lethargy_vals))]
     
     def to_dataframe(self) -> pd.DataFrame:
-        """Convert coefficients data to a pandas DataFrame.
-        
-        :returns: DataFrame with columns:
-            - energy: Energy range string (detector energy)
-            - reaction: Reaction number (MT)
-            - e_lower: Lower boundary of perturbation energy bin
-            - e_upper: Upper boundary of perturbation energy bin
-            - sensitivity: Sensitivity coefficient value
-            - error: Relative error of the coefficient
-        :rtype: pd.DataFrame
+        """The sensitivities as a table with one row per perturbation bin.
+
+        Returns
+        -------
+        pandas.DataFrame
+            Columns ``energy`` (the detector energy key), ``reaction`` (MT),
+            ``e_lower`` and ``e_upper`` (bin bounds in MeV), ``sensitivity`` (the
+            value per bin, **not** per unit lethargy) and ``error`` (its relative
+            one-sigma error, a fraction).
         """
         # Create a list to hold the data for each row
         data = []
@@ -1164,31 +1272,38 @@ class Coefficients:
         label: str = None,
         **styling_kwargs,
     ) -> Union['MultigroupCrossSectionPlotData', Tuple['MultigroupCrossSectionPlotData', 'UncertaintyBand']]:
-        """Convert sensitivity coefficients into PlotData objects.
+        """Step-plot data of the sensitivities, with an optional uncertainty band.
 
-        Returns a :class:`~kika.plotting.MultigroupCrossSectionPlotData` (step plot) and,
-        optionally, an :class:`~kika.plotting.UncertaintyBand` suitable for
-        :class:`~kika.plotting.PlotBuilder`.
+        The step plot is on the perturbation bin boundaries in MeV, for the
+        :class:`~kika.plotting.PlotBuilder`. The band is given as a relative
+        uncertainty: the relative errors of ``errors``, which the division by lethargy
+        leaves unchanged.
 
-        :param per_lethargy: If True, normalise sensitivity values by the lethargy
-            width of each bin (matches ``Coefficients.plot()`` behaviour).
-        :type per_lethargy: bool
-        :param uncertainty: If True, return an ``UncertaintyBand`` alongside the
-            nominal data.
-        :type uncertainty: bool
-        :param sigma: Sigma multiplier for the uncertainty band.
-        :type sigma: float
-        :param uncertainty_style: Rendering style for the uncertainty band:
-            ``'errorbar'`` (default) or ``'band'``.
-        :type uncertainty_style: str
-        :param label: Legend label. Auto-generated as
-            ``"<reaction_name> (MT<reaction>)"`` when *None*.
-        :type label: str, optional
-        :param styling_kwargs: Forwarded to ``MultigroupCrossSectionPlotData``
-            (``color``, ``linestyle``, ``linewidth``, etc.).
-        :returns: ``MultigroupCrossSectionPlotData`` when *uncertainty=False*,
-            or ``(MultigroupCrossSectionPlotData, UncertaintyBand)`` when *uncertainty=True*.
-        :rtype: MultigroupCrossSectionPlotData or Tuple[MultigroupCrossSectionPlotData, UncertaintyBand]
+        Parameters
+        ----------
+        per_lethargy
+            If True the values are divided by the lethargy width of each bin, as
+            :meth:`plot` does. If False they are the values per bin.
+        uncertainty
+            If True an uncertainty band is returned with the data.
+        sigma
+            Number of standard deviations of the band.
+        uncertainty_style : {"errorbar", "band"}
+            How the band is drawn.
+        label : str, optional
+            Legend label. None gives ``"<reaction name> (MT<reaction>)"``, the name
+            being ``MT<reaction>`` when the number has no known name.
+        **styling_kwargs
+            Passed to :class:`~kika.plotting.MultigroupCrossSectionPlotData`
+            (``color``, ``linestyle``, ``linewidth``, ...).
+
+        Returns
+        -------
+        ~kika.plotting.MultigroupCrossSectionPlotData or tuple
+            The data alone when *uncertainty* is False. Otherwise the pair
+            ``(data, band)`` with the band an
+            :class:`~kika.plotting.UncertaintyBand`; the band's own label is
+            ``"<label> (<sigma>σ)"`` when *sigma* is not 1 and None otherwise.
         """
         from kika.plotting import MultigroupCrossSectionPlotData, UncertaintyBand
 
@@ -1400,16 +1515,26 @@ class Coefficients:
             ax.set_xlim(x_min, x_max)
         
     def plot(self, ax=None, xlim=None, xlog=False):
-        """Create a new plot of sensitivity coefficients.
+        """Plot the sensitivity per unit lethargy against energy in MeV, as steps.
 
-        :param ax: Optional existing axis to plot on
-        :type ax: matplotlib.axes.Axes, optional
-        :param xlim: Optional x-axis limits as (min, max). If None, smart limits are applied.
-        :type xlim: tuple, optional
-        :param xlog: Whether to use logarithmic scale for x-axis
-        :type xlog: bool, optional
-        :returns: The axis containing the plot
-        :rtype: matplotlib.axes.Axes
+        Error bars at the middle of each bin are ``|value * relative error /
+        lethargy|`` (one sigma).
+
+        Parameters
+        ----------
+        ax : matplotlib.axes.Axes, optional
+            Axis to draw on. None creates a figure of 5 by 4 inches.
+        xlim : tuple of float, optional
+            ``(min, max)`` of the energy axis in MeV. None trims the range to the
+            non-zero bins, keeping one zero bin on each side where there is one (the
+            full range when every value is zero).
+        xlog
+            If True the energy axis is logarithmic.
+
+        Returns
+        -------
+        matplotlib.axes.Axes
+            The axis drawn on.
         """
         if ax is None:
             fig, ax = plt.subplots(figsize=(5, 4))

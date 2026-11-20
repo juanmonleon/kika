@@ -268,6 +268,13 @@ def read_serpent_materials(
 ) -> MaterialCollection:
     """Parse all materials from a Serpent input file.
 
+    Each ``mat`` card becomes a material named as in the card. A negative nuclide
+    fraction is a weight fraction (``'wo'``) and a positive one an atomic fraction
+    (``'ao'``); the stored fraction is the absolute value. A negative card density
+    is stored as g/cc and a positive one as atoms/b-cm. A density of ``sum`` stores
+    no density (``density`` stays None) and sets
+    ``metadata["serpent_density_sum"] = True``.
+
     Parameters
     ----------
     source : str, Path, or list of str
@@ -275,8 +282,13 @@ def read_serpent_materials(
 
     Returns
     -------
-    MaterialCollection
-        Collection of parsed materials with auto-assigned numeric IDs.
+    ~kika.mcnp.material.MaterialCollection
+        Materials keyed by IDs assigned 1, 2, ... in file order.
+
+    Raises
+    ------
+    ValueError
+        If a material mixes positive and negative nuclide fractions.
     """
     if isinstance(source, (str, Path)):
         with open(source, "r") as f:

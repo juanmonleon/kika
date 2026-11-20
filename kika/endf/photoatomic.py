@@ -70,6 +70,12 @@ def _z_and_za(endf) -> Tuple[Optional[int], Optional[float]]:
 def photoatomic_summary(endf) -> dict:
     """What the photo-atomic files of *endf* hold, without the arrays.
 
+    Parameters
+    ----------
+    endf : ENDF
+        A tape read with :func:`kika.endf.read_endf` or :func:`kika.endf.open_endf`.
+        MF23, MF27 and MF28 that are not on it are left out (empty lists).
+
     Returns
     -------
     dict
@@ -150,6 +156,20 @@ def photoatomic_cross_sections(endf, mts: Optional[Iterable[int]] = None
     because the subshells present differ from element to element. Each MT
     keeps its own grid: the evaluations are not on a common one, and
     interpolating them onto one would hide the photoelectric edges.
+
+    Parameters
+    ----------
+    endf : ENDF
+        A tape read with :func:`kika.endf.read_endf` or :func:`kika.endf.open_endf`.
+    mts : iterable of int, optional
+        The MTs to return. None returns every MF23 section, in ascending MT.
+
+    Returns
+    -------
+    dict
+        ``{mt: (energies, sigma)}``, two float arrays of equal length, in the
+        tape's units (eV and barns, not converted). Empty when the tape has no
+        MF23.
     """
     return _tables(endf, 23, mts)
 
@@ -161,5 +181,20 @@ def form_factors(endf, mts: Optional[Iterable[int]] = None
     ``x`` is ``sin(θ/2)/λ`` in 1/Å for MT 502 (coherent form factor F) and
     504 (incoherent scattering function S); it is the photon energy in eV for
     505 and 506 (imaginary and real anomalous scattering factors).
+
+    Parameters
+    ----------
+    endf : ENDF
+        A tape read with :func:`kika.endf.read_endf` or :func:`kika.endf.open_endf`.
+    mts : iterable of int, optional
+        The MTs to return; one the tape lacks is left out. None returns every
+        MF27 section, in ascending MT.
+
+    Returns
+    -------
+    dict
+        ``{mt: (x, value)}``, two float arrays of equal length, with ``x`` as
+        above and the values as the tape writes them (not converted). Empty
+        when the tape has no MF27.
     """
     return _tables(endf, 27, mts)

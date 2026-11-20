@@ -111,8 +111,129 @@ def perturb_nubar_files(
 ) -> Dict[str, Any]:
     """Perturb MF1 nu-bar from MF31 covariance, optionally regenerating ACE.
 
-    Returns a per-ZAID summary dict (sample counts, NJOY successes, the nu-bar
-    MTs perturbed, and the derived MT recomputed from the sum rule).
+    The relative MF31 covariance of the selected nu-bar MTs (452 total, 455
+    delayed, 456 prompt) is assembled on the union of its energy bins (eV) and
+    ``num_samples`` factor sets are drawn. The factor of a bin multiplies the
+    tabulated nu-bar of its MT inside the bin, and energies outside the
+    covariance keep factor 1. One tape is written per sample, with the MF1
+    tables of 452, 455 and 456 replaced.
+
+    The total is kept equal to the sum of its parts. When MF1 holds the whole
+    family (452, 455 and 456), the member named by *derived_mt* (452 by default)
+    is not perturbed with its own factors: it is rebuilt as the sum (or, for a
+    component, the difference) of the others, which also removes whatever residual
+    of the sum rule the input tape carries. A component with no MF31 covariance
+    takes the factor of the total when the total has one, and stays at baseline
+    otherwise. With an incomplete family nothing is derived and each member with
+    a covariance is perturbed on its own.
+
+    Before the draw, the covariance gets a rescale of the bins whose variance
+    exceeds 1000 times the median of their MT, a cap on the relative standard
+    deviation (*max_relative_std*) and then the repair named by *psd_method*;
+    no threshold rescale applies to nu-bar. Bins with no stated variance are left
+    out of the decomposition and get factor 1. The factors are ``float32``, every
+    file of a call uses the same *seed*, and every direction of the matrix is
+    drawn, null ones included (with ``"svd"``, a direction of negative variance
+    with the magnitude of its eigenvalue).
+
+    Per-file failures are logged and recorded in the returned summary as
+    ``{"error": message}``; a tape whose ZAID cannot be read is logged and
+    skipped without an entry.
+
+    Parameters
+    ----------
+    endf_files : str or list of str
+        ENDF tape(s) with an MF31.
+    num_samples : int
+        Number of samples per file.
+    mt_list : list of int or list of list of int, optional
+        MF31 MTs to perturb (452, 455, 456): a flat list for every file or one list
+        per file. None takes every MT of MF31. There are no negative entries
+        here: the list is the selection, and an MT absent from MF31 is dropped
+        with a warning. An empty list selects nothing and fails each file.
+    generate_ace : bool
+        Run NJOY on each perturbed tape, for each temperature. Needs *njoy_exe*.
+    space : {"log", "linear"}
+        ``"log"`` draws lognormal factors of unit mean that reproduce the
+        relative covariance; ``"linear"`` draws ``1 + X``.
+    decomposition_method : {"svd", "eigen"}
+        As in :func:`kika.sampling.core.draw_samples`.
+    sampling_method : {"sobol", "lhs", "random"}
+        As in :func:`kika.sampling.core.draw_samples`.
+    psd_method : {"auto", "higham", "clip", "clip_rescale", "none"}
+        As in :func:`kika.sampling.core.draw_samples`.
+    autofix : {None, "soft", "medium", "hard"}
+        Level of the covariance's own ``fix_covariance`` repair, applied before
+        the draw; None applies none. A level that cannot bring the matrix to its
+        threshold fails that file (``"soft"`` goes on to the decomposition
+        anyway).
+    max_relative_std : float, optional
+        Cap on the relative standard deviation of every bin (3.0 is 300 %); None
+        applies no cap.
+    derived_mt : int, optional
+        The family member rebuilt from the others; None is 452.
+    njoy_exe : str, optional
+        NJOY executable; required with *generate_ace*.
+    ace_temperatures : sequence of float, optional
+        Temperatures in K; None gives 293.6 K. Only used with *generate_ace*.
+    ace_extensions : sequence of str, optional
+        ACE extension of each temperature; a list of another length is ignored
+        with a warning.
+    ace_library_name : str, optional
+        Library name handed to NJOY; None gives ``"endfb81"``.
+    ace_njoy_version : str
+        NJOY version string for the metadata and titles.
+    xsdir_file : str, optional
+        Baseline xsdir; for each sample a copy named ``<stem>_<NNNN>`` in
+        ``output_dir/xsdir`` has the entry of each ACE table replaced or added.
+    output_dir : str
+        Root of everything written (created if missing); see *Notes*.
+    seed : int, optional
+        Base seed; None draws a different ensemble at each call.
+    dry_run : bool
+        Draw and write the factors only: no tape and no NJOY.
+    verbose_diagnostics : int
+        0 is quiet, 1 prints summaries, 2 prints per MT.
+    log_file : str, optional
+        Log file to append to. None starts ``nubar_perturbation_<timestamp>.log``
+        in *output_dir*.
+
+    Returns
+    -------
+    dict
+        ``timestamp``, ``log_file``, ``output_dir`` (absolute), ``master_matrix``
+        (path of the factors parquet, or ``""`` when none was written) and
+        ``isotopes``: ``{str(zaid): summary}``. A summary has ``mts_perturbed``
+        (the MTs sampled), ``mts_applied`` (those that received their own block:
+        the derived one is sampled and discarded), ``derived_mt`` (None when the
+        family is incomplete), ``sum_rule_residual`` (how far the input tape is
+        from the sum rule, or None), ``n_native_bins`` and ``n_samples``; unless
+        *dry_run*, also ``factor_diagnostics``, ``n_endf_ok``, ``n_ace_ok`` and
+        ``fix_info``; for a failed file only ``error``.
+
+    Raises
+    ------
+    ValueError
+        If *generate_ace* is true and *njoy_exe* is None, or *mt_list* is a
+        list of lists whose length is not that of *endf_files*.
+
+    Notes
+    -----
+    Written under *output_dir*, with the sample number ``NNNN`` from 1 and
+    ``base`` the input file name without extension:
+
+    - ``endf/<zaid>/<NNNN>/<base>_<NNNN><ext>``: the perturbed tape (an existing
+      file is overwritten).
+    - ``perturbation_matrix_<timestamp>_master.parquet`` and
+      ``perturbation_matrix_<timestamp>_metadata.json``: one row per sample, a
+      ``Sample_ID`` column from 1 and one ``float32`` column per MT and bin,
+      ``<symbol>_MT<mt>_<lower>_<upper>``. The columns of a derived MT are
+      present although its factors are not applied; the metadata lists
+      ``mts_sampled`` and ``mts_applied``.
+    - ``nubar_perturbation_<timestamp>.log``, unless *log_file* is given.
+    - With *generate_ace*: ``ace/<NNNN>/`` (ACE files; ``ace/<NNNN>/xsdir/`` for
+      the xsdir lines), ``njoy_files/<NNNN>/`` and, with *xsdir_file*,
+      ``xsdir/<stem>_<NNNN>``.
     """
     global _logger
 

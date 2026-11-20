@@ -5,7 +5,7 @@ difference there. Here that is done three ways:
 
 * two tables against each other (:func:`read_pair`, then :func:`difference`),
   on the union of their grids or on one of them
-  (:func:`~kika.algebra.arithmetic.on_common_grid`);
+  (:func:`~kika.algebra.on_common_grid`);
 * a table against window averages (:func:`window_difference`): the table is
   read at each window's centre, by its own law, and compared value by value;
 * a table against group averages (:func:`steps_difference`): inside each group
@@ -20,7 +20,7 @@ that touches it is ``nan`` -- what ``numpy.interp`` gave the comparison before
 it moved onto this package.
 
 *method* names the law a table is read with, from the reader's side
-(:func:`~kika.algebra.laws.method_laws`). A relative difference divides by the
+(:func:`~kika.algebra.method_laws`). A relative difference divides by the
 reference, and is ``nan`` where the reference is zero.
 """
 from __future__ import annotations
@@ -73,12 +73,39 @@ def interpolate_to_grid(x_target, x_source, y_source, method: str = 'log-log',
 
     A repeated source abscissa is a step, and a repeated target abscissa in a
     non-decreasing *x_target* reads its left then its right limit
-    (:func:`~kika.algebra.evaluate.sample_on_union`). Targets outside the
+    (:func:`~kika.algebra.sample_on_union`). Targets outside the
     source range get *fill_value*, ``nan`` by default so they are seen; a
     target in an interval that touches a hole of the source is ``nan``.
     *method* is ``'log-log'``, ``'lin-lin'``, ``'log-lin'`` (log x, linear y)
     or ``'lin-log'`` (linear x, log y); intervals where a log y has no value
-    are read linear in y (:func:`~kika.algebra.laws.method_laws`).
+    are read linear in y (:func:`~kika.algebra.method_laws`).
+
+    Parameters
+    ----------
+    x_target : array_like
+        Where to read the table.
+    x_source, y_source : array_like
+        The table: abscissae (non-decreasing) and ordinates, one-dimensional
+        and of one length. A non-finite ordinate is a hole.
+    method : {'log-log', 'lin-lin', 'log-lin', 'lin-log'}
+        The law the table is read with; a key of
+        ``kika.algebra.METHODS``.
+    fill_value : float
+        The value at a target outside the source range.
+
+    Returns
+    -------
+    numpy.ndarray
+        One value per target, of the shape of *x_target*. An empty source gives
+        *fill_value* everywhere.
+
+    Raises
+    ------
+    ValueError
+        If *x_source* and *y_source* differ in length; if *method* reads in
+        ``ln x`` (``'log-log'`` or ``'log-lin'``) and a target inside the source
+        range or a source abscissa is not positive; or, when some target lies
+        inside the source range, if *method* is not one of the four above.
     """
     x_src = np.asarray(x_source, dtype=float)
     y_src = np.asarray(y_source, dtype=float)
@@ -113,9 +140,35 @@ def read_pair(first: Tuple, second: Tuple, method: str = 'lin-lin',
     """Two tables ``(x, y)`` on one grid, over the span they share.
 
     *grid* is ``'union'`` or the index (0 or 1) of the table whose abscissae
-    are used (:func:`~kika.algebra.arithmetic.on_common_grid`, which says what
+    are used (:func:`~kika.algebra.on_common_grid`, which says what
     each choice can miss). Returns ``(u, values)``, ``values`` of shape
     ``(2, u.size)``, with ``nan`` wherever a table has a hole.
+
+    Parameters
+    ----------
+    first, second : tuple of array_like
+        Each table as ``(x, y)``: abscissae (non-decreasing) and ordinates,
+        one-dimensional and of one length. A non-finite ordinate is a hole.
+    method : {'lin-lin', 'log-lin', 'lin-log', 'log-log'}
+        The law both tables are read with; a key of
+        ``kika.algebra.METHODS``.
+    grid : {'union'} or int
+        ``'union'``, or 0 or 1 for the table whose abscissae are used.
+
+    Returns
+    -------
+    tuple of numpy.ndarray
+        ``(u, values)``: the abscissae over the shared span, and the readings
+        of the two tables as the rows of a ``(2, u.size)`` array.
+
+    Raises
+    ------
+    ValueError
+        If a table's *x* and *y* are not one-dimensional arrays of one length;
+        if *method* reads in ``ln x`` and a table has a non-positive abscissa
+        among its finite values; if *method* is not one of the four above; or
+        on the conditions of :func:`~kika.algebra.on_common_grid`
+        (no shared span, or *grid* a string other than ``'union'``).
     """
     tables, holes = [], []
     for x, y in (first, second):
@@ -134,6 +187,26 @@ def difference(reference, comparison, mode: Mode = 'relative',
 
     ``nan`` where either is not finite, and for a relative difference where the
     reference is zero. *percent* multiplies a relative difference by 100.
+
+    Parameters
+    ----------
+    reference, comparison : array_like
+        The two operands, of one shape.
+    mode : {'relative', 'absolute'}
+        ``'relative'`` divides the difference by *reference*.
+    percent : bool
+        Multiply a relative difference by 100. It does nothing in the absolute
+        mode.
+
+    Returns
+    -------
+    numpy.ndarray
+        The difference, of the shape of the operands.
+
+    Raises
+    ------
+    ValueError
+        If the operands differ in shape, or *mode* is not one of the two above.
     """
     ref = np.asarray(reference, dtype=float)
     cmp_ = np.asarray(comparison, dtype=float)
@@ -171,6 +244,37 @@ def window_difference(centres, averages, x, y, method: str = 'lin-lin', *,
     *average_is* says which operand is the reference. One value per centre,
     ``nan`` at a centre off the table. On a constant table, whose average is
     itself, it is zero.
+
+    Parameters
+    ----------
+    centres : array_like
+        The centres of the windows.
+    averages : array_like
+        The average over each window, of the shape of *centres*.
+    x, y : array_like
+        The table: abscissae (non-decreasing) and ordinates, one-dimensional
+        and of one length. A non-finite ordinate is a hole.
+    method : {'lin-lin', 'log-lin', 'lin-log', 'log-log'}
+        The law the table is read with; a key of
+        ``kika.algebra.METHODS``.
+    average_is : {'reference', 'comparison'}
+        Which operand the averages are; the table is the other one.
+    mode : {'relative', 'absolute'}
+        As in :func:`difference`.
+    percent : bool
+        As in :func:`difference`.
+
+    Returns
+    -------
+    numpy.ndarray
+        The difference at each centre, of the shape of *centres*.
+
+    Raises
+    ------
+    ValueError
+        If *centres* and *averages* differ in shape; if *average_is* or *mode*
+        is not one of the strings above; or on the conditions of
+        :func:`interpolate_to_grid`.
     """
     centres = np.asarray(centres, dtype=float)
     averages = np.asarray(averages, dtype=float)
@@ -192,6 +296,41 @@ def steps_difference(edges, averages, x, y, method: str = 'lin-lin', *,
     against the group below and the second against the group above, so the
     difference steps there as the averages do. A group whose average is not
     finite gives ``nan``.
+
+    Parameters
+    ----------
+    edges : array_like
+        The group boundaries: one-dimensional and strictly increasing.
+    averages : array_like
+        One average per group, ``len(edges) - 1`` values.
+    x, y : array_like
+        The table: abscissae (non-decreasing) and ordinates, one-dimensional
+        and of one length. A non-finite ordinate is a hole.
+    method : {'lin-lin', 'log-lin', 'lin-log', 'log-log'}
+        The law the table is read with; a key of
+        ``kika.algebra.METHODS``.
+    average_is : {'reference', 'comparison'}
+        Which operand the averages are; the table is the other one.
+    mode : {'relative', 'absolute'}
+        As in :func:`difference`.
+    percent : bool
+        As in :func:`difference`.
+
+    Returns
+    -------
+    tuple of numpy.ndarray
+        ``(u, diff)``: the abscissae, non-decreasing, and the difference there.
+        Both are empty when the table has fewer than two finite points or
+        shares no span of positive width with the groups.
+
+    Raises
+    ------
+    ValueError
+        If *edges* is not one-dimensional with ``len(averages) + 1`` values, or
+        is not strictly increasing; if *x* and *y* are not one-dimensional
+        arrays of one length; if *method* reads in ``ln x`` and a finite point
+        has a non-positive abscissa; if *method*, *average_is* or *mode* is not
+        one of the strings above.
     """
     edges = np.asarray(edges, dtype=float)
     averages = np.asarray(averages, dtype=float)

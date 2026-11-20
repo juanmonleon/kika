@@ -1,7 +1,7 @@
 """Thermal incoherent inelastic scattering tables from S(alpha, beta).
 
 kika's own THERMR + ACER for the ``incoherent_inelastic`` group of an OpenMC
-thermal file: from the model's :class:`~kika.nuclear_data.model.IncoherentInelastic`
+thermal file: from the model's ``IncoherentInelastic``
 law at one temperature, the inelastic cross section on THERMR's fixed incident
 grid and, at each incident energy, the outgoing-energy table with its pdf and
 cdf and the 16 equiprobable cosines at each outgoing energy -- the "continuous"
@@ -23,7 +23,7 @@ documented in the manual (``methods/processing/thermal-scattering-tables``).
 **Incident grid.** THERMR's fixed 118 energies (``EGRID``) are all kept, and a
 node is added at an interval's geometric midpoint wherever sigma read lin-lin there misses
 the exact value by more than 1e-3, or the neighbours' mixed moments miss <E'> by 1e-2
-(relative) or <mu> by 1e-2 (absolute) (:func:`_refine`). On the fixed grid sigma was up to
+(relative) or <mu> by 1e-2 (absolute) (``_refine``). On the fixed grid sigma was up to
 3-4 % off between nodes, and OpenMC samples the closer table's spectrum. The S(alpha, beta)
 tables get it; the free gas keeps THERMR's grid.
 
@@ -85,14 +85,35 @@ class ThermalInelasticOptions:
     ``iinc`` is THERMR's inelastic option: 2 the evaluation's S(alpha, beta),
     1 the free gas of the principal nuclide (:func:`freeGasTables`; there is
     no scattering law to read, so the input is the nuclide's neutron tape).
+
+    Attributes
+    ----------
+    tol : float
+        Relative tolerance of the adaptive outgoing-energy and cosine grids, a
+        fraction. Default 0.001.
+    nbin : int
+        Equiprobable cosines stored at each outgoing energy. Default 16.
+    iinc : int
+        2 reads the evaluation's S(alpha, beta) (:func:`inelasticTables`); 1 is the
+        free gas (:func:`freeGasTables`). Each function refuses the other value.
+    emax : float or None
+        Not used by :func:`freeGasTables`, which takes its own ``emax``.
+        :func:`inelasticTables` refuses any value but None: the S(alpha, beta)
+        path takes the evaluation's upper energy.
+    capacity : int
+        Most outgoing points one incident energy may have. Default 50000.
+    workers : int or None
+        Threads for the incident energies, which are independent (the tables do
+        not depend on it). None is ``KIKA_WORKERS`` when set, else the number of
+        cores, at most 8; 1 uses this thread only.
     """
 
     tol: float = 0.001
     nbin: int = 16
     iinc: int = 2
-    #: THERMR's card-4 ``emax`` (eV) for the free gas; ``None`` is 10 eV, the
-    #: top of THERMR's incident grid. The S(alpha, beta) path takes the
-    #: evaluation's B(4) and does not accept an override yet.
+    #: Reserved; must be ``None``. :func:`inelasticTables` refuses any other value
+    #: (the S(alpha, beta) path takes the evaluation's B(4)), and
+    #: :func:`freeGasTables` takes its upper energy from its own ``emax`` argument.
     emax: Optional[float] = None
     #: Outgoing points one incident energy may have.
     capacity: int = 50000
@@ -150,6 +171,36 @@ def thermalInputs(law, temperature: float, awr: Optional[float] = None) -> _Inpu
 
     ``awr`` overrides the principal atom's mass ratio (ENDF B(3), exactly as the
     tape states it; the model keeps it as a mass in amu).
+
+    Parameters
+    ----------
+    law
+        A model ``IncoherentInelastic`` whose principal atom has a tabulated
+        S(alpha, beta, T) kernel (``Gridded3d``). Other atoms may be
+        short-collision-time approximations (at most one).
+    temperature
+        Temperature in K. It must match a tabulated temperature within 0.2 %;
+        there is no interpolation in temperature.
+    awr
+        Mass ratio of the principal atom. None takes it from the law's mass.
+
+    Returns
+    -------
+    _Inputs
+        The inputs of the calculation, with attributes ``alpha`` and ``beta``
+        (grids), ``sab`` (ln S as a flat array, beta-major with alpha fastest,
+        floored at -225), ``az`` (mass ratio), ``sb`` (bound cross section of the
+        principal atom in b), ``az2``, ``sb2`` and ``teff2`` (the secondary atom,
+        zero if none), ``teff`` (effective kT in eV), ``tev`` (kT in eV), ``emax``
+        (upper incident energy of the law, in eV), ``lat``, ``lasym`` and ``cliq``
+        (THERMR's flags and liquid-branch constant) and ``iinc`` (2).
+
+    Raises
+    ------
+    ValueError
+        If the principal atom's kernel is not a tabulated S(alpha, beta, T), the
+        temperature is not tabulated, or there is more than one secondary
+        short-collision-time atom.
     """
     from kika.nuclear_data import model as m
 
@@ -209,6 +260,27 @@ def freeGasInputs(awr: float, temperature: float, emax: float) -> _Inputs:
     from the PENDF); the bound cross section is ``((awr+1)/awr)**2``, a free
     one of 1 b; no alpha table, ``lat = lasym = 0``. Above 3000 K THERMR
     rescales the incident grid (``break``); that is not ported, so it is refused.
+
+    Parameters
+    ----------
+    awr
+        Mass ratio of the nuclide, positive.
+    temperature
+        Temperature in K, above 0 and at most 3000.
+    emax
+        Upper incident energy in eV, positive.
+
+    Returns
+    -------
+    _Inputs
+        The inputs as for :func:`thermalInputs`, with ``iinc`` 1, the fixed beta
+        grid, ``sb = ((awr + 1) / awr) ** 2`` and ``tev = teff`` in eV.
+
+    Raises
+    ------
+    ValueError
+        If *awr* is not positive, *temperature* is outside (0, 3000] K or *emax* is
+        not positive.
     """
     if not awr > 0:
         raise ValueError(f"the free gas needs a mass ratio > 0, got {awr}")
@@ -306,6 +378,45 @@ def inelasticTables(law, temperature: float, *, nmix: int = 1, awr: Optional[flo
 
     The cross section is per molecule as OpenMC stores it (THERMR's per
     principal atom, divided by ``nmix`` as ACER divides it).
+
+    Parameters
+    ----------
+    law
+        A model ``IncoherentInelastic``; see :func:`thermalInputs`.
+    temperature
+        Temperature in K, one the law tabulates.
+    nmix
+        Divisor of the cross section (number of principal atoms per molecule).
+    awr
+        Overrides the principal atom's mass ratio. None takes the law's.
+    options : ThermalInelasticOptions
+        ``iinc`` must be 2 and ``emax`` None. Default options: ``tol=0.001``,
+        ``nbin=16``, ``capacity=50000``.
+    report
+        An object with a ``warn(str)`` method that receives a line describing the
+        method used. None records nothing.
+
+    Returns
+    -------
+    tuple
+        ``(cross section, EnergyAngularMC, energy_max)``: an ``XYs1d`` of the
+        inelastic cross section in b (per molecule) against incident energy in eV;
+        the model form holding the outgoing-energy tables and the *nbin*
+        equiprobable cosines at each outgoing energy for every incident energy;
+        and the highest incident energy in eV. The incident energies are
+        THERMR's fixed grid below the law's upper energy (a grid energy within
+        1e-5 eV of it or above it is left out), plus nodes added where
+        the cross section read lin-lin misses by more than 1e-3 (relative) or the
+        mean outgoing energy by 1e-2 (relative) or mean cosine by 1e-2 (absolute).
+
+    Raises
+    ------
+    ValueError
+        If ``options.iinc`` is not 2, ``options.emax`` is not None, or
+        :func:`thermalInputs` refuses the law or temperature.
+    ImportError
+        If the compiled thermal extension is missing or out of date (there is no
+        Python version).
     """
     if options.iinc != 2:
         raise ValueError(f"inelasticTables reads an S(alpha, beta) law (iinc=2); iinc="
@@ -325,6 +436,40 @@ def freeGasTables(awr: float, temperature: float, elastic, *, emax: float = 10.0
     at ``temperature`` as ``(E, sigma)`` arrays in eV and b (BROADR's MT2,
     which THERMR writes as the inelastic cross section); ``emax`` is THERMR's
     card-4 ``emax`` in eV. The distributions do not depend on ``elastic``.
+
+    Parameters
+    ----------
+    awr
+        Mass ratio of the nuclide, positive.
+    temperature
+        Temperature in K, above 0 and at most 3000.
+    elastic
+        ``(E, sigma)``: energies in eV (one-dimensional, non-decreasing, at least
+        two) and elastic cross sections in b. It must cover every incident energy
+        used. Read lin-lin, it becomes the returned cross section.
+    emax
+        Highest incident energy in eV, positive. The incident energies are
+        THERMR's fixed grid below it (no refinement). ``options.emax`` is not read.
+    nmix
+        Divisor of the cross section.
+    options : ThermalInelasticOptions
+        ``iinc`` must be 1; the default sets it.
+    report
+        As in :func:`inelasticTables`.
+
+    Returns
+    -------
+    tuple
+        ``(cross section, EnergyAngularMC, energy_max)`` as in
+        :func:`inelasticTables`; the cross section is *elastic* divided by *nmix*.
+
+    Raises
+    ------
+    ValueError
+        If ``options.iinc`` is not 1, *elastic* is malformed or does not reach an
+        incident energy, or *awr*, *temperature* or *emax* is out of range.
+    ImportError
+        If the compiled thermal extension is missing or out of date.
     """
     if options.iinc != 1:
         raise ValueError(f"freeGasTables is THERMR's iinc=1; the options say iinc={options.iinc}")

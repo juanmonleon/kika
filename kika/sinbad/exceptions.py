@@ -26,7 +26,7 @@ class SinbadFormatError(SinbadError):
 class LabelNotFoundError(SinbadError, KeyError):
     """No object in the benchmark (or its calculations) carries this label.
 
-    Derives from :class:`KeyError` as well, because labels are looked up with
+    Derives from ``KeyError`` as well, because labels are looked up with
     ``benchmark["label"]`` and a caller may reasonably catch either name.
     """
 
@@ -39,7 +39,7 @@ class AmbiguousLabelError(SinbadError, KeyError):
 
     Look-up accepts a fragment of a label as a convenience, so this is what a
     caller gets for ``b["reactionRate"]`` when the entry holds five of them.
-    Like :class:`LabelNotFoundError` it is a :class:`KeyError` as well, so
+    Like :class:`LabelNotFoundError` it is a ``KeyError`` as well, so
     code that guards a look-up with one name still catches it.
     """
 

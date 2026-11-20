@@ -40,9 +40,12 @@ def check(source, *, what: Union[str, Sequence[str]] = "all", mf: Optional[Seque
     ----------
     source : path, folder, or iterable of paths
         An ENDF-6 tape or GNDS file; a folder (every tape in it, as
-        :data:`kika.endf.checks.TAPE_PATTERNS` finds them); or the files.
+        ``kika.endf.checks.TAPE_PATTERNS`` finds them); or the files. An ENDF
+        object already read (anything with a ``files`` attribute) is checked as
+        one evaluation.
     what : str or sequence
-        ``"all"`` (default), ``"data"`` or ``"covariances"``.
+        ``"all"`` (default), ``"data"`` or ``"covariances"``; a sequence may
+        combine them. Case is ignored.
     mf : sequence of int, optional
         Only these files, and what they are checked against.
     deep : bool
@@ -63,7 +66,25 @@ def check(source, *, what: Union[str, Sequence[str]] = "all", mf: Optional[Seque
 
     Returns
     -------
-    CheckReport or LibraryReport
+    ~kika.endf.checks.CheckReport or ~kika.endf.checks.LibraryReport
+        A :class:`~kika.endf.checks.CheckReport` for one file (or one ENDF object):
+        its ``findings``, each with a level (``note``, ``warn``, ``defect``) and a
+        location, and the properties ``defects``, ``warnings`` and ``notes``.
+        ``to_html(path)`` and ``to_markdown(path)`` return the report as text and
+        write it to *path* when given (by default only findings at ``warn`` or
+        worse are listed; notes are counted); ``summary()`` and ``to_dataframe()``
+        give tables and ``to_dict()`` plain data. A folder or a list of files gives
+        a :class:`~kika.endf.checks.LibraryReport`: one entry per tape in
+        ``tapes``, the same ``to_html`` and ``to_markdown``, and ``write(out_dir)``,
+        which writes the summary, files and findings tables as TSV into *out_dir*
+        and returns their paths by table name.
+
+    Raises
+    ------
+    FileNotFoundError
+        If *source* is a path that does not exist.
+    ValueError
+        If *what* names no family of checks.
     """
     from kika.endf.checks.evaluation import check_evaluation, normalise_what
     from kika.endf.checks.library import check_library

@@ -8,7 +8,7 @@ than the metadata silently interpolates part of the table under the wrong law.
 ``regions1d`` has no dominant scheme: every region is its own function with its
 own rule, which is what the data actually is.
 
-**Bit-exactness for continuous adjacent regions.** :meth:`evaluate` rebuilds
+**Bit-exactness for continuous adjacent regions.** ``evaluate`` rebuilds
 the ENDF ``(NBT, INT)`` pairs and
 makes a single call to ``kika.processing.interpolation.interpolate_1d`` over the
 concatenated grid — the same call, on the same arrays, that the flat path makes.
@@ -34,7 +34,32 @@ __all__ = ["Regions1d", "curvesOnDomains"]
 
 @dataclass
 class Regions1d(Function1d):
-    """A piecewise function: a list of :class:`XYs1d`, one per region."""
+    """A piecewise function: a list of ``XYs1d``, one per region.
+
+    Each region has its own interpolation rule, so no rule dominates the others. In
+    the ENDF layout (``fromEndfRegions`` and ``toEndfRegions``) the regions are the
+    ``(NBT, INT)`` pairs of a TAB1 record, ``NBT`` being cumulative. Consecutive
+    regions share their boundary abscissa; at a shared boundary the right region
+    owns the value. ``evaluate(x, outOfRange)`` takes ``"zero"`` (the default),
+    ``"hold"`` or ``"raise"`` for points outside the domain. Regions that are not
+    adjacent, or that jump at a shared boundary, are evaluated region by region,
+    and a gap cannot be flattened by ``toEndfRegions``, which raises ``ValueError``.
+
+    Attributes
+    ----------
+    function1ds
+        The regions (``XYs1d``) in ascending order.
+    axes
+        The axes object carrying the units of the abscissa and the ordinate, or
+        None.
+    label : str, optional
+        The style (form) this function belongs to inside a multi-form container.
+    outerDomainValue : float, optional
+        The coordinate of the next dimension up when the function sits inside a
+        two-dimensional one.
+    index : int, optional
+        The position of the function when it sits inside another ``regions1d``.
+    """
 
     function1ds: List[XYs1d] = field(default_factory=list)
     axes: Optional[Axes] = None

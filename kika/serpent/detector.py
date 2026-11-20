@@ -32,7 +32,32 @@ DET_COLUMNS_TIME = [
 
 @dataclass
 class DetectorResult:
-    """A single detector's results from a ``_det.m`` file."""
+    """A single detector's results from a ``_det.m`` file.
+
+    A user gets it from :class:`DetectorFile`, by detector name.
+
+    Attributes
+    ----------
+    name : str
+        Detector name, without the ``DET`` prefix.
+    data : numpy.ndarray
+        The detector matrix as written, one row per line of ``DET<name>``. The parser
+        gives it 13 columns when the file has a ``DET<name>T`` block; otherwise it
+        takes 12 or 13 according to which divides the number of values, and when
+        neither does it uses 12 and drops the trailing values. The column meanings
+        are Serpent's layout as kika assumes it: ``idx, Eb, Ub, Cb, Mb, Lb, Rb, Zb,
+        Yb, Xb, value, rel_error``, with ``Tb`` after ``idx`` in the 13-column form.
+        kika reads the ``Eb`` and ``Tb`` columns as 1-based bin numbers and the last
+        column as the relative statistical error.
+    energy_grid : numpy.ndarray or None
+        Shape ``(M, 3)``: the rows of ``DET<name>E`` as written, taken as lower edge,
+        upper edge and midpoint of each energy bin. Serpent writes energies in MeV;
+        kika does not convert them. None when the file has no such array.
+    time_grid : numpy.ndarray or None
+        Shape ``(K, 3)``: the rows of ``DET<name>T`` as written, taken as lower edge,
+        upper edge and midpoint of each time bin. None when the file has no such
+        array.
+    """
     name: str
     data: np.ndarray             # raw matrix, shape (N, 12) or (N, 13)
     energy_grid: Optional[np.ndarray] = None  # from DET<name>E, shape (M, 3)
@@ -40,6 +65,7 @@ class DetectorResult:
 
     @property
     def has_time_bins(self) -> bool:
+        """True when ``data`` has the 13-column layout with a time-bin column."""
         return self.data.shape[1] == 13
 
     @property
@@ -54,16 +80,19 @@ class DetectorResult:
 
     @property
     def n_bins(self) -> int:
+        """Number of rows of ``data``."""
         return self.data.shape[0]
 
     @property
     def n_energy_bins(self) -> int:
+        """Number of energy bins in ``energy_grid``; 0 when there is none."""
         if self.energy_grid is not None:
             return self.energy_grid.shape[0]
         return 0
 
     @property
     def n_time_bins(self) -> int:
+        """Number of time bins in ``time_grid``; 0 when there is none."""
         if self.time_grid is not None:
             return self.time_grid.shape[0]
         return 0
@@ -221,7 +250,16 @@ class DetectorResult:
 
 @dataclass
 class DetectorFile:
-    """Container for all detectors parsed from a ``_det.m`` file."""
+    """All detectors of a ``_det.m`` file.
+
+    A user gets one from :func:`read_detector_file`. Indexing by name returns the :class:`DetectorResult`, ``in`` tests a name, ``len``
+    counts the detectors and iterating yields the results in file order.
+
+    Attributes
+    ----------
+    detectors : dict of str to DetectorResult
+        By detector name.
+    """
     detectors: Dict[str, DetectorResult] = field(default_factory=dict)
 
     def __len__(self) -> int:
@@ -238,6 +276,7 @@ class DetectorFile:
 
     @property
     def names(self) -> List[str]:
+        """Detector names, in file order."""
         return list(self.detectors.keys())
 
     def summary(self) -> str:

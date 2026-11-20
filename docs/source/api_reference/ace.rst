@@ -19,6 +19,13 @@ kika.ace.parsers.parse_ace
    :undoc-members:
    :show-inheritance:
 
+kika.ace.classes.ace
+--------------------
+
+The object :func:`kika.ace.read_ace` returns.
+
+.. autoclass:: kika.ace.classes.ace.Ace
+
 kika.ace.model_adapter
 ----------------------
 
@@ -65,3 +72,11 @@ Photonuclear tables
 
 .. automodule:: kika.ace.encoders.photonuclear
    :members: encode_photonuclear
+
+What the readers return and raise
+---------------------------------
+
+.. autoclass:: kika.ace.classes.photoatomic.PhotoatomicAce
+   :no-members:
+
+.. autoexception:: kika.ace.classes.read_report.AceReadError

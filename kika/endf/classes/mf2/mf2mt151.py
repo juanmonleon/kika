@@ -397,6 +397,21 @@ class MF2MT151(MT):
 
     Stores resolved resonance parameters (SLBW, MLBW, Reich-Moore)
     and scattering-radius-only ranges as read from an ENDF file.
+
+    A user gets one from ``endf[2][151]`` on a tape read with
+    :func:`kika.endf.read_endf` or :func:`kika.endf.open_endf`. The ``isotopes``
+    property lists the isotope records, each with its energy ranges.
+    ``number`` has no default.
+
+    Attributes
+    ----------
+    number : int
+        The MT number, 151.
+    data : dict
+        A free-form dictionary. The parser does not fill it.
+    num_lines : int
+        The number of lines of the section on the tape, as the parser counted
+        them; 0 for a section built by hand.
     """
 
     _za: float = None

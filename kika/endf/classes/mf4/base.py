@@ -15,6 +15,21 @@ class MF4MT(MT):
     Base class for MT sections within MF4 (Angular Distributions).
     
     This class provides a common interface for all angular distribution formats.
+
+    A user never gets a bare ``MF4MT``: ``endf[4][mt]`` on a tape read with
+    :func:`kika.endf.read_endf` or :func:`kika.endf.open_endf` is the subclass of
+    the section's LTT (isotropic, Legendre, tabulated or mixed). ``number`` has no
+    default.
+
+    Attributes
+    ----------
+    number : int
+        The MT number.
+    data : dict
+        A free-form dictionary. The parser does not fill it.
+    num_lines : int
+        The number of lines of the section on the tape, as the parser counted
+        them; 0 for a section built by hand.
     """
     _za: float = None    # ZA identifier
     _awr: float = None   # Atomic weight ratio

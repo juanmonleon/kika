@@ -1,3 +1,11 @@
+"""Read an ACE file into the object that holds its tables.
+
+:func:`read_ace` reads the header and the XSS array and returns an
+:class:`~kika.ace.classes.ace.Ace` (neutron and other particle tables), or the
+class of the table's own kind for a photo-atomic, dosimetry or photonuclear
+table. ``xss_data`` keeps the numbers as the file has them (ACE writes MeV and
+barns). :func:`read_xss` and :func:`read_xss_file` read that array alone.
+"""
 import logging
 from kika.ace.classes.ace import Ace
 import numpy as np
@@ -48,21 +56,35 @@ def read_ace(filename, debug=False, strict=True):
     filename : str
         Path to the ACE file
     debug : bool, optional
-        Whether to print debug information, defaults to False
+        Whether to log what is read at DEBUG level; the flag is also passed to the
+        block parsers. Defaults to False.
     strict : bool, optional
         ``True`` (the default): a block or reaction that cannot be read raises
-        :class:`~kika.ace.classes.read_report.AceReadError`. ``False``: the
+        ``AceReadError``. ``False``: the
         table keeps what could be read and ``ace.read_report`` lists what was
         not. Notes (legitimate things worth knowing) are recorded either way.
-        
+        ``strict`` applies to a neutron-type table only: the photo-atomic,
+        dosimetry and photonuclear decoders below raise ``ValueError`` on a
+        table they cannot read, whatever ``strict`` says.
+
     Returns
     -------
-    ace : Ace, PhotoatomicAce or DosimetryAce
-        An Ace object containing the parsed data, or, for a photo-atomic
-        table (ZAID suffix ending in ``p``), a
-        :class:`~kika.ace.classes.photoatomic.PhotoatomicAce`, and for a
-        dosimetry table (suffix ending in ``y``), a
-        :class:`~kika.ace.classes.dosimetry.DosimetryAce`.
+    ace : Ace, PhotoatomicAce, DosimetryAce or PhotonuclearAce
+        An Ace object containing the parsed data. The suffix of the ZAID
+        decides the class: ending in ``p`` (photo-atomic) gives a
+        ``PhotoatomicAce``, ending in ``y`` (dosimetry) a
+        :class:`~kika.ace.classes.dosimetry.DosimetryAce`, and ending in ``u``
+        (photonuclear) a
+        :class:`~kika.ace.classes.photonuclear.PhotonuclearAce`.
+
+    Raises
+    ------
+    ``AceReadError``
+        When ``strict`` and a block of a neutron-type table cannot be read.
+    ValueError
+        If the file's XSS does not hold the ``NXS(1)`` values its header
+        declares (checked by :func:`read_xss`), or a photo-atomic, dosimetry or
+        photonuclear table is malformed.
     """
 
     if debug:
@@ -117,8 +139,28 @@ def parse_blocks(ace, debug=False):
     """Decode every block of ``ace`` from its header and ``xss_data``.
 
     What :func:`read_ace` runs once the XSS is read; also what turns an XSS
-    built by :mod:`kika.ace.encoders` back into blocks. ``ace.read_report``
+    built by the ACE encoders back into blocks. ``ace.read_report``
     must exist (strict or not).
+
+    Parameters
+    ----------
+    ace : Ace
+        A table with ``header``, ``xss_data`` and ``read_report`` set. Each block
+        is stored on it as an attribute (``esz_block``, ``xs_data``,
+        ``energy_distributions`` and so on); a block that cannot be read is
+        ``None`` when ``read_report`` is not strict.
+    debug : bool, optional
+        Passed to every block parser.
+
+    Returns
+    -------
+    Ace
+        ``ace`` itself, with its blocks filled in.
+
+    Raises
+    ------
+    AceReadError
+        If ``ace.read_report`` is strict and a block cannot be read.
     """
     # Parse every block. A block that cannot be read raises AceReadError
     # naming it (strict) or is left empty and recorded in ace.read_report.
@@ -209,14 +251,16 @@ def read_xss_file(file, n_values, spelling=False):
         ``NXS(1)``, the declared length of the XSS array.
 
     spelling : bool, optional
-        Also return which words are spelled as integers, packed as
-        ``Ace.xss_int_words`` (see :mod:`kika.ace.classes.xss`).
+        Also return which words are spelled as integers (no decimal point), as
+        a little-endian bit mask over ``XSS(1..n_values)``, the form of
+        ``Ace.xss_int_words``.
 
     Returns
     -------
     numpy.ndarray
         ``float64`` array of length ``n_values + 1``, ``[0]`` = 0.0; with
-        ``spelling=True``, ``(xss, int_words)``.
+        ``spelling=True``, ``(xss, int_words)``, where ``int_words`` is
+        ``None`` when the tokens of the file do not number ``n_values``.
     """
     start = file.tell()
     found = _read_xss_fixed_lines(file, n_values) if n_values else None
@@ -314,8 +358,8 @@ def read_xss(lines, n_values=None):
 
     The array uses 1-based indexing to match the FORTRAN ``XSS(i)`` of the ACE
     manual: index 0 holds a 0.0 placeholder and ``xss[i]`` is ``XSS(i)``.
-    Blocks parsed from it are views of this array (see
-    :mod:`kika.ace.classes.xss`).
+    Blocks parsed from it are views of this array: writing into a block writes
+    into the XSS.
 
     Parameters
     ----------
@@ -329,6 +373,11 @@ def read_xss(lines, n_values=None):
     -------
     numpy.ndarray
         ``float64`` array of length ``n + 1``.
+
+    Raises
+    ------
+    ValueError
+        If ``n_values`` is given and the lines hold a different number of values.
     """
     if n_values:
         lines = lines[:-(-n_values // 4)]  # 4 values per line, last one partial

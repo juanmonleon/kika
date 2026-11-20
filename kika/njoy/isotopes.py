@@ -48,10 +48,17 @@ def _build_isotope_map() -> dict[str, int]:
 
 
 def load_isotopes() -> dict[str, int]:
-    """Return isotope name -> MAT number mapping.
+    """Return the MAT number of every isotope name kika knows, as a dict.
 
-    Derived from :data:`kika._constants.ENDF_MAT_TO_ZAID`; cached after
-    first call.
+    The names are built from kika's table of ENDF MAT numbers and their ZA values
+    (``ENDF_MAT_TO_ZAID`` in ``kika/_constants.py``), not from a file. A name is
+    the element symbol followed by the mass number (``"U235"``, no hyphen), or
+    ``"<symbol>-nat"`` for a natural element (mass number 0). When several MATs
+    share a ZA, the lowest MAT keeps the plain name and the next ones take the
+    suffix ``m``, then ``m2`` and so on (``"Am242m"``).
+
+    The dict is built on the first call and the same object is returned on the
+    next ones, so a caller must not modify it.
     """
     global _isotopes_cache
     if _isotopes_cache is None:
@@ -60,7 +67,18 @@ def load_isotopes() -> dict[str, int]:
 
 
 def load_module_definitions() -> dict[str, Any]:
-    """Load all available module JSON definitions from ``data/modules/``."""
+    """Return the definitions of the NJOY modules shipped with kika, by module name.
+
+    The definitions are the ``*.json`` files in ``kika/njoy/data/modules/``, one per
+    module (``acer.json``, ``reconr.json`` ...). Each key is the upper-case ``name``
+    of a file (``"ACER"``) and each value is the file's content: the keys ``name``,
+    ``description``, ``tooltip`` and ``cards``, where ``cards`` lists the cards of
+    the module with the parameters of each (name and type always; default and
+    help text in most).
+
+    The dict is built on the first call and the same object is returned on the
+    next ones, so a caller must not modify it.
+    """
     global _modules_cache
     if _modules_cache is None:
         _modules_cache = {}
@@ -73,5 +91,18 @@ def load_module_definitions() -> dict[str, Any]:
 
 
 def get_mat_number(isotope: str) -> int:
-    """Get MAT number for an isotope name (e.g. ``'U235'`` -> ``9228``)."""
+    """Return the MAT number of an isotope name (``'U235'`` gives ``9228``).
+
+    Parameters
+    ----------
+    isotope
+        A name as ``load_isotopes`` spells it, with the same case. Any other
+        spelling (``"U-235"``, ``"u235"``) is not recognised.
+
+    Returns
+    -------
+    int
+        The MAT number. An unknown name does not raise: it returns 9228, the MAT
+        of U-235.
+    """
     return load_isotopes().get(isotope, 9228)

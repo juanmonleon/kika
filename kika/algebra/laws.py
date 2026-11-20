@@ -50,12 +50,30 @@ _LIN_Y = {LOGLIN: LINLIN, LOGLOG: LINLOG}
 def method_laws(y, method: str) -> np.ndarray:
     """One law per interval for reading the ordinates *y* under *method*.
 
-    *method* is a key of :data:`METHODS`: the reader's choice of interpolation,
+    *method* is a key of ``METHODS``: the reader's choice of interpolation,
     not a law the table states. So where a log-y law has no value -- an
     interval with an end at or below zero, a coefficient crossing zero say --
     that interval is read with the same x law and a linear y. Only those
     intervals change; the app's data table reads the same way
     (``interpolateAt`` in ``kika-app/frontend/src/utils/plotter.ts``).
+
+    Parameters
+    ----------
+    y : array_like
+        The ordinates of the table; only their signs matter here.
+    method : str
+        A key of ``METHODS``.
+
+    Returns
+    -------
+    numpy.ndarray
+        One law code (1-5) per interval, ``len(y) - 1`` integers (none for fewer
+        than two points).
+
+    Raises
+    ------
+    ValueError
+        If *method* is not a key of ``METHODS``.
     """
     if method not in METHODS:
         raise ValueError(f"unknown interpolation {method!r}; "
@@ -89,6 +107,24 @@ def interval_laws(n_points: int, pairs: Sequence[Tuple[int, int]]) -> np.ndarray
     up to ``NBT[r] - 2``, and the interval that straddles a region boundary
     belongs to the region *after* it. An empty pair list is one lin-lin region.
     A last NBT short of the table holds its law to the end.
+
+    Parameters
+    ----------
+    n_points : int
+        Number of points of the table.
+    pairs : sequence of (int, int)
+        The ``(NBT, INT)`` pairs, in order.
+
+    Returns
+    -------
+    numpy.ndarray
+        One law code (1-5) per interval, ``n_points - 1`` integers.
+
+    Raises
+    ------
+    ValueError
+        If a resulting code is not 1-5 (the two-dimensional codes 11-15 and
+        21-25 included).
     """
     laws = np.full(max(n_points - 1, 0), LINLIN, dtype=np.int64)
     pairs = list(pairs) or [(n_points, LINLIN)]
@@ -109,6 +145,16 @@ def pairs_from_laws(laws: np.ndarray) -> list:
 
     The inverse of :func:`interval_laws` up to merging adjacent regions that
     share a law. A table of one point, or none, is one lin-lin region.
+
+    Parameters
+    ----------
+    laws : array_like of int
+        One law code per interval.
+
+    Returns
+    -------
+    list of (int, int)
+        The ``(NBT, INT)`` pairs, in order.
     """
     laws = np.asarray(laws, dtype=np.int64)
     if laws.size == 0:
@@ -129,12 +175,31 @@ def laws_on_refinement(x_old, laws_old, x_new) -> np.ndarray:
     lin-lin region, what ``MF5PartialTabulated.replace_table`` does by default)
     and refusing it.
 
-    Raises ``ValueError`` when *x_new* is not a refinement: a different
-    domain, or an interval that straddles an old node. A zero-width interval
-    (a repeated abscissa, a step) has no law; it takes the old one at the same
-    place when the old table had the repeat too, and the law of the panel it
-    starts otherwise -- which no reader consults, but which keeps the regions
-    contiguous.
+    A zero-width interval (a repeated abscissa, a step) has no law; it takes
+    the old one at the same place when the old table had the repeat too, and
+    the law of the panel it starts otherwise -- which no reader consults, but
+    which keeps the regions contiguous.
+
+    Parameters
+    ----------
+    x_old : array_like
+        Abscissae of the table, non-decreasing.
+    laws_old : int or array_like of int
+        One law code for the whole table, or one per interval of *x_old*.
+    x_new : array_like
+        Abscissae of the refinement, non-decreasing. When either grid has fewer
+        than two points the result is lin-lin throughout.
+
+    Returns
+    -------
+    numpy.ndarray
+        One law code (1-5) per interval of *x_new*, ``len(x_new) - 1`` integers.
+
+    Raises
+    ------
+    ValueError
+        If *x_new* is not a refinement of *x_old*: its end points differ from
+        those of *x_old*, or an interval of it straddles a node of *x_old*.
     """
     x_old = np.asarray(x_old, dtype=float)
     x_new = np.asarray(x_new, dtype=float)
@@ -182,8 +247,30 @@ def validate(x, y, laws) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     matching shapes, finite values, non-decreasing ``x``, codes 1-5, and that
     every log law has positive values on its own axis. A zero-width interval
     (a repeated abscissa) has no law and is not checked. A log-y interval with
-    an end at exactly 0 is let through (:func:`vanishing_panels`); one below 0
+    an end at exactly 0 is let through (``vanishing_panels``); one below 0
     is refused.
+
+    Parameters
+    ----------
+    x, y, laws
+        The table: abscissae (non-decreasing), ordinates, and one interpolation
+        law per interval (codes 1-5). A single code applies to every interval.
+        *y* may have further axes after the first, one row per abscissa.
+
+    Returns
+    -------
+    tuple of numpy.ndarray
+        ``(x, y, laws)`` as a float array, a float array and an integer array
+        with one law per interval.
+
+    Raises
+    ------
+    ValueError
+        If *x* is not one-dimensional or *y* does not have it as first axis; if
+        *laws* is neither a scalar nor one per interval; if a code is not 1-5;
+        if a value is not finite; if *x* decreases; if a ln x law starts an
+        interval of positive width at ``x <= 0``; or if a ln y law has a
+        negative value at an end of an interval of positive width.
     """
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)

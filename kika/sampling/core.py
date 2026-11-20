@@ -1,51 +1,26 @@
-"""The sampler, with the formatting taken out of it.
+"""Draw correlated realisations of covariance blocks.
 
-``draw_samples`` decomposes a covariance, draws uncorrelated normals and imposes
-the correlation. That is all it does. It knows nothing about MT numbers, energy
-groups, Legendre orders, incident-energy bands, ENDF, ACE or NJOY, and it holds
-no covariance class — a block is a ``(key, matrix)`` pair and the key can be
-anything hashable.
+``draw_samples`` decomposes each covariance block, draws uncorrelated standard
+normals and imposes the correlation. It knows nothing about MT numbers, energy
+groups, Legendre orders, ENDF, ACE or NJOY: a block is a ``(key, matrix)`` pair
+and the key can be any hashable.
 
-**Why this exists beside** :func:`kika.sampling.generators.generate_samples`.
-That function is ~400 lines, of which about fifteen are the sampling. The rest
-is MT/group bookkeeping, four heuristics that only make sense for a *relative*
-covariance, sample diagnostics, and a cast to float32. It is a format-aware
-pipeline with a sampler inside it. Every perturbation pipeline in this library
-needs the sampler; only some of them want the pipeline.
+The format-level sampler ``kika.sampling.generators.generate_samples`` adds three
+steps that are wrong for an absolute covariance such as a fission-spectrum one,
+and this module has none of them:
 
-So the sampler is extracted rather than copied. PFNS is the first caller, and it
-is a good first caller precisely because the parts it does *not* want are not
-merely off by default for it — they are wrong for it:
+* a mask that drops rows with no stated variance before the decomposition, which
+  breaks ``C·1 = 0`` on the retained subspace and with it the normalisation of a
+  linearly perturbed spectrum;
+* a rescale of statistical outliers (any bin whose variance is far above the
+  median), which fires on the genuine spread of a spectrum's variance;
+* a cast to float32, which loses absolute deltas far below float32 epsilon once
+  stored as ``1 + δ``. The output here is float64 unless *dtype* says otherwise.
 
-* the **inert-bin mask** drops rows before decomposition, which breaks
-  ``C·1 = 0`` on the retained subspace; that identity is the whole reason a
-  linear draw preserves the normalisation of a spectrum.
-* the **statistical-outlier rescale** flags any bin whose variance exceeds
-  1000× the median. A fission spectrum's variance spans ~30 decades across the
-  outgoing grid *as genuine structure*, so it would fire on correct data.
-* the **float32 cast** annihilates absolute deltas: they run many decades below
-  float32 epsilon, and stored as ``1 + δ`` all but the largest vanish. Silently
-  — the run completes, writes tapes, passes NJOY, and contains no perturbation.
-
-A flag that must always be set one way is a fork wearing a parameter, so those
-steps are not given flags here. They live in :mod:`kika.cov.decomposition` as
-standalone functions and a caller that wants them applies them to the matrix
-before handing it over.
-
-**Nothing existing was migrated onto this.** ``generate_samples`` is untouched,
-so no result any current pipeline produces changes. ``returns="factors"`` is
-here so that the migration, when it happens, is a call rather than a rewrite.
-
-**Blocks are independent, and seeded independently.** MF35 gives no cross-band
-covariance, MF33 gives no cross-material one; a block-diagonal covariance is
-sampled block by block. That is also much cheaper — five band-wise SVDs on
-ENDF/B-VIII.1 U-235 cost ~1/125 of one 3205×3205 decomposition. What stops
-the blocks drawing correlated ``Z`` is the quiet failure this arrangement
-invites -- the samples look fine block by block and are correlated across
-blocks -- and a per-block seed only prevents it for pseudo-random draws.
-Separately seeded Sobol sequences paired by replica are correlated too,
-so under Sobol all blocks of a call share one sequence and take disjoint
-columns of it; see :func:`realise_blocks`.
+Blocks are independent: the draw is block-diagonal and carries no covariance
+between two blocks. Under Sobol all blocks of one call share a single sequence and
+take disjoint columns of it. Under ``random`` and ``lhs`` block *i* is seeded with
+``seed + i × BLOCK_SEED_STRIDE``. See :func:`realise_blocks`.
 """
 from __future__ import annotations
 
@@ -102,22 +77,31 @@ def draw_samples(
 ) -> Tuple[Dict[Hashable, np.ndarray], Dict[Hashable, Dict[str, Any]]]:
     """Draw *n_samples* correlated realisations of each covariance block.
 
+    Each block is decomposed into a factor ``L`` with one column per retained
+    direction, ``Z`` of shape ``(n_samples, n_retained)`` standard normals are
+    drawn, and the realisation is ``Y = Z L^T``. The blocks are independent of each other (see :func:`realise_blocks`).
+    A matrix is a square two-dimensional array; entries that are not finite are
+    set to 0 before the decomposition and counted in the diagnostics.
+
     Parameters
     ----------
     blocks
         ``{key: matrix}``, a sequence of ``(key, matrix)`` pairs, or a bare
         sequence of matrices (then the key is the index). The key is opaque —
         ``(isotope, mt)`` for a cross section, ``(isotope, mt, order)`` for a
-        Legendre block, ``(isotope, mt, band)`` for a PFNS band.
+        Legendre block, ``(isotope, mt, band)`` for a PFNS band. The order of the
+        blocks sets the seed of each one (see *seed*).
     n_samples
         Number of realisations per block.
     space
         ``"linear"`` draws ``Y = Z L^T`` from the matrix as given.
         ``"log"`` takes the matrix as a **relative** covariance Σ and draws
-        lognormal factors that reproduce it exactly: ``ln f`` is normal with
+        lognormal factors that reproduce it, up to the repair of ``psd_method``
+        and the dropped null directions: ``ln f`` is normal with
         covariance ``log1p(Σ)`` and mean ``-diag(log1p Σ)/2``, so
         ``E[f] = 1`` and ``Cov(f) = Σ``. Only meaningful together with
-        ``returns="factors"``. A caller whose matrix is already ``log1p(Σ)``
+        ``returns="factors"``; ``"log"`` with ``returns="deltas"`` is refused.
+        A caller whose matrix is already ``log1p(Σ)``
         (it conditioned it in that space) calls :func:`draw_prepared_samples`.
     returns
         ``"deltas"`` returns ``Y`` — absolute departures, which is what an
@@ -125,47 +109,54 @@ def draw_samples(
         or ``exp(Y + m)`` (log), which is what a relative covariance describes
         and what the ENDF/ACE perturbation drivers multiply by.
     decomposition_method
-        ``"svd"`` or ``"eigen"``. **Cholesky is refused**: these matrices are
-        built from a handful of model parameters and are severely rank
-        deficient by construction — two thirds of a typical MF35 band is null
-        space — so a Cholesky factor either fails or is meaningless.
+        ``"svd"`` or ``"eigen"`` (any case). **Cholesky is refused**: these
+        matrices are built from a handful of model parameters and are severely
+        rank deficient by construction — two thirds of a typical MF35 band is
+        null space — so a Cholesky factor either fails or is meaningless. With
+        ``"svd"`` the factor is built from the singular vectors, with
+        ``"eigen"`` from the eigenvectors sorted by decreasing eigenvalue.
+    sampling_method
+        ``"sobol"`` (scrambled Sobol sequence), ``"lhs"`` (Latin hypercube) or
+        ``"random"`` (pseudo-random), in any case. The Sobol and Latin-hypercube
+        uniforms become standard normals through the inverse normal CDF.
     seed
-        Base seed. Under Sobol every block uses it, on its own columns of one
-        sequence (recorded as ``sobol_columns``); under ``random``/``lhs``
-        block *i* uses ``seed + i × BLOCK_SEED_STRIDE``.
+        Base seed; None draws a different ensemble at each call. Under Sobol
+        every block uses it, on its own columns of one sequence (recorded as
+        ``sobol_columns``); under ``random``/``lhs`` block *i* (its position in
+        *blocks*) uses ``seed + i × BLOCK_SEED_STRIDE``.
     psd_method
-        Passed through to the decomposition. ``"auto"`` routes the tiny
+        Passed through to the decomposition, which repairs the matrix before it
+        is factorised: ``"auto"``, ``"higham"``, ``"clip"``, ``"clip_rescale"``
+        or ``"none"``. ``"auto"`` routes the tiny
         negative eigenvalues these matrices carry to ``clip``, which rebuilds
         ``V·clip(Λ,0)·Vᵀ`` and so **preserves the eigenvectors** — including
         the near-null direction that carries a sum rule.
     null_tol
-        Threshold for counting null directions. They are counted and reported,
-        never repaired: the rank deficiency is a property of the evaluation,
-        and filling it in would invent uncertainty the evaluator did not claim.
+        Threshold for null directions: the singular values (the eigenvalues,
+        for ``"eigen"``) at or below ``null_tol`` × the largest one, after the
+        repair. They are counted and reported, never repaired: the rank
+        deficiency is a property of the evaluation, and filling it in would
+        invent uncertainty the evaluator did not claim. They are left out of the
+        draw, so the number of normals drawn per block is the retained rank.
 
-        ``None`` retains **every** direction, including the null ones, and is
-        there for one purpose: proving that a migrated call site draws what the
-        code it replaces drew. Truncation changes the QMC dimension from *n* to
-        the rank, so it moves every drawn column — on the Fe-56 multigroup MF34
-        joint, 4218 → 3603 — and a migration that turns it on in the same commit
-        that changes which objects the draw comes from cannot say which of the
-        two moved the numbers. Set it to ``None`` to establish byte-identity,
-        then let it default in a separate, measured commit.
+        ``None`` retains **every** direction, null ones included (a null
+        direction then carries a vanishing amplitude), and is there for one
+        purpose: reproducing a draw made without truncation. Truncation changes
+        the dimension of the quasi-random sequence from *n* to the rank, so it
+        moves every drawn column.
 
         It is an escape hatch for gates, not a modelling option. The diagnostics
-        still report ``n_null`` and ``rank`` at :data:`DEFAULT_NULL_TOL`, so a
-        run drawing in null directions says so rather than reporting full rank.
+        still count ``n_null`` and ``rank`` at :data:`~kika.cov.conditioning.DEFAULT_NULL_TOL`, so a
+        run drawing in null directions says so.
 
-        **The rank reported here and the rank a pre-flight reports are not the
-        same number, and neither is wrong.** This one is taken on the singular
+        **The rank reported here and the rank a pre-flight reports can differ.**
+        This one is taken on the singular
         values the draw actually decomposes — *after* ``psd_method`` has acted.
         With ``negative_directions="fold"`` an SVD folds a negative eigenvalue
         to its magnitude, so a direction the file states as negative-variance
         survives as a retained direction here while
         ``conditioning.inspect_blocks``, which reads the eigenvalues of the
-        matrix as stated, counts it null. Measured on that same Fe-56 joint:
-        615 null directions in the folded draw against 669 in the pre-flight,
-        the difference being directions the evaluation states as unphysical.
+        matrix as stated, counts it null.
         With the default ``"zero"`` those directions count null here too.
     negative_directions
         What the draw does with a direction the matrix it decomposes states
@@ -177,20 +168,56 @@ def draw_samples(
         magnitude ``|λ|``, i.e. draws from ``V|Λ|Vᵀ`` and adds variance in a
         direction the evaluation does not state. It exists only so the frozen
         format-level samplers (``perturb_ENDF_files`` and
-        :func:`kika.sampling.multigroup_draw.draw_relative_factors`) keep
+        ``kika.sampling.multigroup_draw.draw_relative_factors``) keep
         drawing exactly what produced the published results; nothing new
         should ask for it. A zeroed direction counts as null in ``n_null``.
+        With ``decomposition_method="eigen"`` a negative eigenvalue always has
+        zero variance and this argument changes nothing.
     dtype
         Output dtype. float64 by default and on purpose; see the module
         docstring.
+    verbose, logger
+        The decomposition and the repair named by *psd_method* report their
+        progress when ``verbose`` is true: it is printed to the console and sent
+        to ``logger`` (an object with an ``info`` method, such as a
+        ``logging.Logger``; None for none).
 
     Returns
     -------
-    samples, diagnostics
-        ``{key: (n_samples, m_key) array}`` and ``{key: {...}}``. The
-        diagnostics carry ``n_null``, ``rank``, ``seed``, ``psd_method``,
-        the extreme eigenvalue ratio and the realised-versus-input covariance
-        error on the retained subspace.
+    samples : dict
+        ``{key: array}``, each array of shape ``(n_samples, m)`` with ``m`` the
+        size of the block and one row per realisation, of dtype *dtype*. With
+        ``returns="deltas"`` the rows are ``Y``; with ``"factors"`` they are
+        ``Y + 1`` (``space="linear"``) or ``exp(Y - diag/2)``
+        (``space="log"``, ``diag`` the diagonal of ``log1p(Σ)``).
+    diagnostics : dict
+        ``{key: dict}`` with, for each block: ``n``, ``n_null``, ``rank``
+        (``n - n_null``), ``null_fraction``, ``n_non_finite_zeroed``,
+        ``psd_method``, ``decomposition_method``, ``space``, ``returns``,
+        ``label`` (``str(key)``), ``min_over_max_eigenvalue`` (of the matrix
+        before the repair), ``realised_covariance_error``, ``seed``,
+        ``block_index`` and, under Sobol only, ``sobol_columns``. The matrix of
+        these diagnostics is the one that is decomposed: the matrix as given for
+        ``space="linear"``, ``log1p(Σ)`` for ``space="log"``, with non-finite
+        entries set to 0. The error is
+        ``||C_realised - Λ|| / ||Λ||`` in the Frobenius norm, taken on the
+        eigenvectors of that matrix whose eigenvalue exceeds
+        ``null_tol`` × the largest (``Λ`` their eigenvalues; with ``null_tol``
+        None, ``DEFAULT_NULL_TOL``, 1e-10, is used), with the sample
+        covariance of ``Y``; it is ``nan`` for a single sample or a matrix with
+        no positive eigenvalue. ``seed`` is the base seed under Sobol and the
+        seed of that block otherwise.
+
+    Raises
+    ------
+    ValueError
+        If *returns* is not ``"deltas"`` or ``"factors"``; *space* is not
+        ``"linear"`` or ``"log"``; ``space="log"`` with ``returns="deltas"``;
+        *decomposition_method* is ``"cholesky"`` or neither ``"svd"`` nor
+        ``"eigen"``; *negative_directions* is neither ``"zero"`` nor
+        ``"fold"``; *psd_method* is not one of the five above; a block is not a
+        square two-dimensional matrix; or *sampling_method* is not one of the
+        three above.
     """
     method = _validated_method(space, returns, decomposition_method)
     _validated_negative_directions(negative_directions)
@@ -230,8 +257,26 @@ def draw_prepared_samples(
     With ``space="log"`` each matrix is taken as ``log1p(Σ)`` -- the covariance
     of ``ln f`` -- and not transformed again. That is what a caller that
     conditions the matrix in log space holds
-    (:func:`kika.sampling.multigroup_draw.draw_relative_factors`). Everything
+    (``kika.sampling.multigroup_draw.draw_relative_factors``). Everything
     else is :func:`draw_samples`'.
+
+    Parameters
+    ----------
+    blocks, n_samples, space, returns, decomposition_method, sampling_method, seed, psd_method, null_tol, negative_directions, dtype, verbose, logger
+        As in :func:`draw_samples`. With ``space="log"`` and ``returns="factors"``
+        the realisation is ``exp(Y - diag/2)``, ``diag`` being the diagonal of the
+        matrix handed in.
+
+    Returns
+    -------
+    samples, diagnostics : tuple of dict
+        As in :func:`draw_samples`: ``{key: (n_samples, m) array}`` and
+        ``{key: diagnostics dict}``.
+
+    Raises
+    ------
+    ValueError
+        Under the conditions of :func:`draw_samples`.
     """
     prepared = prepare_blocks(
         blocks, space=space, returns=returns,
@@ -263,6 +308,28 @@ def prepare_blocks(
     their own options and still be **realised together** by one
     :func:`realise_blocks` call. That is what keeps them independent under
     Sobol; see :func:`realise_blocks`.
+
+    Parameters
+    ----------
+    blocks, space, returns, decomposition_method, psd_method, null_tol, negative_directions, verbose, logger
+        As in :func:`draw_samples`. One call prepares all its blocks the same
+        way; blocks that need another *space* or *returns* go through another
+        call. With ``space="log"`` the matrices are taken as already
+        ``log1p(Σ)``.
+
+    Returns
+    -------
+    list
+        One prepared block per input block, in the order of *blocks*, to be
+        handed unchanged to :func:`realise_blocks`. Blocks prepared by several
+        calls can be concatenated into one list.
+
+    Raises
+    ------
+    ValueError
+        If a block is not a square two-dimensional matrix, or under the
+        conditions of :func:`draw_samples` on *returns*, *space*,
+        *decomposition_method*, *negative_directions* and *psd_method*.
     """
     method = _validated_method(space, returns, decomposition_method)
     _validated_negative_directions(negative_directions)
@@ -298,10 +365,8 @@ def realise_blocks(
     replica index would correlate them. Scrambling randomises the values but
     keeps the lattice of each dimension, so dimension *k* of two separately
     seeded Sobol sequences is the same function of the replica index up to a
-    digital flip: measured ``|corr|`` 0.35-0.85 between the k-th columns, and
-    p95 ``|rho|`` 0.20-0.39 between blocks the file leaves independent (MF33 x
-    MF34 of U-238 B-VIII.1). Every block would look right on its own; the error
-    is in the covariance *between* blocks, where a response that depends on two
+    digital flip. Every block would look right on its own; the error is in the
+    covariance *between* blocks, where a response that depends on two
     of them picks up a term the evaluation never stated, of either sign.
 
     So one ``qmc.Sobol(d=sum of ranks, seed=seed)`` is drawn and its columns
@@ -309,21 +374,51 @@ def realise_blocks(
     first, in block order, then every block's second, and so on, a block
     dropping out when its rank is used up. The leading Sobol dimensions are
     the best equidistributed, so every block's leading directions get good
-    ones. A block's own directions keep their order, which is what makes a
-    **single-block call bit-identical** to the old draw: its columns are
-    ``0..rank-1`` of ``Sobol(d=rank, seed=seed)``.
+    ones. A block's own directions keep their order: the columns of a
+    single-block call are ``0..rank-1`` of ``Sobol(d=rank, seed=seed)``.
 
-    Dealing by rank position rather than by eigenvalue is deliberate. Merging
-    the directions of all blocks by share of variance gives slightly better
-    dimensions to the dominant directions, but it makes a block's columns
-    depend on the *spectra* of the other blocks: drawing MF34 in linear rather
-    than log space moved the MF33 draw of the same run. Dealt in turn, a
-    block's columns depend only on the ranks and order of the blocks.
+    Dealing by rank position and not by eigenvalue is deliberate: a block's
+    columns then depend only on the ranks and the order of the blocks, and not
+    on the spectra of the other blocks.
 
     ``"random"`` and ``"lhs"`` keep the per-block seed ladder
     (``seed + i * BLOCK_SEED_STRIDE``): independently seeded pseudo-random
-    streams and independently permuted hypercubes are independent, so they
-    never had the defect, and leaving them alone keeps their draws unchanged.
+    streams and independently permuted hypercubes are independent.
+
+    Parameters
+    ----------
+    prepared
+        The list that :func:`prepare_blocks` returns (several lists may be
+        concatenated). Its blocks may differ in *space* and *returns*; each is
+        realised as it was prepared.
+    n_samples
+        Number of realisations per block.
+    sampling_method
+        ``"sobol"``, ``"lhs"`` or ``"random"``, in any case.
+    seed
+        Base seed; None draws a different ensemble at each call. Under Sobol
+        the sequence is seeded with it; under ``"random"`` and ``"lhs"`` block
+        *i* (its position in *prepared*) is seeded with
+        ``seed + i × BLOCK_SEED_STRIDE``.
+    dtype
+        Output dtype of every sample array.
+
+    Returns
+    -------
+    samples : dict
+        ``{key: array}`` of shape ``(n_samples, m)`` and dtype *dtype*, as in
+        :func:`draw_samples`.
+    diagnostics : dict
+        ``{key: dict}``: what :func:`prepare_blocks` recorded for the block, plus
+        ``realised_covariance_error``, ``seed`` (the base seed under Sobol, the
+        block's seed otherwise), ``block_index`` (position in *prepared*) and,
+        under Sobol, ``sobol_columns`` (the columns of the shared sequence, one
+        per retained direction).
+
+    Raises
+    ------
+    ValueError
+        If *sampling_method* is not one of the three above.
     """
     prepared = list(prepared)
     samples: Dict[Hashable, np.ndarray] = {}

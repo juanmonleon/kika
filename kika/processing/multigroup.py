@@ -32,25 +32,75 @@ class WeightingFunction:
 
     @staticmethod
     def constant(energy: Union[float, np.ndarray]) -> Union[float, np.ndarray]:
-        """Constant weighting function phi(E) = 1."""
+        """Constant weighting function phi(E) = 1.
+
+        Parameters
+        ----------
+        energy
+            Energy in eV. Only its shape matters.
+
+        Returns
+        -------
+        float or numpy.ndarray
+            1.0 for anything that is not a numpy array; for an array, ones of its
+            shape and dtype.
+        """
         if isinstance(energy, np.ndarray):
             return np.ones_like(energy)
         return 1.0
 
     @staticmethod
     def constant_antiderivative(energy: Union[float, np.ndarray]) -> Union[float, np.ndarray]:
-        """Antiderivative of constant weighting: Phi(E) = E."""
+        """Antiderivative of constant weighting: Phi(E) = E.
+
+        Parameters
+        ----------
+        energy
+            Energy in eV.
+
+        Returns
+        -------
+        float or numpy.ndarray
+            *energy* itself, in eV.
+        """
         return energy
 
     @staticmethod
     def maxwellian(energy: Union[float, np.ndarray], temperature: float = 2.53e-2) -> Union[float, np.ndarray]:
-        """Maxwellian spectrum phi(E) = sqrt(E) * exp(-E/kT)."""
+        """Maxwellian spectrum phi(E) = sqrt(E) * exp(-E/kT), not normalised.
+
+        Parameters
+        ----------
+        energy
+            Energy in eV.
+        temperature
+            The product kT in eV, not a temperature in K. The default is 0.0253 eV.
+
+        Returns
+        -------
+        float or numpy.ndarray
+            phi(E) in eV^0.5; ``nan`` for a negative energy.
+        """
         kT = temperature  # in eV, default = 0.0253 eV (room temperature)
         return np.sqrt(energy) * np.exp(-energy / kT)
 
     @staticmethod
     def maxwellian_antiderivative(energy: Union[float, np.ndarray], temperature: float = 2.53e-2) -> Union[float, np.ndarray]:
-        """Antiderivative of Maxwellian: ∫ sqrt(E) e^{-E/kT} dE = (kT)^{3/2} Γ(3/2) * gammainc(3/2, E/kT)."""
+        """Antiderivative of Maxwellian: ∫ sqrt(E) e^{-E/kT} dE = (kT)^{3/2} Γ(3/2) * gammainc(3/2, E/kT).
+
+        Parameters
+        ----------
+        energy
+            Energy in eV.
+        temperature
+            The product kT in eV, not a temperature in K.
+
+        Returns
+        -------
+        float or numpy.ndarray
+            The integral of :meth:`maxwellian` from 0 to *energy*, in eV^1.5
+            (zero at 0, ``(kT)^1.5 Γ(3/2)`` as the energy grows).
+        """
         kT = temperature
         x = np.asarray(energy) / kT
         return (kT ** 1.5) * special.gamma(1.5) * special.gammainc(1.5, x)
@@ -61,12 +111,34 @@ class WeightingFunction:
 
         A Maxwellian: theta is its temperature, and its mean energy is
         1.5 theta = 1.94 MeV.
+
+        Parameters
+        ----------
+        energy
+            Energy in eV. theta is fixed at 1.29e6 eV and cannot be changed.
+
+        Returns
+        -------
+        float or numpy.ndarray
+            phi(E), not normalised; ``nan`` for a negative energy.
         """
         return np.sqrt(energy) * np.exp(-energy / 1.29e6)  # theta = 1.29 MeV
 
     @staticmethod
     def fission_spectrum_antiderivative(energy: Union[float, np.ndarray]) -> Union[float, np.ndarray]:
-        """Antiderivative of fission spectrum with kT≈1.29 MeV."""
+        """Antiderivative of fission spectrum with kT≈1.29 MeV.
+
+        Parameters
+        ----------
+        energy
+            Energy in eV.
+
+        Returns
+        -------
+        float or numpy.ndarray
+            The integral of :meth:`fission_spectrum` from 0 to *energy*
+            (kT = 1.29e6 eV exactly), in eV^1.5.
+        """
         kT = 1.29e6  # 1.29 MeV in eV
         x = np.asarray(energy) / kT
         return (kT ** 1.5) * special.gamma(1.5) * special.gammainc(1.5, x)
@@ -79,6 +151,19 @@ class WeightingFunction:
         This produces group averages consistent with a uniform distribution in lethargy
         u = ln(E). A tiny epsilon prevents division by zero for any accidental
         non-positive energies.
+
+        Parameters
+        ----------
+        energy
+            Energy in eV.
+        epsilon
+            Floor in eV: an energy below it is replaced by it.
+
+        Returns
+        -------
+        float or numpy.ndarray
+            phi(E) in 1/eV. At or below *epsilon* it is the constant 1/*epsilon*,
+            so a zero or negative energy gives 1e30 with the default.
         """
         if isinstance(energy, np.ndarray):
             return 1.0 / np.maximum(energy, epsilon)
@@ -86,7 +171,21 @@ class WeightingFunction:
 
     @staticmethod
     def lethargy_antiderivative(energy: Union[float, np.ndarray], epsilon: float = 1e-30) -> Union[float, np.ndarray]:
-        """Antiderivative of 1/E: Phi(E)=ln(E). Safe for vector/scalar inputs."""
+        """Antiderivative of 1/E: Phi(E)=ln(E). Safe for vector/scalar inputs.
+
+        Parameters
+        ----------
+        energy
+            Energy in eV.
+        epsilon
+            Floor in eV: an energy below it is replaced by it.
+
+        Returns
+        -------
+        float or numpy.ndarray
+            ``ln(max(energy, epsilon))``, with the energy taken in eV (so the value
+            depends on the unit, but a difference of two does not).
+        """
         if isinstance(energy, np.ndarray):
             return np.log(np.maximum(energy, epsilon))
         return float(np.log(max(energy, epsilon)))

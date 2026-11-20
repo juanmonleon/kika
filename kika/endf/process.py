@@ -56,9 +56,15 @@ Progress = Callable[[str, "float | None"], None]
 
 
 class ProcessingOutputError(ValueError):
-    """An output of :class:`EndfProcessing` could not be written. ``category``
-    is a key of :data:`PROCESSING_REJECTION_CATEGORIES` (or, for the PENDF, of
-    ``kika.processing.REJECTION_CATEGORIES``)."""
+    """An output of :class:`EndfProcessing` could not be written.
+
+    A ``ValueError`` whose ``category`` is a key of
+    ``PROCESSING_REJECTION_CATEGORIES`` (the dictionary of sentences in
+    ``kika.endf.process``). The ``write_*`` methods also record the failure as
+    a ``rejected`` write stage with the same category. With ``ace-table-exists``
+    the table file has already replaced any file of that name: only the xsdir
+    is unchanged, and the tables of earlier temperatures stay on disk.
+    """
 
     def __init__(self, category, message):
         super().__init__(message)
@@ -152,37 +158,70 @@ NO_HEATING_HDF5 = ("KERMA and damage (the plan asked for no heating): no MT301, 
 
 @dataclass(frozen=True)
 class ProcessingPlan:
-    """What :func:`process_endf` does. The defaults are what a user who touches
-    nothing should get: the reconstruction as ``reconstruct_endf`` runs it, room
-    temperature, broadening to where NJOY BROADR stops, URR tables, no heating
-    stage, and the KERMA and damage the ACE and HDF5 files carry.
+    """What :func:`process_endf` does: the options of each stage, as a frozen dataclass.
 
-    ``heating`` says where the KERMA (MT301) and damage (MT444) go. ``None``
-    (the default): only into the ACE and HDF5 files, computed when they are
-    written, as a library made with HEATR carries them. ``True``: the heating
-    stage too, HEATR's MT301 and MT444 at every temperature, 0 K included, in
-    the PENDF. ``False``: nowhere; an ACE table's heating numbers are then 0
-    (as ACER writes them without HEATR) and the HDF5 file has no MT301, MT444 or
-    MT901, which a heating tally needs. Each file's ``omitted`` says so.
+    The defaults are what a user who touches nothing should get: the
+    reconstruction as :func:`~kika.endf.reconstruct_endf` runs it, room
+    temperature, broadening up to the top of the resolved range, URR tables, no
+    heating stage, and the KERMA and damage that the ACE and HDF5 files carry.
+    The constructor raises ``ValueError`` for a temperature that is not finite
+    and positive, and for a ``thnmax`` that is neither ``"njoy"`` nor a number
+    above 0.
 
-    ``temperatures`` are kelvin, > 0; 0 K is the reconstruction and is always
-    there, so ``()`` stops after it. They are the temperatures of both the
-    broadening and the URR tables; ``broaden=False`` skips the broadening and
-    keeps them for the URR tables alone (the tables do not depend on the
-    broadened MF3). ``thnmax`` is the top of the broadening in
-    eV, or ``"njoy"`` for BROADR's default (the top of the resolved range).
-    ``thinning`` is the relative tolerance each temperature's cross sections are
-    stated to (BROADR's ``errthn``, 1e-3; five times tighter below 0.4999 eV, as
-    in NJOY), shared between the 0 K source, the Doppler table and the thinning
-    so that they do not add up beyond it (:mod:`kika.processing.tolerances`);
-    ``None`` keeps every point of the union grid.
-    ``urr_bins`` are PURR's bands; ``urr_ladders`` the most ladders an energy
-    draws (at least PURR's 64, more until the table's error is 5e-3). ``workers`` is
-    the count of every stage: the reconstruction's threads, the processes of
-    the broadening and the URR tables, the heating's threads. When not given,
-    ``KIKA_WORKERS``, else each stage's default (the reconstruction up to four
-    threads, the rest up to eight); see :mod:`kika.processing.workers`. No
-    result depends on it.
+    Attributes
+    ----------
+    temperatures : tuple of float
+        Temperatures in K, each above 0; sorted and de-duplicated on
+        construction. 0 K is the reconstruction and is always there, so ``()``
+        stops after it. They are the temperatures of both the broadening and the
+        URR tables. Default ``(293.6,)``.
+    broaden : bool
+        ``False`` skips the broadening and keeps ``temperatures`` for the URR
+        tables alone (the tables do not depend on the broadened MF3). With no
+        broadened temperature, the HDF5 and ACE outputs are refused.
+    reconstruction
+        The options of the 0 K reconstruction, a ``ReconstructionOptions``;
+        ``None`` takes its defaults (relative tolerance 1e-3, absolute 1e-8 b)
+        with a budget of 4 000 000 stored points.
+    thnmax : float or "njoy"
+        Top of the broadening in eV; the 0 K values stand above it. ``"njoy"``
+        is the top of the resolved resonance range; with only an unresolved
+        range, its start; with no resonance parameters, the lesser of 6.5 MeV
+        and the lowest threshold of the reactions with a negative Q value. It is
+        never above 6.5 MeV.
+    thinning : float or None
+        Relative tolerance (a fraction) that each temperature's cross sections
+        are stated to; default 1e-3. It is shared between the 0 K source, the
+        Doppler table and the thinning, so that together they stay within it
+        (``kika.processing.tolerances``), and it is five times tighter below
+        0.4999 eV. ``None`` keeps every point of the union grid.
+    urr : bool
+        Compute the probability tables of the unresolved resonance range.
+        Nothing is computed, and the stage is ``skipped``, when the evaluation
+        has no unresolved range or ``temperatures`` is empty.
+    urr_bins : int
+        Probability bands per table. Default 20.
+    urr_ladders : int
+        Most resonance ladders drawn at one energy. Default 4096. Fewer are
+        drawn at an energy once the statistical error of its table reaches
+        5e-3, which is first tested after 64 ladders.
+    heating : bool or None
+        Where the KERMA (MT301) and damage (MT444) go. ``None`` (the default):
+        only into the ACE and HDF5 files, computed when they are written.
+        ``True``: the heating stage too, MT301 and MT444 at every temperature,
+        0 K included, written into the PENDF. ``False``: nowhere; an ACE
+        table's heating numbers are then 0 and the HDF5 file has no MT301,
+        MT444 or MT901, which a heating tally needs. The ``omitted`` entry of
+        each file's write stage says so.
+    workers : int or None
+        Count for every stage: the reconstruction's workers, the processes of
+        the broadening and of the URR tables, the heating's threads. The
+        verification physics of the reconstruction runs in parallel only when
+        its work (energies times levels) reaches 1e9, on processes or threads
+        according to the solver and the size of the work. ``None`` takes
+        ``KIKA_WORKERS`` if set, else each stage's own default (the
+        reconstruction up to four, the others up to eight). No result depends
+        on it.
     """
     temperatures: tuple = DEFAULT_TEMPERATURES
     broaden: bool = True
@@ -208,9 +247,30 @@ class ProcessingPlan:
 class StageReport:
     """One stage of a :func:`process_endf` run; plain types only.
 
-    ``status`` is ``done``, ``skipped`` or ``rejected``; ``category`` is set on
-    the last two (a key of :data:`PROCESSING_REJECTION_CATEGORIES`) and ``None``
-    when a stage was simply not requested. ``summary`` is one English line.
+    Found in :attr:`EndfProcessing.stages`, one per stage in order (a run that
+    writes files appends one ``write`` stage per call).
+
+    Attributes
+    ----------
+    stage : str
+        ``read``, ``decode``, ``reconstruct``, ``broaden``, ``urr``,
+        ``heating`` or ``write``.
+    status : str
+        ``done``, ``skipped`` or ``rejected``.
+    seconds : float or None
+        Wall time of the stage in s; ``None`` for a stage that did not run.
+    category : str or None
+        On a ``skipped`` or ``rejected`` stage, a key of
+        ``PROCESSING_REJECTION_CATEGORIES`` (the dictionary of sentences in
+        ``kika.endf.process``). A rejected ``write`` stage of a PENDF can
+        instead carry a category of ``kika.processing.REJECTION_CATEGORIES``
+        (for example ``verification-failed``), when the 0 K material's
+        reconstruction error is re-raised. ``None`` when a stage was simply not
+        requested.
+    summary : str
+        One English line.
+    details : dict
+        Plain types, by stage as below.
 
     ``details`` by stage (every key optional; energies in eV, times in s):
 
@@ -309,17 +369,32 @@ def _resonance_line(resolved, unresolved):
 def inspect_endf_processing(path) -> dict:
     """What :func:`process_endf` can do with a tape, from MF1 and MF2 alone (seconds).
 
-    Returns ``evaluation`` (MF1/451 identification: ``za``, ``mat``, ``zsymam``,
-    ``awr``, ``library``, ``temperature_K``, ``lrp``, ``emax_eV``, ...),
-    ``resonance_ranges`` (one dict per MF2 range: ``formalism``, ``el_eV``,
-    ``eh_eV``, ``lru``, ``lrf``, ``resonances``, ...), ``resolved``
-    (``formalisms``, ``resonances``, ``range_eV``) or ``None``, ``unresolved``
-    (``range_eV``, ``case``, ``lssf``) or ``None``, ``reactions`` (the MF3 MTs
-    of the MF1 directory) and ``stages``: per stage, ``applicable`` (bool),
-    ``predicted_rejection`` (a category or ``None``) and ``reason``.
+    The prediction is static: it looks at the flags and formalisms that the
+    engine is known to refuse. A run can still be rejected on its budgets or
+    verification.
 
-    The prediction is static -- the flags and formalisms the engine is known
-    to refuse. A run can still be rejected on its budgets or verification.
+    Parameters
+    ----------
+    path
+        The ENDF-6 tape. Only MF1 and MF2 are read.
+
+    Returns
+    -------
+    dict
+        ``evaluation`` (MF1/451 identification: ``za``, ``mat``, ``zsymam``,
+        ``awr``, ``library``, ``temperature_K``, ``lrp``, ``emax_eV``, ...);
+        ``resonance_ranges`` (one dict per MF2 range: ``formalism``, ``el_eV``,
+        ``eh_eV``, ``lru``, ``lrf``, ``resonances``, ...); ``resolved``
+        (``formalisms``, ``resonances``, ``range_eV``) or ``None``;
+        ``unresolved`` (``range_eV``, ``case``, ``lssf``) or ``None``;
+        ``reactions`` (the MF3 MTs of the MF1 directory); and ``stages``, a
+        dict with the keys ``reconstruct``, ``broaden``, ``urr`` and
+        ``heating``, each holding ``applicable`` (bool),
+        ``predicted_rejection`` (a category or ``None``) and ``reason``.
+        Energies are in eV and temperatures in K. A tape with ``LRP = 2``, more
+        than one isotope in MF2, or resolved parameters with ``LRF`` 4
+        (Adler-Adler), 5 or 6, has ``reconstruct`` predicted as rejected and
+        the other stages not applicable.
     """
     from kika.endf.read_endf import read_endf
     from .reconstruction_report import evaluation_summary
@@ -363,9 +438,34 @@ def _contiguous(x):
 
 
 class EndfProcessing:
-    """The result of :func:`process_endf`. Every array is float64; :meth:`to_dict`
-    gives it as plain types and arrays, which pickle (the result itself holds the
-    reconstruction, which does not)."""
+    """The result of :func:`process_endf` (or :func:`process_gnds`); not built by hand.
+
+    Every array is float64; :meth:`to_dict` gives the result as plain types and
+    arrays, which pickle, as do :attr:`stages`. The ``write_*`` methods produce
+    the outputs and each appends a ``write`` stage to :attr:`stages`.
+
+    Parameters
+    ----------
+    reconstruction
+        The 0 K :class:`~kika.endf.EndfReconstruction`, kept unchanged in the
+        attribute of the same name.
+    plan : ProcessingPlan
+        The plan the run followed.
+    stages : list of StageReport
+        One report per stage, in order.
+    heated : dict
+        ``{T: {MT: (E, sigma)}}`` of the broadened temperatures, in K, eV and b.
+    thnmax : float or None
+        Top of the broadening in eV (the 0 K values stand above it), or
+        ``None`` when nothing was broadened.
+    urr_tables : dict
+        ``{T: ProbabilityTables}`` of the URR stage; empty when it did not run.
+    broadened : dict, optional
+        The raw broadened forms, kept so that ``write_hdf5`` and ``write_ace``
+        do not broaden again.
+    source_format : {"endf", "gnds"}
+        What the evaluation was read from.
+    """
 
     def __init__(self, reconstruction, plan, stages, heated, thnmax, urr_tables, *, broadened=None,
                  source_format="endf"):
@@ -413,17 +513,53 @@ class EndfProcessing:
         return tuple(sorted(self._heated))
 
     def stage(self, name) -> StageReport:
+        """The first stage called *name* in :attr:`stages`.
+
+        A run that wrote several files has several ``write`` stages; this
+        returns the first.
+
+        Parameters
+        ----------
+        name
+            ``read``, ``decode``, ``reconstruct``, ``broaden``, ``urr``,
+            ``heating`` or ``write``.
+
+        Returns
+        -------
+        StageReport
+
+        Raises
+        ------
+        StopIteration
+            If there is no such stage (no file written yet, for ``write``).
+        """
         return next(s for s in self.stages if s.stage == name)
 
     def cross_sections(self, temperature=None) -> dict:
-        """``{MT: (E, sigma)}``, float64 arrays, every reaction with an MT
-        including the sums (MT1, 4, 103...).
+        """The cross sections of every reaction with an MT at one temperature.
 
-        ``None`` or 0: the 0 K reconstruction (a repeated energy is a real
-        jump). A broadened ``temperature``: the broadened values below
-        ``thnmax`` and the 0 K ones above, on that temperature's union grid,
-        thinned as the plan says; each reaction starts at its threshold.
-        ``KeyError`` for a temperature that was not broadened.
+        Parameters
+        ----------
+        temperature : float, optional
+            Temperature in K. ``None`` or 0 is the 0 K reconstruction. Another
+            value must match a broadened temperature of the run to a relative
+            1e-9.
+
+        Returns
+        -------
+        dict
+            ``{MT: (E, sigma)}``, with float64 arrays, energies in eV and cross
+            sections in b; the sums (MT1, 4, 103...) are among the keys. At 0 K
+            a repeated energy is a real jump. At a broadened temperature the
+            values are the broadened ones below ``thnmax`` and the 0 K ones
+            above it, on that temperature's union grid, thinned as the plan
+            says; each reaction starts at its threshold. The same dictionary
+            is returned on every call, so do not modify it.
+
+        Raises
+        ------
+        KeyError
+            If *temperature* was not broadened in this run.
         """
         if not temperature:
             if self._cold is None:
@@ -437,11 +573,13 @@ class EndfProcessing:
 
     @property
     def probability_tables(self) -> dict | None:
-        """``{T: tables}`` when the URR stage ran, else ``None``. Each ``tables``:
-        ``energies`` (NE,), and ``cdf``, ``total``, ``elastic``, ``fission``,
-        ``capture``, ``heating`` as (NE, NB) arrays; ``factors`` True when the
-        band values multiply the smooth (dilute) cross sections rather than
-        being barns; ``interpolation`` (2 lin-lin, 5 log-log between energies);
+        """``{T: tables}`` (T in K) when the URR stage ran, else ``None``.
+
+        Each ``tables`` is a dict: ``energies`` (NE,) in eV; ``cdf``, ``total``,
+        ``elastic``, ``fission``, ``capture`` and ``heating`` as (NE, NB)
+        float64 arrays; ``factors``, True when the band values multiply the
+        smooth (dilute) cross sections and False when they are in b;
+        ``interpolation`` (2 lin-lin, 5 log-log between energies); and
         ``inelastic`` and ``absorption``, the competing MTs (<= 0: none).
         """
         if not self._urr:
@@ -488,35 +626,66 @@ class EndfProcessing:
 
     def write_pendf(self, path, *, progress: Progress | None = None, temperatures=None,
                     mat=None, workers=None):
-        """Write the PENDF: one material per temperature, as NJOY BROADR leaves it.
+        """Write the PENDF: one material per temperature, on one tape.
 
-        ``temperatures`` (kelvin; ``0`` is the reconstruction) chooses the
-        materials; ``None`` writes 0 K and every broadened temperature, in
-        increasing order. Each material repeats the MAT with its own TEMP in
-        MF1/451 and LRP=2, keeps MF2 and carries the MF3 of its temperature;
-        a broadened one also carries MF2/MT153, the URR probability tables in
-        PURR's layout, when the URR stage produced them at that temperature
-        (written as factors, LSSF=1, with a zero heating row, as PURR leaves
-        it without HEATR). When the heating stage ran, every material carries
-        MF3/MT301 and MT444 as HEATR adds them (:attr:`heating`).
+        Each material repeats the MAT with its own TEMP in MF1/451 and LRP=2,
+        keeps MF2 and carries the MF3 of its temperature; a broadened one also
+        carries MF2/MT153, the URR probability tables in the PURR layout, when
+        the URR stage produced them at that temperature (written as factors,
+        LSSF=1, with a zero heating row). When the heating stage ran, every
+        material carries MF3/MT301 and MT444 (:attr:`heating`).
 
-        From a GNDS evaluation the PENDF is RECONR's: MF1/451 derived from the
-        model (as the GNDS to ENDF-6 writer does), an MF2/151 that states the
-        scattering radius alone (one LRU=0 range up to the top of the resolved
-        range), since the resonances are in MF3 and GNDS does not carry their
-        ENDF bookkeeping (:func:`~kika.endf.model_adapter.pendf.pendfResonances`),
-        and MF3. The nu-bars, MF1/458 and the distributions stay on the
-        evaluation, where NJOY's later modules read them, as from RECONR.
+        From a GNDS evaluation the MF1/451 is derived from the model (as the
+        GNDS to ENDF-6 writer does) and the MF2/151 states the scattering radius
+        alone (one LRU=0 range up to the top of the resolved range), since the
+        resonances are in MF3 and GNDS does not carry their ENDF bookkeeping
+        (``pendfResonances``). The nu-bars, MF1/458 and the distributions are
+        not on the PENDF.
 
-        The 0 K material is ``EndfReconstruction.write_pendf``'s: verified
+        The 0 K material is that of ``EndfReconstruction.write_pendf``: verified
         against the resonance physics before and after the reload. Each
         broadened one is read back and compared with the table in memory, every
-        point within half the 0.1 % tolerance, and its MT153 parsed back. The
-        destination is replaced only if every material passes.
+        point within half the reconstruction's tolerance (``rtol`` and ``atol``
+        of the plan's ``reconstruction`` options), and its MT153 is parsed
+        back. The destination is replaced only if every material passes.
+        Each call appends its own ``write`` stage, ``rejected`` on a failure.
 
-        Raises the reconstruction's errors for the 0 K material, else
-        :class:`ProcessingOutputError` (``pendf-temperature-not-processed``,
-        ``pendf-failed``). Each call appends its own ``write`` stage.
+        Parameters
+        ----------
+        path
+            The PENDF to write; its folder is created if missing.
+        progress
+            ``progress("write", fraction)``: ``None`` at the start, then a float
+            in (0, 1] shared evenly between the materials.
+        temperatures
+            Temperatures in K of the materials; ``0`` is the reconstruction.
+            ``None`` writes 0 K and every broadened temperature, in increasing
+            order. A given list is sorted and de-duplicated.
+        mat
+            MAT of every material. ``None`` takes the evaluation's own.
+        workers
+            Workers of the 0 K material's verification, which runs in
+            parallel only when its work (energies times levels) reaches 1e9,
+            on processes or threads by solver and size. ``None`` takes the
+            plan's ``workers``; 1 keeps it in this thread. No result depends
+            on it.
+
+        Returns
+        -------
+        pathlib.Path
+            *path*.
+
+        Raises
+        ------
+        ProcessingOutputError
+            ``pendf-temperature-not-processed`` for a temperature that was not
+            broadened (0 excepted); ``pendf-failed`` for an empty list of
+            temperatures, a conversion that loses data, or a material that
+            differs on reload.
+        ~kika.processing.resonances.ReconstructionConvergenceError
+            The reconstruction's own error, from the 0 K material.
+        ~kika.processing.resonances.UnsupportedResonanceError
+            Likewise.
         """
         import tempfile
         t0 = time.perf_counter()
@@ -709,10 +878,26 @@ class EndfProcessing:
         kika writes and validates, has no element for them (they are 2.1); the
         stage lists them under ``omitted``. Covariances are not written either.
         The file is read back and its styles and temperatures checked before it
-        replaces ``path``.
+        replaces ``path``. Each call appends its own ``write`` stage.
 
-        Raises :class:`ProcessingOutputError` (``gnds-failed``). Each call
-        appends its own ``write`` stage.
+        Parameters
+        ----------
+        path
+            The GNDS file to write; its folder is created if missing.
+        progress
+            ``progress("write", fraction)``: ``None`` at the start, then floats
+            up to 1.0.
+
+        Returns
+        -------
+        pathlib.Path
+            *path*.
+
+        Raises
+        ------
+        ProcessingOutputError
+            ``gnds-failed``: the tape could not be read whole, the file could
+            not be written, or its styles and temperatures did not read back.
         """
         import tempfile
         import kika
@@ -773,12 +958,30 @@ class EndfProcessing:
         and the URR tables are reused, not recomputed; the distributions and
         heating are computed here, since only this format needs them, and are
         the slow part. The file is read back and compared before it replaces
-        ``path``. ``index`` also writes or updates ``cross_sections.xml`` in
-        the same directory.
+        ``path``. Each call appends its own ``write`` stage, whose ``omitted``
+        lists what the file lacks (URR tables the URR stage did not produce;
+        the heating, when the plan has ``heating=False``).
 
-        Raises :class:`ProcessingOutputError`: ``hdf5-needs-temperature``
-        when nothing was broadened (OpenMC needs a temperature), else
-        ``hdf5-failed``. Each call appends its own ``write`` stage.
+        Parameters
+        ----------
+        path
+            The HDF5 file to write; its folder is created if missing.
+        progress
+            ``progress("write", fraction)``: ``None`` at the start, then floats
+            up to 1.0.
+        index
+            Also write or update ``cross_sections.xml`` in the folder of *path*.
+
+        Returns
+        -------
+        pathlib.Path
+            *path*.
+
+        Raises
+        ------
+        ProcessingOutputError
+            ``hdf5-needs-temperature`` when nothing was broadened (OpenMC needs
+            a temperature); ``hdf5-failed`` for any other failure.
         """
         from kika.hdf5.writer import writeSuite
         t0 = time.perf_counter()
@@ -827,18 +1030,54 @@ class EndfProcessing:
         the legacy header, the KERMA of HEATR's ``local = 0`` as ESZ's heating
         number. Each table is ``<ZAID><suffix>`` (``8016.02c``); it is read
         back in strict mode and compared word for word before it replaces a
-        file. ``xsdir`` adds its line to ``directory/xsdir`` (path relative to
-        it), refusing a table name the file already has unless ``replace``.
+        file. The light charged particles are written (PTYPE, NTRO, IXS), as
+        ACER writes them. Each call appends its own ``write`` stage, whose
+        ``omitted`` lists what the tables leave out (URR tables the URR stage
+        did not produce, the heating when the plan has ``heating=False``, and
+        what the encoder does not support).
 
-        ``temperatures`` (kelvin) picks some of the broadened ones; ``extension``
-        overrides the suffix and needs a single temperature. The light
-        charged particles are written (PTYPE, NTRO, IXS), as ACER writes them.
-        Returns the paths written.
+        A table file replaces any file of the same name; ``replace`` governs
+        only the xsdir entry. Tables are written one temperature at a time, in
+        increasing order, so a failure at one temperature leaves the earlier
+        tables on disk.
 
-        Raises :class:`ProcessingOutputError`: ``ace-needs-temperature`` when
-        nothing was broadened, ``ace-temperature-not-processed``,
-        ``ace-table-exists``, else ``ace-failed``. Each call appends its own
-        ``write`` stage.
+        Parameters
+        ----------
+        directory
+            Output folder, created if missing.
+        temperatures
+            Temperatures in K, a number or a sequence, chosen among the
+            broadened ones to a relative 1e-9. ``None`` writes all of them.
+        extension
+            Suffix of the table in place of the one derived from the
+            temperature (``.02c`` at 293.6 K); it names one table, so it
+            needs a single temperature.
+        xsdir
+            Add the line of each table to ``directory/xsdir`` (the path of
+            the table is relative to it); the file is created if missing.
+        replace
+            When a table name is already in the xsdir, ``False`` refuses and
+            ``True`` replaces that entry. It does nothing when ``xsdir`` is
+            false.
+        progress
+            ``progress("write", fraction)``: ``None`` at the start, then floats
+            up to 1.0.
+
+        Returns
+        -------
+        list of pathlib.Path
+            The table files written, in increasing temperature.
+
+        Raises
+        ------
+        ProcessingOutputError
+            ``ace-needs-temperature`` when nothing was broadened;
+            ``ace-temperature-not-processed`` for a requested temperature that
+            was not; ``ace-table-exists`` when the xsdir names a table and
+            ``replace`` is false (that table file has then been written, only
+            the xsdir is unchanged, and the tables of earlier temperatures stay
+            on disk); ``ace-failed`` for any other failure,
+            including an ``extension`` with more than one temperature.
         """
         from kika.ace.model_adapter import encodeAce
         from kika.ace.writers.write_ace import write_ace_checked
@@ -920,10 +1159,28 @@ class EndfProcessing:
         :meth:`write_ace`; each table is read back in strict mode and compared
         word for word before it replaces a file.
 
-        Raises :class:`ProcessingOutputError` with the categories of
-        :meth:`write_ace`: ``ace-needs-temperature``,
-        ``ace-temperature-not-processed``, ``ace-table-exists``, ``ace-failed``.
-        Each call appends its own ``write`` stage.
+        Each call appends its own ``write`` stage (``format`` ``ace``), whose
+        ``omitted`` lists what each temperature's table dropped. As in
+        :meth:`write_ace`, a table file replaces any file of the same name and
+        ``replace`` governs only the xsdir entry.
+
+        Parameters
+        ----------
+        directory, temperatures, extension, xsdir, replace, progress
+            As in :meth:`write_ace`; the default suffix is that of the
+            dosimetry table (``.02y`` at 293.6 K).
+
+        Returns
+        -------
+        list of pathlib.Path
+            The table files written, in increasing temperature.
+
+        Raises
+        ------
+        ProcessingOutputError
+            The categories of :meth:`write_ace`: ``ace-needs-temperature``
+            (nothing was broadened), ``ace-temperature-not-processed``,
+            ``ace-table-exists`` and ``ace-failed``.
         """
         import datetime
 
@@ -1008,10 +1265,16 @@ class EndfProcessing:
         return written
 
     def report_document(self):
-        """The processing report: did the run go well, and what exactly was done
-        (:mod:`kika.endf.processing_report`). ``to_text()``, ``to_html()``,
-        ``to_dict()``, ``to_json()``, ``save(path)``. Ask for it after the files
-        are written: each ``write_*`` call is one of the stages it reports."""
+        """The processing report: did the run go well, and what exactly was done.
+
+        Returns
+        -------
+        kika.endf.processing_report.ProcessingReport
+            Built from the stages recorded so far, so ask for it after the
+            files are written: each ``write_*`` call is one of the stages it
+            reports. It offers ``to_text()``, ``to_html()``, ``to_dict()``,
+            ``to_json()`` and ``save(path)``.
+        """
         from .processing_report import ProcessingReport, build
         return ProcessingReport(build(self))
 
@@ -1606,13 +1869,41 @@ def dosimetry_ace(path, directory, *, extension: str | None = None, xsdir: bool 
     ``process_endf(path, ProcessingPlan(temperatures=...)).write_dosimetry_ace(...)``.
 
     The suffix is the tape temperature's (``.02y`` at 293.6 K, ``.01y`` at 0 K); a
-    temperature with none needs ``extension``. Returns the path written; the table is
-    read back and compared word for word before it replaces a file, and its
-    line is added to ``directory/xsdir`` unless ``xsdir`` is false.
+    temperature with none needs ``extension``. The table is read back and compared
+    word for word before it replaces a file of the same name.
 
-    Raises :class:`ProcessingOutputError`: ``ace-failed`` (resonance
-    parameters, no suffix for the temperature, unreadable tape) or
-    ``ace-table-exists``.
+    Parameters
+    ----------
+    path
+        An ENDF-6 tape, with no resonance parameters or with ``LRP = 2``.
+    directory
+        Output folder, created if missing.
+    extension
+        Suffix of the table, in place of the one derived from the tape's
+        temperature.
+    xsdir
+        Add the line of the table to ``directory/xsdir``, created if missing.
+        The table file is written first.
+    replace
+        When the table name is already in the xsdir, ``False`` refuses and
+        ``True`` replaces that entry. It does nothing when ``xsdir`` is false.
+
+    Returns
+    -------
+    pathlib.Path
+        The table file written, ``<ZAID><suffix>`` in *directory*.
+
+    Raises
+    ------
+    ProcessingOutputError
+        ``ace-failed`` for a tape with resonance parameters and ``LRP`` other
+        than 2, a temperature with no suffix and no *extension*, or a failure
+        after MF1 and MF2 are read; ``ace-table-exists`` when the xsdir names
+        the table and *replace* is false (the table file has then been
+        written, and only the xsdir is unchanged).
+    FileNotFoundError
+        If the tape is missing. A tape whose MF1 and MF2 cannot be read raises
+        the reader's own exception, not ``ProcessingOutputError``.
     """
     import datetime
 
@@ -1745,28 +2036,103 @@ def photonuclear_ace(path, directory, *, extension: str | None = None, xsdir: bo
 
     The tape's reactions, their sum, the heating number and, per emitted particle
     (n, γ, p, d, t, ³He, α), its production, yields, angles and energy laws, at
-    0 K, as :func:`kika.ace.processing.photonuclear.photonuclearTable` makes them
+    0 K, as ``kika.ace.processing.photonuclear.photonuclearTable`` makes them
     (the method and its choices are there). The suffix is the 0 K one (``.01u``)
-    unless ``extension`` is given. Returns the path written; the table is read
-    back and compared word for word before it replaces a file, and its line is
-    added to ``directory/xsdir`` unless ``xsdir`` is false. What the table leaves
-    out or approximates is the report of
-    :func:`kika.ace.processing.photonuclear.photonuclearTable`.
+    unless ``extension`` is given. The table is read back and compared word for
+    word before it replaces a file of the same name. What the table leaves out
+    or approximates is the report of ``photonuclearTable``.
 
-    Raises :class:`ProcessingOutputError`: ``ace-failed`` (not a photonuclear tape,
-    resonance parameters, unreadable tape) or ``ace-table-exists``.
+    Parameters
+    ----------
+    path
+        An ENDF-6 photonuclear tape, with no resonance parameters.
+    directory
+        Output folder, created if missing.
+    extension
+        Suffix of the table, in place of ``.01u``.
+    xsdir
+        Add the line of the table to ``directory/xsdir``, created if missing.
+        The table file is written first.
+    replace
+        When the table name is already in the xsdir, ``False`` refuses and
+        ``True`` replaces that entry. It does nothing when ``xsdir`` is false.
+
+    Returns
+    -------
+    pathlib.Path
+        The table file written, ``<ZAID><suffix>`` in *directory*.
+
+    Raises
+    ------
+    ProcessingOutputError
+        ``ace-failed`` for a tape that is not photonuclear, one with resonance
+        parameters, or a failure after MF1 and MF2 are read; ``ace-table-exists``
+        when the xsdir names the table and *replace* is false (the table file
+        has then been written, and only the xsdir is unchanged).
+    FileNotFoundError
+        If the tape is missing. A tape whose MF1 and MF2 cannot be read raises
+        the reader's own exception, not ``ProcessingOutputError``.
     """
     return write_checked_ace(photonuclear_table(path, extension=extension), directory, xsdir=xsdir,
                              replace=replace)
 
 
 def process_endf(path, plan: ProcessingPlan | None = None, progress: Progress | None = None) -> EndfProcessing:
-    """Process an ENDF-6 neutron tape stage by stage (see the module doc for
-    the stages, the progress calls and the failure contract).
+    """Process an ENDF-6 neutron tape stage by stage, and keep every result in memory.
+
+    The stages, in order, are ``read``, ``decode`` and ``reconstruct`` (the 0 K
+    cross sections), ``broaden`` (free-gas Doppler broadening at each
+    temperature of the plan), ``urr`` (probability tables of the unresolved
+    range) and ``heating`` (MT301 and MT444, only when ``plan.heating`` is
+    ``True``). Nothing is written: the PENDF, HDF5, ACE and GNDS files come from
+    the ``write_*`` methods of the result.
+
+    ``read``, ``decode`` and ``reconstruct`` raise: without the 0 K cross
+    sections there is nothing to show. The later stages never raise. A stage
+    the material does not admit is recorded as ``rejected``, with a category of
+    ``PROCESSING_REJECTION_CATEGORIES`` in ``kika.endf.process``; a stage
+    that does not apply, or that the plan did not ask for, is ``skipped``; and
+    the results of the earlier stages are kept either way. Read them from
+    :attr:`EndfProcessing.stages`.
 
     Called from a daemonic process, which may not start children, the
     broadening and the URR tables run in this process; the threaded stages keep
-    ``plan.workers``. The results do not depend on the number of workers."""
+    ``plan.workers``. The results do not depend on the number of workers.
+
+    Parameters
+    ----------
+    path
+        The ENDF-6 tape.
+    plan
+        What to do and with which options; ``None`` is ``ProcessingPlan()``:
+        room temperature (293.6 K), broadening, URR tables, no heating stage.
+    progress
+        ``progress(stage, fraction)``, called with the stages ``read``,
+        ``decode``, ``reconstruct``, ``broaden:<T>`` (one per temperature, with
+        ``T`` formatted ``%g``; the temperatures run in parallel, so their
+        calls interleave), ``urr`` and ``heating``. ``fraction`` is ``None``
+        when a stage starts and then a float in (0, 1].
+
+    Returns
+    -------
+    EndfProcessing
+        The stage reports, the cross sections at 0 K and at each broadened
+        temperature, the probability tables and the heating, with the methods
+        that write the outputs.
+
+    Raises
+    ------
+    ~kika.processing.resonances.UnsupportedResonanceError
+        If the evaluation uses resonance data the reconstruction does not
+        support; its ``category`` is in ``kika.processing.REJECTION_CATEGORIES``.
+    ~kika.processing.resonances.ReconstructionConvergenceError
+        If the reconstruction exhausts its point or iteration budget or fails
+        its verification; same ``category`` convention.
+    RuntimeError
+        If called while a worker process is importing the caller's main script
+        (start the run under ``if __name__ == "__main__":``, or use
+        ``ProcessingPlan(workers=1)``).
+    """
     from .reconstruction import reconstruct_endf
     plan, report = _start(plan, progress)
     rec = reconstruct_endf(path, options=plan.reconstruction, progress=report, workers=plan.workers)
@@ -1854,6 +2220,31 @@ def process_gnds(path, plan: ProcessingPlan | None = None, progress: Progress | 
     A file with no resonance parameters takes its evaluated pointwise cross
     sections as they are. The MAT of the outputs is the one the evaluation's
     ``endfCompatible`` text states, when it does.
+
+    Parameters
+    ----------
+    path
+        The GNDS ``reactionSuite`` file. Its covariances are not read.
+    plan
+        As in :func:`process_endf`; ``None`` is ``ProcessingPlan()``.
+    progress
+        As in :func:`process_endf`.
+
+    Returns
+    -------
+    EndfProcessing
+        As :func:`process_endf` returns it, with ``source_format`` ``"gnds"``.
+
+    Raises
+    ------
+    ~kika.processing.resonances.UnsupportedResonanceError
+        With ``category`` ``context-missing`` if the file states no target mass
+        or spin in PoPs, which the reconstruction needs; also the errors of
+        the ``reconstruct`` stage of :func:`process_endf`.
+    ~kika.processing.resonances.ReconstructionConvergenceError
+        As in :func:`process_endf`.
+    RuntimeError
+        As in :func:`process_endf`.
     """
     import kika
     from kika.processing.resonances import ENGINE_VERSION, ReconstructionOptions, native_available, reconstruct_suite

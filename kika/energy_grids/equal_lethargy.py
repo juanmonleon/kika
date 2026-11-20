@@ -15,14 +15,21 @@ def equal_lethargy_grid(e_low: float, e_high: float, n_bins: int) -> np.ndarray:
     Parameters
     ----------
     e_low, e_high : float
-        Positive energy bounds in eV with ``e_high > e_low``.
+        Positive bounds with ``e_high > e_low``. The function does not convert
+        units: the edges are in the unit of the bounds.
     n_bins : int
         Number of bins (produces ``n_bins + 1`` edges).
 
     Returns
     -------
     np.ndarray
-        Monotonically increasing edges, length ``n_bins + 1``.
+        Monotonically increasing edges from *e_low* to *e_high*, length
+        ``n_bins + 1``.
+
+    Raises
+    ------
+    ValueError
+        If a bound is not positive, ``e_high <= e_low``, or ``n_bins < 1``.
     """
     if e_low <= 0 or e_high <= 0:
         raise ValueError("energy bounds must be positive")

@@ -21,7 +21,24 @@ __all__ = ["CheckDescription", "CHECKS", "describe"]
 
 @dataclass(frozen=True)
 class CheckDescription:
-    """``levels`` maps each level the check can give to when it gives it."""
+    """What one check means and when it gives each level.
+
+    The entries are in ``kika.endf.checks.CHECKS``, keyed by the check name that
+    ``Finding.check`` carries. The texts are ASCII; ``to_dict`` gives them with
+    Greek letters and math signs.
+
+    Attributes
+    ----------
+    title : str
+        A short name for the check.
+    mf : tuple of int
+        The files the check runs on.
+    levels : Mapping[str, str]
+        For each level the check can give (``note``, ``warn``, ``defect``), when
+        it gives it, with the thresholds the check uses.
+    description : str
+        What the check looks at and what a finding means for a user of the file.
+    """
 
     title: str
     mf: Tuple[int, ...]

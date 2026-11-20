@@ -1,3 +1,11 @@
+"""MCNP xsdir entries: building the line of a table and keeping an xsdir file.
+
+An xsdir line names a table (ZAID and suffix), its atomic weight ratio, the file that
+holds it, the length of its XSS and its temperature as kT in MeV. Lines longer than
+79 columns are continued with a trailing ``+``. :func:`xsdir_line_for` builds the
+line of an :class:`~kika.ace.classes.ace.Ace`; :func:`add_xsdir_entry` puts it in an
+xsdir file.
+"""
 import os
 import warnings
 
@@ -110,6 +118,26 @@ def xsdir_line_for(ace, file_ref: str) -> str:
 
     Text file (type 1), address 1, ``ptable`` when the table has URR
     probability tables, as ACER writes it.
+
+    The fields, in order: the table name (the header's ZAID followed by its
+    extension, for example ``26056.00c``), the AWR with six decimals, ``file_ref``,
+    ``0``, ``1`` (text file), ``1`` (address), the length of the XSS (NXS(1)), ``0``
+    and ``0`` (record length and entries per record), kT in MeV as written in the
+    header (``%.3E``), and ``ptable`` when present. The line is wrapped at 79
+    columns with a trailing ``+``.
+
+    Parameters
+    ----------
+    ace : Ace
+        The table. Its header supplies the name, AWR, NXS(1) and temperature.
+    file_ref : str
+        The file reference of the third field, as MCNP is to find the file
+        (a path relative to the xsdir, or a name).
+
+    Returns
+    -------
+    str
+        The entry; it holds newlines when it is wrapped.
     """
     h = ace.header
     has_ptable = bool(getattr(getattr(ace, "unresolved_resonance", None), "has_data", False))
@@ -148,6 +176,28 @@ def add_xsdir_entry(xsdir_path, line: str, *, replace: bool = False) -> None:
     MCNP would read only one of the two; ``replace`` drops that entry first.
     Everything else in the file is kept as it is. The sampling master xsdir,
     which replaces on purpose, is written by :func:`create_xsdir_files_for_ace`.
+
+    The entries are the lines after the one that reads ``directory``; a file with no
+    such line is read as entries from its first line. A line before ``directory``
+    is kept as it is. The new entry goes last. The file is read and written in
+    UTF-8 with LF line ends, and blank lines between entries are dropped.
+
+    Parameters
+    ----------
+    xsdir_path : str or path-like
+        The xsdir file. It is created when it does not exist.
+    line : str
+        The entry, as :func:`xsdir_line_for` builds it. Its first word is the table
+        name that is compared with the existing entries.
+    replace : bool, optional
+        When True, an entry with the same name is removed and ``line`` is added at
+        the end. When False (the default), such an entry is an error.
+
+    Raises
+    ------
+    XsdirEntryExists
+        If the file already has an entry with the name of ``line`` and ``replace``
+        is false. The file is not changed.
     """
     name = line.split()[0]
     text = open(xsdir_path, encoding="utf-8").read() if os.path.exists(xsdir_path) else ""
@@ -165,7 +215,18 @@ def add_xsdir_entry(xsdir_path, line: str, *, replace: bool = False) -> None:
 
 
 def write_xsdir_line(xsdir_path: str, line: str, mode: str = "w") -> None:
-    """Write a single xsdir entry (possibly multi-line) to file."""
+    """Write a single xsdir entry (possibly multi-line) to file.
+
+    Parameters
+    ----------
+    xsdir_path : str
+        The file to write.
+    line : str
+        The entry. A newline is added after it.
+    mode : str, optional
+        The mode ``open`` is given: ``"w"`` (the default) replaces the file,
+        ``"a"`` appends. The file is opened with the platform's default encoding.
+    """
     with open(xsdir_path, mode) as fx:
         fx.write(line + "\n")
 
@@ -188,8 +249,40 @@ def create_xsdir_files_for_ace(
     Creates both per-sample xsdir files and optionally updates a master xsdir
     file. Shared between ACE and ENDF perturbation workflows.
 
+    The entry is named ``<zaid><extension>``, the extension being the one of
+    ``ace_file_path`` (with its dot), and its file reference is the path of the
+    ACE file relative to ``output_dir`` with ``../`` before it, with ``/`` as
+    separator: the master xsdir is written in ``output_dir/xsdir``. A file name
+    ending in ``_NNNN`` (the sample number, counted from 1) loses it when the
+    snippet is named. Existing files are overwritten.
+
     Parameters
     ----------
+    ace_file_path : str
+        The perturbed ACE file.
+    zaid : int
+        The ZAID of the entry.
+    awr : float
+        The atomic weight ratio of the entry.
+    xss_len : int
+        The length of the XSS array (NXS(1)).
+    temperature_mev : float
+        The temperature kT in MeV.
+    sample_index : int
+        The sample number counted from 0; the files carry ``sample_index + 1`` as
+        four digits.
+    output_dir : str
+        The root the file reference is relative to; the master xsdir is written in
+        its ``xsdir`` subdirectory (created when missing).
+    master_xsdir_file : str, optional
+        The baseline xsdir. When given, a copy named ``<its stem>_<NNNN>`` is
+        written, with the entry of the same name replaced (its continuation lines
+        too), or added at the end when there is none. When a copy for this sample
+        already exists it is the base instead of ``master_xsdir_file``, so the
+        entries replaced for other tables are kept. When ``None``, no master is
+        written.
+    has_ptable : bool, optional
+        Whether the entry ends in ``ptable``.
     per_sample_xsdir_path : str, optional
         Full path to write the per-sample xsdir snippet. When None, the
         legacy layout `sample_dir/{base}_{sample_str}.xsdir` is used.

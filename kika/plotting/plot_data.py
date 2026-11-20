@@ -46,7 +46,8 @@ class Provenance:
     temperature : float, optional
         Kelvin.
     state : str, optional
-        One of :data:`PROVENANCE_STATES`.
+        One of ``'evaluated'``, ``'background'``, ``'reconstructed'``,
+        ``'heated'``, ``'projected'``, ``'multigroup'`` or ``'measured'``.
     frame : str, optional
         ``'CM'`` or ``'LAB'``, for angular quantities.
     source : str, optional
@@ -99,10 +100,9 @@ class PlotData:
     
     Attributes
     ----------
-    x : array-like
-        X-axis data
-    y : array-like
-        Y-axis data
+    x, y : array_like
+        The abscissae and ordinates, of one length, stored as numpy arrays. Their
+        units are ``x_unit`` and ``y_unit``; nothing in the class converts them.
     label : str, optional
         Label for legend
     color : str or tuple, optional
@@ -126,6 +126,25 @@ class PlotData:
         frontend plotting libraries (e.g., Plotly's line_shape parameter).
     metadata : dict
         Additional metadata about the data (e.g., isotope, MT, order)
+    quantity : str, optional
+        Key of :data:`~kika.plotting.QUANTITIES` that says what the curve is.
+        Keyword-only. :func:`~kika.plotting.plottable` fills it in; a curve
+        without it is drawn as given.
+    x_unit, y_unit : str, optional
+        Unit of ``x`` and of ``y``, keyword-only. An adapter of
+        :func:`~kika.plotting.plottable` may set them; where it sets none,
+        ``plottable`` fills in the canonical unit of the quantity (eV, barn,
+        b/sr, ...). None means unknown::class:`~kika.plotting.PlotBuilder` then leaves that axis
+        unconverted.
+    provenance : Provenance, optional
+        Where the curve comes from and what state it is in, keyword-only.
+        :func:`~kika.plotting.plottable` builds the default legend entry from it,
+        and :class:`~kika.plotting.PlotBuilder` warns when curves of different
+        frames share an axis.
+    interpolation : str, optional
+        Law between the points, keyword-only (``'lin-lin'``, ``'log-log'``, ...).
+        :class:`~kika.plotting.ComparisonBuilder` reads the reference's one when
+        it has no ``interpolation`` of its own.
     """
     x: np.ndarray
     y: np.ndarray
@@ -169,7 +188,13 @@ class PlotData:
         Returns
         -------
         PlotData
-            New PlotData object with updated styling
+            New PlotData object with updated styling. It is a shallow copy: the
+            arrays and ``metadata`` are shared with this object.
+
+        Raises
+        ------
+        ValueError
+            If a keyword is not an attribute of the object.
         """
         # Create a copy of the current object
         import copy
@@ -217,17 +242,29 @@ class PlotData:
 class LegendreCoeffPlotData(PlotData):
     """
     Plottable data for Legendre coefficients.
-    
-    Additional Attributes
-    ---------------------
+
+    A :class:`PlotData` whose ``x`` is the incident energy and ``y`` the
+    coefficient of ``order``. The ``to_plot_data`` methods of the ENDF, ACE and
+    covariance classes return it.
+
+    Attributes
+    ----------
+    x, y, color, linestyle, linewidth, marker, markersize, alpha, drawstyle
+        As in :class:`PlotData`.
+    plot_type, metadata, quantity, x_unit, y_unit, provenance, interpolation
+        As in :class:`PlotData`.
+    label : str, optional
+        Legend entry. None becomes ``'<isotope> - L=<order>'``, or
+        ``'L=<order>'`` when there is no isotope.
     order : int
-        Legendre polynomial order
+        Legendre polynomial order.
     isotope : str, optional
-        Isotope identifier
+        Isotope identifier.
     mt : int, optional
-        MT reaction number
+        MT reaction number.
     energy_range : tuple, optional
-        (min, max) energy range for this data
+        ``(min, max)`` energy range of the data, in the unit of ``x``. Stored
+        in ``metadata``; it does not clip the data.
     """
     order: int = 0
     isotope: Optional[str] = None
@@ -253,23 +290,44 @@ class LegendreCoeffPlotData(PlotData):
 class LegendreUncertaintyPlotData(PlotData):
     """
     Plottable data for Legendre coefficient uncertainties.
-    
-    Additional Attributes
-    ---------------------
+
+    A :class:`PlotData` whose ``y`` is the uncertainty of the coefficient of
+    ``order`` at each ``x`` (an energy). Passed as the ``uncertainty`` of
+    :meth:`PlotBuilder.add_data`, it becomes a band around the nominal curve.
+
+    Attributes
+    ----------
+    x, y, color, linestyle, linewidth, marker, markersize, alpha, drawstyle
+        As in :class:`PlotData`.
+    metadata, quantity, x_unit, y_unit, provenance, interpolation
+        As in :class:`PlotData`.
+    label : str, optional
+        Legend entry. None becomes ``'<isotope> - L=<order>'``, or
+        ``'L=<order>'`` when there is no isotope.
+    plot_type : str
+        As in :class:`PlotData`, except that the default ``'line'`` becomes
+        ``'step'``.
     order : int
-        Legendre polynomial order
+        Legendre polynomial order.
     isotope : str, optional
-        Isotope identifier
+        Isotope identifier.
     mt : int, optional
-        MT reaction number
-    uncertainty_type : str
-        'relative' or 'absolute'
+        MT reaction number.
+    uncertainty_type : {'relative', 'absolute'}
+        ``'relative'``: ``y`` is a percentage (the band divides it by 100).
+        ``'absolute'``: ``y`` is the half-width in the units of the nominal
+        curve. Any other string is read as ``'absolute'`` by the band.
     sigma : float
-        Number of sigma levels (1.0 = 1σ, 2.0 = 2σ)
-    energy_bins : array-like, optional
-        Energy bin boundaries for step plots
-    step_where : str
-        Where to place steps: 'pre', 'post', 'mid'
+        The number of standard deviations ``y`` stands for (1.0 is one sigma).
+        Stored for the caller: the band built from this object does not apply
+        it again.
+    energy_bins : array_like, optional
+        Energy bin boundaries, stored as an array. The builders do not read it.
+    step_where : {'pre', 'post', 'mid'}
+        Where the steps change, as in ``matplotlib.axes.Axes.step``. It is read
+        only when the curve is drawn as steps, and a ``drawstyle`` containing
+        ``'steps'`` (``'steps-pre'``, ``'steps-mid'``, ``'steps-post'``) overrides
+        it.
     """
     order: int = 0
     isotope: Optional[str] = None
@@ -307,16 +365,28 @@ class AngularDistributionPlotData(PlotData):
     """
     Plottable data for angular distributions.
 
-    Additional Attributes
-    ---------------------
+    A :class:`PlotData` whose ``x`` is the cosine of the scattering angle and
+    ``y`` the distribution at one incident ``energy``.
+
+    Attributes
+    ----------
+    x, y, color, linestyle, linewidth, marker, markersize, alpha, drawstyle
+        As in :class:`PlotData`.
+    plot_type, metadata, quantity, x_unit, y_unit, provenance, interpolation
+        As in :class:`PlotData`.
+    label : str, optional
+        Legend entry. None becomes ``'E = <energy> MeV'`` with the energy in
+        scientific notation and two decimals, whatever the unit of ``energy``.
     energy : float
-        Energy at which this distribution is defined
+        Incident energy of this distribution. Its unit is the caller's: the
+        default label writes the number followed by MeV.
     isotope : str, optional
-        Isotope identifier
+        Isotope identifier.
     mt : int, optional
-        MT reaction number
+        MT reaction number.
     distribution_type : str, optional
-        Type of distribution: 'legendre', 'tabulated', 'mixed'
+        Kind of distribution: ``'legendre'``, ``'tabulated'`` or ``'mixed'``.
+        Stored; the class does not check it.
     """
     energy: float = 0.0
     isotope: Optional[str] = None
@@ -344,14 +414,23 @@ class CrossSectionPlotData(PlotData):
     This class represents cross section data as a function of energy,
     typically from EXFOR experimental data or ENDF evaluations.
 
-    Additional Attributes
-    ---------------------
+    Attributes
+    ----------
+    x, y, color, linestyle, linewidth, marker, markersize, alpha, drawstyle
+        As in :class:`PlotData`.
+    plot_type, metadata, quantity, x_unit, y_unit, provenance, interpolation
+        As in :class:`PlotData`.
+    label : str, optional
+        Legend entry. None becomes ``'<isotope> MT=<mt>'``, or ``'MT=<mt>'``
+        without an isotope; it stays None without an ``mt``.
     isotope : str, optional
         Isotope identifier (e.g., 'Fe56')
     mt : int, optional
         MT reaction number (e.g., 1 for total, 2 for elastic)
-    energy_range : Tuple[float, float], optional
-        (min, max) energy range for this data in MeV
+    energy_range : tuple of float, optional
+        ``(min, max)`` energy range of the data, in the unit of ``x`` (the
+        ENDF producer sets it to the range of its own ``x``). Stored in
+        ``metadata``; it does not clip the data.
     data_source : str, optional
         Source of data: 'exfor', 'endf', 'ace', etc.
     """
@@ -380,10 +459,24 @@ class DifferencePlotData(PlotData):
     """
     Plottable data representing a difference or ratio between two datasets.
 
-    Additional Attributes
-    ---------------------
-    difference_type : str
-        'relative' (percentage) or 'absolute' (same units as original)
+    :func:`~kika.plotting.compute_difference` returns one as the ``difference``
+    of its result, with no units, quantity or provenance set.
+
+    Attributes
+    ----------
+    x, y, color, linestyle, linewidth, marker, markersize, alpha, drawstyle
+        As in :class:`PlotData`.
+    plot_type, metadata, quantity, x_unit, y_unit, provenance, interpolation
+        As in :class:`PlotData`.
+    label : str, optional
+        Legend entry. None becomes ``'(<comparison> − <reference>) / <reference>'``
+        for a relative difference and ``'<comparison> − <reference>'`` for an
+        absolute one, with ``'comp'`` and ``'ref'`` for a missing label.
+    difference_type : {'relative', 'absolute'}
+        ``'relative'``: ``(comparison - reference) / reference``, in per cent
+        or as a fraction as the producer chose. ``'absolute'``: ``comparison -
+        reference``, in the units of the two datasets. Used for the default
+        label and stored in ``metadata``.
     reference_label : str, optional
         Label of the reference dataset
     comparison_label : str, optional
@@ -411,31 +504,42 @@ class DifferencePlotData(PlotData):
 class UncertaintyBand:
     """
     Represents an uncertainty band for a plot.
-    
+
     This can store either absolute bounds or relative uncertainties.
     When relative uncertainties are provided, they will be converted to
     absolute bounds by PlotBuilder using the nominal y values.
-    
-    Attributes
+
+    :func:`~kika.plotting.plottable` returns one in a :class:`PlotItem`: a
+    relative band for evaluated data (the relative standard deviation from the
+    covariance, times ``sigma``) and an absolute one with ``style='errorbar'``
+    for measurements (the reported errors times ``sigma``, as ``y`` minus and
+    plus that).
+
+    Parameters
     ----------
-    x : array-like
-        X-axis data (same as the main plot data)
-    y_lower : array-like, optional
-        Lower bound of uncertainty (absolute values)
-    y_upper : array-like, optional
-        Upper bound of uncertainty (absolute values)
-    relative_uncertainty : array-like, optional
-        Relative uncertainties (fractional, e.g., 0.05 for 5%)
-        If provided, y_lower and y_upper should be None
+    x : array_like
+        Abscissae of the band, the same as those of the curve it belongs to, in
+        the same unit.
+    y_lower, y_upper : array_like, optional
+        Absolute bounds, in the unit of the curve's ``y``, of the length of
+        ``x``. ``sigma`` is not applied to them. Give both or use
+        ``relative_uncertainty``.
+    relative_uncertainty : array_like, optional
+        One standard deviation as a fraction of the curve's ``y`` (0.05 for
+        5 %), of the length of ``x``. The band is then ``y`` plus and minus
+        ``abs(y) * sigma * relative_uncertainty``, computed by
+        :meth:`to_absolute`. Cannot be combined with ``y_lower`` and ``y_upper``.
     sigma : float
-        Number of sigma levels (default: 1.0)
+        Number of standard deviations that ``relative_uncertainty`` is
+        multiplied by (default 1.0, a one-sigma band). It has no effect on
+        absolute bounds.
     color : str or tuple, optional
         Fill color
     alpha : float
         Transparency (default: 0.2)
     label : str, optional
         Label for legend
-    style : str
+    style : {'band', 'errorbar'}
         Rendering style: ``'band'`` for ``fill_between`` (default) or
         ``'errorbar'`` for vertical error bars via ``ax.errorbar()``.
     capsize : float
@@ -444,6 +548,14 @@ class UncertaintyBand:
     elinewidth : float
         Line width for error bars (default: 1.5). Only used when
         ``style='errorbar'``.
+
+    Raises
+    ------
+    ValueError
+        If ``style`` is not one of the two above; if ``relative_uncertainty`` is
+        given with ``y_lower`` or ``y_upper``; if neither
+        ``relative_uncertainty`` nor both bounds are given; or if an array does
+        not have the length of ``x``.
     """
     
     def __init__(
@@ -502,13 +614,23 @@ class UncertaintyBand:
         
         Parameters
         ----------
-        y_nominal : array-like
-            Nominal y values to apply uncertainties to
-            
+        y_nominal : array_like
+            Nominal y values to apply uncertainties to, of the length of ``x``.
+            Ignored by a band that already holds absolute bounds.
+
         Returns
         -------
-        tuple of (y_lower, y_upper)
-            Absolute uncertainty bounds
+        tuple of numpy.ndarray
+            ``(y_lower, y_upper)``. For a relative band,
+            ``y_nominal -/+ abs(y_nominal) * sigma * relative_uncertainty``,
+            symmetric about ``y_nominal``. For an absolute band, the stored
+            bounds, unchanged.
+
+        Raises
+        ------
+        ValueError
+            If the band is relative and ``y_nominal`` does not have the length
+            of ``relative_uncertainty``.
         """
         if not self.is_relative():
             return self.y_lower, self.y_upper
@@ -552,17 +674,33 @@ class UncertaintyBand:
 class MultigroupCrossSectionPlotData(PlotData):
     """
     Plottable data for multigroup cross sections.
-    
-    Additional Attributes
-    ---------------------
+
+    A :class:`PlotData` drawn as steps, with ``x`` the group energies. Also
+    exported as ``MultigroupXSPlotData``, the same class.
+
+    Attributes
+    ----------
+    x, y, color, linestyle, linewidth, marker, markersize, alpha, drawstyle
+        As in :class:`PlotData`.
+    metadata, quantity, x_unit, y_unit, provenance, interpolation
+        As in :class:`PlotData`.
+    label : str, optional
+        Legend entry. None becomes ``'<symbol> MT=<mt>'`` from the ZAID, or
+        ``'MT=<mt>'`` without one; it stays None without an ``mt``.
+    plot_type : str
+        As in :class:`PlotData`, except that the default ``'line'`` becomes
+        ``'step'``.
     zaid : int, optional
         Isotope identifier (ZAID)
     mt : int, optional
         MT reaction number
-    energy_bins : array-like, optional
-        Energy bin boundaries for step plots
-    step_where : str
-        Where to place steps: 'pre', 'post', 'mid'
+    energy_bins : array_like, optional
+        Energy bin boundaries, stored as an array. The builders do not read it.
+    step_where : {'pre', 'post', 'mid'}
+        Where the steps change, as in ``matplotlib.axes.Axes.step``. It is read
+        only when the curve is drawn as steps, and a ``drawstyle`` containing
+        ``'steps'`` (``'steps-pre'``, ``'steps-mid'``, ``'steps-post'``) overrides
+        it.
     """
     zaid: Optional[int] = None
     mt: Optional[int] = None
@@ -596,19 +734,38 @@ class MultigroupCrossSectionPlotData(PlotData):
 class MultigroupUncertaintyPlotData(PlotData):
     """
     Plottable data for multigroup cross section uncertainties.
-    
-    Additional Attributes
-    ---------------------
+
+    A :class:`PlotData` drawn as steps, with ``x`` the group energies and ``y``
+    the uncertainty of the group cross section. Passed as the ``uncertainty``
+    of :meth:`PlotBuilder.add_data`, it becomes a band around the nominal curve.
+
+    Attributes
+    ----------
+    x, y, color, linestyle, linewidth, marker, markersize, alpha, drawstyle
+        As in :class:`PlotData`.
+    metadata, quantity, x_unit, y_unit, provenance, interpolation
+        As in :class:`PlotData`.
+    label : str, optional
+        Legend entry. None becomes ``'<symbol> MT=<mt>'`` from the ZAID, or
+        ``'MT=<mt>'`` without one; it stays None without an ``mt``.
+    plot_type : str
+        As in :class:`PlotData`, except that the default ``'line'`` becomes
+        ``'step'``.
     zaid : int, optional
         Isotope identifier (ZAID)
     mt : int, optional
         MT reaction number
-    uncertainty_type : str
-        'relative' or 'absolute'
-    energy_bins : array-like, optional
-        Energy bin boundaries for step plots
-    step_where : str
-        Where to place steps: 'pre', 'post', 'mid'
+    uncertainty_type : {'relative', 'absolute'}
+        ``'relative'``: ``y`` is a percentage (the band divides it by 100).
+        ``'absolute'``: ``y`` is the half-width in the units of the nominal
+        curve. Any other string is read as ``'absolute'`` by the band.
+    energy_bins : array_like, optional
+        Energy bin boundaries, stored as an array. The builders do not read it.
+    step_where : {'pre', 'post', 'mid'}
+        Where the steps change, as in ``matplotlib.axes.Axes.step``. It is read
+        only when the curve is drawn as steps, and a ``drawstyle`` containing
+        ``'steps'`` (``'steps-pre'``, ``'steps-mid'``, ``'steps-post'``) overrides
+        it.
     """
     zaid: Optional[int] = None
     mt: Optional[int] = None
@@ -724,38 +881,64 @@ class CovarianceHeatmapData(HeatmapPlotData):
     """
     Covariance/correlation matrix heatmap data.
 
-    Additional Attributes
-    ---------------------
-    matrix_type : str
-        'cov' or 'corr'
-    zaid : int, List[int], or None
-        Isotope identifier(s). Single ZAID for single-isotope heatmaps,
-        list of ZAIDs for multi-isotope heatmaps.
+    The ``to_heatmap_data`` methods of the covariance classes return it, and
+    :class:`HeatmapBuilder` draws it.
+
+    Attributes
+    ----------
+    matrix_data, extent, x_edges, y_edges, norm, colorbar_position, mask_value
+        As in :class:`HeatmapPlotData`. With no ``norm`` given, a correlation
+        matrix gets a norm symmetric about zero, ``TwoSlopeNorm`` from minus to
+        plus the largest absolute unmasked value (1 if that is below 1e-10).
+        A covariance matrix gets ``TwoSlopeNorm`` over the unmasked range when
+        it spans zero and ``Normalize`` over it otherwise.
+    mask_color, label, metadata
+        As in :class:`HeatmapPlotData`.
+    cmap : str or colormap
+        As in :class:`HeatmapPlotData`, except that the default ``'viridis'``
+        becomes ``'RdYlGn'`` for a correlation matrix.
+    colorbar_label : str, optional
+        None becomes ``'Correlation'`` or ``'Covariance'`` from ``matrix_type``.
+    matrix_type : {'cov', 'corr'}
+        Covariance or correlation. It selects the default norm, colour map and
+        colorbar label above.
+    zaid : int or list of int, optional
+        Isotope identifier(s): one ZAID for a single-isotope heatmap, a list for a
+        multi-isotope one.
     block_info : dict, optional
-        Information about matrix block structure:
-        - For single-isotope:
-            - 'mts': list of MT numbers
-            - 'G': number of energy groups per MT
-            - 'ranges': list of (start, end) indices for each MT block
-            - 'energy_ranges': dict mapping MT -> (start, end) coordinates
-        - For multi-isotope (when 'is_multi_isotope' is True):
-            - 'blocks': list of (zaid, mt) tuples
-            - 'zaids': list of ZAIDs
-            - 'mts': list of MT numbers
-            - 'G': number of energy groups per block
-            - 'ranges': dict mapping (zaid, mt) -> (start, end) indices
-            - 'energy_ranges': dict mapping (zaid, mt) -> (start, end) coordinates
-            - 'is_multi_isotope': True
+        The block structure of the matrix, with the keys below.
+
+        For a single isotope:
+
+        * ``'mts'``: list of MT numbers.
+        * ``'G'``: number of energy groups per MT.
+        * ``'ranges'``: list of ``(start, end)`` indices, one per MT block.
+        * ``'energy_ranges'``: dict from MT to ``(start, end)`` coordinates.
+
+        For several isotopes (``'is_multi_isotope'`` is True):
+
+        * ``'blocks'``: list of ``(zaid, mt)`` tuples.
+        * ``'zaids'``: list of ZAIDs.
+        * ``'mts'``: list of MT numbers.
+        * ``'G'``: number of energy groups per block.
+        * ``'ranges'``: dict from ``(zaid, mt)`` to ``(start, end)`` indices.
+        * ``'energy_ranges'``: dict from ``(zaid, mt)`` to ``(start, end)``
+          coordinates.
+        * ``'is_multi_isotope'``: True.
     uncertainty_data : dict, optional
-        Uncertainty values for optional panels above heatmap.
-        - For single-isotope: {mt: sigma_percent_array}
-        - For multi-isotope: {(zaid, mt): sigma_percent_array}
-    energy_grid : np.ndarray, optional
-        Energy bin boundaries (length G+1) for automatic energy tick display
+        Uncertainty values for the optional panels above the heatmap, in
+        percent: ``{mt: array}`` for a single isotope, ``{(zaid, mt): array}``
+        for several.
+    energy_grid : numpy.ndarray, optional
+        Energy bin boundaries (length G+1) for the energy ticks, in the unit the
+        producer used. The ticks print the values as they are, with no unit.
     mt_labels : list of str, optional
         Custom labels for blocks. For multi-isotope, typically "Symbol-MT#" format.
     is_diagonal : bool
         Whether this represents diagonal blocks (vs off-diagonal)
+    scale : str
+        ``'log'`` (default) lays the energy axis out on log10 of ``energy_grid``;
+        any other value lays it out linearly.
     """
     matrix_type: str = "corr"
     zaid: Optional[Union[int, List[int]]] = None
@@ -829,33 +1012,47 @@ class CovarianceHeatmapData(HeatmapPlotData):
 class LegendreHeatmapData(HeatmapPlotData):
     """
     Angular distribution (MF34) covariance heatmap data.
-    
+
     These heatmaps can be more complex because different Legendre coefficients
-    may have different energy group structures.
-    
-    Additional Attributes
-    ---------------------
+    may have different energy group structures. Also exported as
+    ``MF34HeatmapData``, the same class.
+
+    Attributes
+    ----------
+    matrix_data, extent, x_edges, y_edges, norm, colorbar_position, mask_value
+        As in :class:`HeatmapPlotData`. With no ``norm`` given, the default is
+        the one of :class:`CovarianceHeatmapData` for the ``matrix_type``.
+    mask_color, label, metadata
+        As in :class:`HeatmapPlotData`.
+    cmap : str or colormap
+        As in :class:`HeatmapPlotData`, except that the default ``'viridis'``
+        becomes ``'RdYlGn'`` for a correlation matrix.
+    colorbar_label : str, optional
+        None becomes ``'Correlation'`` or ``'Covariance'`` from ``matrix_type``.
     isotope : int
         Isotope identifier (ZAID)
     mt : int
         MT reaction number
     legendre_coeffs : list of int
         Legendre polynomial orders included
-    matrix_type : str
-        'cov' or 'corr'
+    matrix_type : {'cov', 'corr'}
+        Covariance or correlation.
     scale : str
-        Energy axis scale: 'log' or 'linear'
+        ``'log'`` (default) lays the energy axis out on log10 of the energy
+        grids; any other value lays it out linearly.
     block_info : dict, optional
-        Per-Legendre block structure information:
-        - 'legendre_coeffs': list of L values
-        - 'G_per_L': dict {L: G_L} of energy groups per L
-        - 'ranges': dict {L: (start, end)} of index ranges
+        Per-Legendre block structure information, with the keys:
+
+        * ``'legendre_coeffs'``: list of L values.
+        * ``'G_per_L'``: dict ``{L: G_L}`` of energy groups per L.
+        * ``'ranges'``: dict ``{L: (start, end)}`` of index ranges.
     uncertainty_data : dict, optional
-        Uncertainty values for optional panels
-        Format: {L: sigma_percent_array[G_L]}
+        Uncertainty values for the optional panels, in percent:
+        ``{L: array of G_L values}``.
     energy_grids : dict, optional
-        Energy bin boundaries per Legendre coefficient for automatic energy tick display
-        Format: {L: energy_grid[G_L+1]}
+        Energy bin boundaries per Legendre coefficient for the energy ticks,
+        ``{L: array of G_L + 1 values}``, in the unit the producer used. The
+        ticks print the values as they are, with no unit.
     is_diagonal : bool
         Whether diagonal blocks (L vs L) or off-diagonal (L1 vs L2)
     """
@@ -948,8 +1145,9 @@ class PlotItem:
     Attributes
     ----------
     data : PlotData
-        The curve, in canonical units (eV, barn, b/sr), with ``quantity``,
-        ``x_unit``, ``y_unit`` and ``provenance`` filled in.
+        The curve, with ``quantity``, ``x_unit``, ``y_unit`` and ``provenance``
+        filled in. Its units are the ones the adapter set, and the canonical
+        unit of the quantity (eV, barn, b/sr, ...) where it set none.
     band : UncertaintyBand, optional
         Its uncertainty: a relative band for evaluated data, error bars for
         measurements. ``None`` when the source carries none.
@@ -963,4 +1161,5 @@ class PlotItem:
 
     @property
     def label(self) -> Optional[str]:
+        """The legend entry of the curve, ``data.label`` (None when it has none)."""
         return self.data.label

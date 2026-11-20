@@ -153,6 +153,10 @@ def check_covariances(
 ) -> CovarianceCheckReport:
     """Check the covariance files of one ENDF tape as they are written.
 
+    Every problem is a finding of the returned report, with a level (``note``,
+    ``warn`` or ``defect``) that says how bad it is; the tape is not changed.
+    A file of *mf* that the tape does not hold is skipped.
+
     Parameters
     ----------
     endf : ENDF
@@ -161,16 +165,17 @@ def check_covariances(
         the checks that need central values say they could not run.
     mf : sequence of int
         Which covariance files to check; any of 31, 32, 33, 34, 35, 40
-        (:data:`CHECKED_MF`, the default). Others are ignored.
+        (the default is all six). Others are ignored.
     xs_sections : dict, optional
-        sigma(E) by MT, e.g. a PENDF from ``kika.processing.read_pendf_mf3_sections``.
-        Defaults to ``endf.pendf``. Used to sum mixed absolute/relative MF33
-        blocks and as the MF33 central values; without it MF3 is used only
-        above the upper limit of the resonance ranges, where it is the cross
-        section and not a background. NC LTY=0 numerical propagation also needs
-        these central values wherever a contributing NI covariance is relative.
-        MF31 uses MF1 nu-bar instead. Missing inputs produce an explicit
-        ``nc_matrix_not_evaluated`` finding, never an unweighted approximation.
+        sigma(E) in b by MT, e.g. a PENDF from
+        ``kika.processing.read_pendf_mf3_sections``. Defaults to ``endf.pendf``.
+        It sums mixed absolute/relative MF33 blocks and gives the MF33 central
+        values; without it MF3 is used only above the upper limit of the
+        resonance ranges, where it is the cross section and not a background.
+        NC LTY=0 numerical propagation also needs these central values wherever
+        a contributing NI covariance is relative. MF31 uses MF1 nu-bar instead.
+        Missing inputs produce an explicit ``nc_matrix_not_evaluated`` finding,
+        never an unweighted approximation.
 
     Notes
     -----
@@ -183,7 +188,9 @@ def check_covariances(
 
     Returns
     -------
-    CovarianceCheckReport
+    ~kika.endf.checks.CovarianceCheckReport
+        The findings of every file checked, with the tape's source path and MAT
+        and the files asked for among 31, 32, 33, 34, 35 and 40.
     """
     xs = xs_sections if xs_sections is not None else getattr(endf, "pendf", None)
     ctx = _Context(endf, xs or None)

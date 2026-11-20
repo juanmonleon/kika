@@ -60,7 +60,20 @@ SEND_SEQUENCE_NUMBER = 99999
 
 
 def format_endf_send_record(mat: int, mf: int) -> str:
-    """The SEND record closing a section: MT=0, sequence number 99999."""
+    """The SEND record closing a section: MT=0, sequence number 99999.
+
+    Parameters
+    ----------
+    mat, mf : int
+        The material number (columns 67-70) and file number (71-72) written
+        in the record.
+
+    Returns
+    -------
+    str
+        One 80-column record with the C1 and C2 fields as floats and the other
+        four as integers.
+    """
     return format_endf_data_line(
         [0.0, 0.0, 0, 0, 0, 0], mat, mf, 0, SEND_SEQUENCE_NUMBER,
         formats=_TERMINATION_FORMATS,
@@ -68,7 +81,19 @@ def format_endf_send_record(mat: int, mf: int) -> str:
 
 
 def format_endf_fend_record(mat: int) -> str:
-    """The FEND record closing a file: MF=0, MT=0, sequence number 0."""
+    """The FEND record closing a file: MF=0, MT=0, sequence number 0.
+
+    Parameters
+    ----------
+    mat : int
+        The material number written in columns 67-70.
+
+    Returns
+    -------
+    str
+        One 80-column record with the C1 and C2 fields as floats and the other
+        four as integers.
+    """
     return format_endf_data_line(
         [0.0, 0.0, 0, 0, 0, 0], mat, 0, 0, 0, formats=_TERMINATION_FORMATS,
     )
@@ -99,8 +124,20 @@ def record_width(lines: Sequence[str]) -> int:
     width changes partway through — which NJOY reads without complaint and
     processes wrongly.
 
-    Measured from the widest data line rather than the first, so blank lines and
+    Measured from the widest data line and not the first, so blank lines and
     terminators (which are shorter, and legitimately so) do not decide it.
+
+    Parameters
+    ----------
+    lines : sequence of str
+        Tape lines, with or without their line ending.
+
+    Returns
+    -------
+    int
+        80 if any line, trailing blanks ignored, is longer than 75 characters;
+        75 otherwise, including for no lines. Lines under 75 characters are not
+        looked at.
     """
     width = 0
     for line in lines:
@@ -113,15 +150,24 @@ def record_width(lines: Sequence[str]) -> int:
 
 
 def line_ending(path) -> str:
-    """CRLF or LF, whichever the tape at *path* ends its first line with.
+    r"""CRLF or LF, whichever the tape at *path* ends its first line with.
 
     The other half of :func:`record_width`: what a splice must preserve so the
-    tape is still the tape it was outside the spliced section. The writers read
-    in text mode, which hides the ending, and then wrote in text mode, which on
-    Windows turned every line of an LF tape into CRLF -- so a one-section edit
-    changed every byte-level line of the file, and ``cmp`` against the source
-    could no longer show what moved. Pass the result as ``newline=`` when
-    writing and the internal newline comes out as the source had it.
+    tape is still the tape it was outside the spliced section. Text mode hides
+    the ending, and on Windows writing in text mode turns every line of an LF
+    tape into CRLF. Pass the result as ``newline=`` when writing and the
+    internal newline comes out as the source had it.
+
+    Parameters
+    ----------
+    path : str or os.PathLike
+        The tape to inspect.
+
+    Returns
+    -------
+    str
+        ``"\r\n"`` if the first line ends with CRLF, else ``"\n"`` (also for an
+        empty file); only the first line is read.
     """
     with open(path, 'rb') as f:
         first = f.readline()
@@ -131,16 +177,24 @@ def line_ending(path) -> str:
 
 
 def group_lines_by_mt_with_positions(lines: List[str]) -> Tuple[Dict[int, List[str]], Dict[int, int]]:
-    """
-    Group lines by MT numbers and track their line counts.
-    
-    Args:
-        lines: List of string lines
-        
-    Returns:
-        Tuple of:
-            - Dictionary mapping MT numbers to lists of lines
-            - Dictionary mapping MT numbers to line counts
+    """Group the lines of one file by MT number, with the line count of each.
+
+    A line whose MT is 0 (SEND, FEND) closes the section being collected and is
+    not kept. A line with no readable MT (shorter than 75 characters, or
+    non-numeric identification fields) ends the section being collected and is
+    dropped; no ``None`` key appears in the result.
+
+    Parameters
+    ----------
+    lines : list of str
+        Tape lines in order.
+
+    Returns
+    -------
+    (dict, dict)
+        The lines of each section, keyed by MT, and the number of lines of each,
+        keyed by MT. When an MT appears in two separate runs, the later run
+        replaces the earlier one.
     """
     result: Dict[int, List[str]] = {}
     line_counts: Dict[int, int] = {}
@@ -212,27 +266,36 @@ INTERPOLATION_SCHEMES = {
 }
 
 def get_interpolation_scheme_name(scheme_code):
-    """
-    Get the descriptive name of an interpolation scheme based on its code.
-    
-    Parameters:
-        scheme_code (int): The interpolation scheme code (INT in ENDF format)
-        
-    Returns:
-        str: The descriptive name of the interpolation scheme
+    """Descriptive name of an ENDF interpolation law, from its INT code.
+
+    Parameters
+    ----------
+    scheme_code : int
+        The INT code: 1 to 6 for the laws of a table, 11 to 15 for corresponding
+        points, 21 to 25 for unit base.
+
+    Returns
+    -------
+    str
+        The name, for instance ``"linear-linear"`` for 2; ``"Unknown scheme
+        (<code>)"`` for any other code.
     """
     return INTERPOLATION_SCHEMES.get(scheme_code, f"Unknown scheme ({scheme_code})")
 
 def describe_interpolation_region(nbt, int_code):
-    """
-    Generate a descriptive string for an interpolation region.
-    
-    Parameters:
-        nbt (int): The NBT value indicating the upper bound of points for this interpolation
-        int_code (int): The interpolation scheme code (INT)
-        
-    Returns:
-        str: A descriptive string for this interpolation region
+    """Describe one ``(NBT, INT)`` interpolation region in words.
+
+    Parameters
+    ----------
+    nbt : int
+        The NBT of the region: the 1-based index of its last point.
+    int_code : int
+        The INT code of the region, as in :func:`get_interpolation_scheme_name`.
+
+    Returns
+    -------
+    str
+        ``"Points up to <nbt> use <name of the law>"``.
     """
     scheme_name = get_interpolation_scheme_name(int_code)
     return f"Points up to {nbt} use {scheme_name}"
@@ -367,18 +430,24 @@ class PadStyle:
     ``pairs`` for TAB1 x/y bodies, ``values`` for LIST bodies, ``interp`` for
     the (NBT, INT) records of a TAB1 or TAB2.
 
-    **``interp`` was added when MF6 landed, and the claim it replaces was
-    wrong.** This docstring used to say interpolation records are always
-    blank-padded, measured on the TSL tapes — ``tsl_4-Be.txt`` writes
-    ``       1621          1`` followed by blanks on the same tape whose data
-    lines end in explicit zeros. ENDF/B-VIII.1's *neutron* tapes do the
-    opposite — O-16's MF6 ends its one-pair interpolation records with four
+    The interpolation records follow neither of the other two. ``tsl_4-Be.txt``
+    writes ``       1621          1`` followed by blanks on the same tape whose
+    data lines end in explicit zeros. ENDF/B-VIII.1's *neutron* tapes do the
+    opposite: O-16's MF6 ends its one-pair interpolation records with four
     explicit zeros::
 
         16          2          0          0          0          0
 
-    Fifty-two records of a single section, and every one of them re-written
-    wrongly by an emitter that had no way to say so.
+    Attributes
+    ----------
+    pairs : str
+        Padding of TAB1 x/y bodies: ``"blank"`` (``PAD_BLANK``) or ``"zero"``
+        (``PAD_ZERO``). Blank by default.
+    values : str
+        Padding of LIST bodies, with the same two values.
+    interp : str
+        Padding of the ``(NBT, INT)`` records of a TAB1 or TAB2, with the same
+        two values.
     """
 
     pairs: str = PAD_BLANK
@@ -422,21 +491,52 @@ class PaddingProbe:
         return PAD_ZERO if parse_number(field) == 0 else None
 
     def observe_pairs(self, lines: List[str], end_idx: int, n_pairs: int) -> None:
-        """A TAB1 x/y body, which uses two fields per point."""
+        """Look at a TAB1 x/y body, which uses two fields per point.
+
+        Parameters
+        ----------
+        lines : list of str
+            The tape lines.
+        end_idx : int
+            Index one past the last line of the body.
+        n_pairs : int
+            Number of x/y points in the body.
+        """
         if self.pairs is None:
             self.pairs = self._read(lines, end_idx, 2 * n_pairs)
 
     def observe_values(self, lines: List[str], end_idx: int, n: int) -> None:
-        """A LIST body, one field per value."""
+        """Look at a LIST body, one field per value.
+
+        Parameters
+        ----------
+        lines : list of str
+            The tape lines.
+        end_idx : int
+            Index one past the last line of the body.
+        n : int
+            Number of values in the body.
+        """
         if self.values is None:
             self.values = self._read(lines, end_idx, n)
 
     def observe_interp(self, lines: List[str], end_idx: int, n_pairs: int) -> None:
-        """An interpolation record, which uses two fields per (NBT, INT) pair."""
+        """Look at an interpolation record, two fields per (NBT, INT) pair.
+
+        Parameters
+        ----------
+        lines : list of str
+            The tape lines.
+        end_idx : int
+            Index one past the last line of the record.
+        n_pairs : int
+            Number of ``(NBT, INT)`` pairs (NR). Zero is ignored.
+        """
         if self.interp is None and n_pairs:
             self.interp = self._read(lines, end_idx, 2 * n_pairs)
 
     def resolve(self) -> PadStyle:
+        """The padding found for each kind, with blank for a kind not yet decided."""
         return PadStyle(pairs=self.pairs or PAD_BLANK,
                         values=self.values or PAD_BLANK,
                         interp=self.interp or PAD_BLANK)
@@ -469,13 +569,15 @@ def format_data_values(values, mat, mf, mt, start_line, formats=None,
         Per-value format codes (ENDF_FORMAT_*).  If *None*, all values
         are written as floats.
     pad : str, optional
-        :data:`PAD_BLANK` (default, unchanged behaviour) or :data:`PAD_ZERO`
-        for the unused fields of the final short line.
+        ``"blank"`` (default, :data:`PAD_BLANK`) or ``"zero"`` for the unused
+        fields of the final short line.
 
     Returns
     -------
     lines : list of str
+        The 80-character records, six values each.
     next_line_num : int
+        The sequence number following the last record.
     """
     result_lines = []
     line_num = start_line
@@ -567,7 +669,23 @@ _INTG_LAYOUT: Dict[int, Tuple[int, int, int]] = {
 
 
 def intg_row_length(ndigit: int) -> int:
-    """How many correlation coefficients one INTG record of *ndigit* holds."""
+    """How many correlation coefficients one INTG record of *ndigit* holds.
+
+    Parameters
+    ----------
+    ndigit : int
+        Digits of the packed integers, 2 to 6.
+
+    Returns
+    -------
+    int
+        The row length: 18, 13, 11, 9 or 8 for 2 to 6 digits.
+
+    Raises
+    ------
+    ValueError
+        If ``ndigit`` is not 2 to 6.
+    """
     try:
         return _INTG_LAYOUT[ndigit][0]
     except KeyError:
@@ -586,8 +704,8 @@ def parse_intg(lines: List[str], start: int, ndigit: int,
     ``C[II,JJ+1]``, … A coefficient that mapped to zero may be written either as
     a blank field or as an explicit ``0``; both read back as ``0`` here, so this
     function is **not** enough on its own to rewrite a tape byte-identically.
-    The caller keeps the raw text for that — see
-    :class:`~kika.endf.classes.mf32.mf32mt151.IntgMatrix`.
+    The caller keeps the raw text for that, as ``IntgMatrix`` of the MF32 MT151
+    class does.
 
     Parameters
     ----------
@@ -604,7 +722,11 @@ def parse_intg(lines: List[str], start: int, ndigit: int,
     Returns
     -------
     entries : list of (ii, jj, values)
+        One tuple per record: the two integers (blank reads as 0) and the list
+        of ``NROW`` packed integers (a blank field reads as 0).
     next_idx : int
+        Index of the line after the last record read. Fewer than ``nm``
+        records are returned when the lines run out.
     """
     nrow, width, sep = _INTG_LAYOUT[ndigit] if ndigit in _INTG_LAYOUT else (
         intg_row_length(ndigit), 0, 0)
@@ -638,6 +760,30 @@ def format_intg(entries: Sequence[Tuple[int, int, Sequence[int]]], ndigit: int,
     tape written this way may differ from its source in whitespace alone. That
     is why the round-trip path re-emits stored text instead of calling this —
     this function is for covariance matrices kika *builds*, not ones it read.
+
+    Parameters
+    ----------
+    entries : sequence of (int, int, sequence of int)
+        ``(II, JJ, values)`` per record. Only the first ``NROW`` values of each
+        are written; a record with fewer is padded with blank fields.
+    ndigit : int
+        Digits of the packed integers, 2 to 6.
+    mat, mf, mt : int
+        ENDF identification numbers.
+    start_line : int
+        Sequence number of the first record.
+
+    Returns
+    -------
+    lines : list of str
+        One 80-character record per entry.
+    next_line_num : int
+        The sequence number following the last record.
+
+    Raises
+    ------
+    ValueError
+        If ``ndigit`` is not 2 to 6.
     """
     nrow, width, sep = _INTG_LAYOUT[ndigit] if ndigit in _INTG_LAYOUT else (
         intg_row_length(ndigit), 0, 0)
@@ -698,10 +844,24 @@ def format_interp_pairs(pairs, mat, mf, mt, start_line, pad=PAD_BLANK):
     *pad* fills the unused fields of the last line: blanks, or explicit integer
     zeros. Both are in use — see :class:`PadStyle`.
 
+    Parameters
+    ----------
+    pairs : sequence of (int, int)
+        The ``(NBT, INT)`` pairs, three to a record.
+    mat, mf, mt : int
+        ENDF identification numbers.
+    start_line : int
+        Sequence number of the first record.
+    pad : str, optional
+        ``"blank"`` (default, :data:`PAD_BLANK`) or ``"zero"`` for the unused
+        fields of the last record.
+
     Returns
     -------
     lines : list of str
+        The 80-character records; empty for no pairs.
     next_line_num : int
+        The sequence number following the last record.
     """
     result_lines = []
     line_num = start_line
@@ -730,10 +890,27 @@ def format_data_pairs(x_data, y_data, mat, mf, mt, start_line, pad=PAD_BLANK,
     *pad* fills the unused fields of the final short line — see
     :data:`PAD_BLANK`.
 
+    Parameters
+    ----------
+    x_data, y_data : sequence of float
+        The abscissae and ordinates, of equal length.
+    mat, mf, mt : int
+        ENDF identification numbers.
+    start_line : int
+        Sequence number of the first record.
+    pad : str, optional
+        ``"blank"`` (default) or ``"zero"``.
+    data_format : str, optional
+        An ``ENDF_FORMAT_*`` code applied to every value; the default is the
+        standard 7-digit float. Only the float and precise codes use the batch
+        path, which gives the same text as the general one.
+
     Returns
     -------
     lines : list of str
+        The 80-character records, three pairs each.
     next_line_num : int
+        The sequence number following the last record.
     """
     if data_format in (ENDF_FORMAT_PRECISE, ENDF_FORMAT_FLOAT):
         fast = _format_float_pairs(x_data, y_data, mat, mf, mt, start_line, pad, data_format)
@@ -793,13 +970,26 @@ class NonMonotonicTable(ValueError):
 
     ENDF-6 requires the x column of a TAB1 to be non-decreasing; a repeated
     abscissa is how the format writes a step, and a *descending* one is not a
-    table at all. It is raised rather than warned because there is no reader
-    that recovers from it and no consumer that reports it:
+    table at all. It is raised, not warned, because there is no reader that
+    recovers from it and no consumer that reports it:
     :func:`kika.njoy.run_njoy.run_njoy_with_pendf` on a PENDF carrying one
     returns ``0`` and writes an ACE built from the wrong numbers.
 
-    Carries the offending index and the two abscissae, because the useful
-    question is always *where*.
+    A subclass of ``ValueError``, raised by :func:`format_tab1` when it is asked
+    to write such a table. It carries the position of the first descent and the
+    two abscissae around it.
+
+    Parameters
+    ----------
+    message : str
+        The error text.
+    mf, mt : int
+        File and section of the table (0 when unknown).
+    index : int
+        Zero-based position of the first abscissa that is followed by a smaller
+        one (-1 when unknown).
+    previous, current : float
+        That abscissa and the one after it.
     """
 
     def __init__(self, message: str, *, mf: int = 0, mt: int = 0,
@@ -832,15 +1022,36 @@ def format_tab1(c1, c2, l1, l2, interp_pairs, x_data, y_data, mat, mf, mt,
     l1, l2 : int
         Header integer fields (positions C3, C4).
     interp_pairs : list of tuple(int, int)
+        The ``(NBT, INT)`` pairs; their count is written as NR. With none, no
+        interpolation record is written.
     x_data, y_data : list of float
+        The abscissae and ordinates; their count is written as NP. ``x_data``
+        must be non-decreasing.
     mat, mf, mt : int
+        ENDF identification numbers.
     start_line : int
+        Sequence number of the header record.
     pad : str, optional
+        ``"blank"`` (default) or ``"zero"``: the filling of the x/y body.
+    interp_pad : str, optional
+        The same for the interpolation record.
+    data_format : str, optional
+        An ``ENDF_FORMAT_*`` code applied to the x/y values (7-digit float by
+        default).
+    header_format : str, optional
+        An ``ENDF_FORMAT_*`` code applied to ``c1`` and ``c2``.
 
     Returns
     -------
     lines : list of str
+        The 80-character records: header, interpolation, then x/y body.
     next_line_num : int
+        The sequence number following the last record.
+
+    Raises
+    ------
+    NonMonotonicTable
+        If ``x_data`` has a descending step.
     """
     _assertAscending(x_data, mf, mt)
 
@@ -1009,9 +1220,29 @@ def project_tabulated_to_legendre(
     ``f = sum (2l+1)/2 a_l P_l`` -- with f read under the table's own angular
     (NBT, INT) and held at its end values out to mu = -1 and +1, as
     :func:`evaluate_tabulated_pdf` reads it: :func:`kika.algebra.legendre_coefficients`,
-    exact on lin-lin and histogram tables. A 64-node Gauss-Legendre rule over the whole of [-1, 1] used to
-    stand in for them and missed the kinks of the table by up to 5e-4 in a_l
-    (forward-peaked elastic at 30 MeV, JEFF-4.0 U-235 and U-238).
+    exact on lin-lin and histogram tables.
+
+    Parameters
+    ----------
+    mu, fmu : array_like
+        The table: cosines, ascending, and ``f(mu)`` at each. The result is
+        divided by the integral of ``f``, so its scale does not matter.
+    max_order : int
+        Highest order :math:`L` returned.
+    ang_nbt_int : sequence of (int, int), optional
+        The table's ``(NBT, INT)`` regions. None is one lin-lin region.
+
+    Returns
+    -------
+    numpy.ndarray
+        Shape ``(max_order + 1,)``, with ``a_0 = 1`` (left unscaled when the
+        integral of ``f`` is 1e-15 or less in magnitude). Zeros when either
+        input is empty.
+
+    Raises
+    ------
+    ValueError
+        If the table is not valid (see :func:`kika.algebra.legendre_coefficients`).
     """
     mu = np.asarray(mu, dtype=float)
     fmu = np.asarray(fmu, dtype=float)
@@ -1043,13 +1274,38 @@ def evaluate_tabulated_pdf(
 
     This is the distribution the evaluator wrote, not a reconstruction of it.
     Shared by ``MF4MTTabulated`` and the tabulated branch of ``MF4MTMixed``
-    so the two cannot drift, which is the failure this module has already been
-    through once (see :mod:`kika.endf.dcs`).
+    so the two cannot drift.
 
     ``out_of_range`` applies to the *energy* grid: ``"zero"`` returns zeros
     outside it, ``"hold"`` clamps to the nearest end table.  Interpolation in
     :math:`\mu` always holds, since a cosine outside a table's own range is
-    the table's endpoint and never an absence of data.
+    the table's endpoint and not an absence of data.
+
+    Parameters
+    ----------
+    mu_points : array_like
+        Cosines at which to read :math:`f`.
+    E : float
+        Incident energy, in the units of ``energies`` (eV in an ENDF tape).
+    energies : array_like
+        The incident-energy grid of the section, ascending.
+    cosines, probabilities : sequence of array_like
+        One table per energy: the cosines and the values of :math:`f` at them
+        (per unit cosine).
+    angular_interp : sequence of sequence of (int, int), optional
+        The ``(NBT, INT)`` regions of each energy's table. A missing or empty
+        entry is one lin-lin region.
+    energy_interp : sequence of (int, int), optional
+        The ``(NBT, INT)`` regions of the energy grid. None is lin-lin.
+    out_of_range : {"zero", "hold"}
+        What to do for ``E`` outside the grid. Any other string behaves as
+        ``"hold"``.
+
+    Returns
+    -------
+    numpy.ndarray
+        :math:`f(\mu, E)` at ``mu_points``, of their shape. Zeros when
+        ``energies`` is empty.
     """
     mu_points = np.asarray(mu_points, dtype=float)
     energies = np.asarray(energies, dtype=float)
@@ -1094,19 +1350,28 @@ def auto_trim_legendre_tail(
     tol: float = 1e-6,
     min_order: int = 0
 ) -> Dict[int, Union[float, np.ndarray]]:
-    """
-    Auto-trim to smallest L such that ``sum_{ℓ>L} |a_ℓ| < tol``.
-    If values are arrays over energies, use a *global* L that satisfies the condition for all energies,
-    so dictionary keys remain consistent.
-    
+    """Drop the Legendre orders above the smallest L with ``sum_{l>L} |a_l| < tol``.
+
+    If the values are arrays over energies, L is *global*: the largest of the
+    per-energy values, so that the keys stay the same for every energy.
+
     Parameters
     ----------
     coeffs_by_l : dict
-        Dictionary mapping order l to coefficient values
+        Order ``l`` to its coefficient (a scalar, or an array over energies),
+        with every order from 0 to the highest present as a key.
     tol : float
-        Tolerance for trimming
+        Bound on the sum of the absolute values of the dropped coefficients
+        (the coefficients' own unit, dimensionless for :math:`a_l`).
     min_order : int
-        Minimum order to keep (ensures at least orders 0 to min_order are returned)
+        Lowest L allowed: orders 0 to ``min_order`` are always kept. It must not
+        exceed the highest order present.
+
+    Returns
+    -------
+    dict
+        The entries of ``coeffs_by_l`` for orders 0 to L, as the same objects.
+        An empty input is returned as it is.
     """
     if not coeffs_by_l:
         return coeffs_by_l
@@ -1130,11 +1395,23 @@ def auto_trim_legendre_tail(
 
 
 def pick_mixed_branch(E: float, E_leg: np.ndarray, E_tab: np.ndarray) -> str:
-    """
-    For LTT=3, decide which branch to use at energy E.
-    - If within Legendre range: 'leg'
-    - If within tabulated range: 'tab'
-    - If between disjoint ranges: pick the closer boundary
+    """For LTT=3, decide which representation to read at energy *E*.
+
+    The Legendre branch is taken up to the top of its range, the tabulated
+    branch from the bottom of its range; between two disjoint ranges the closer
+    boundary decides, a tie going to the Legendre branch.
+
+    Parameters
+    ----------
+    E : float
+        Incident energy, in the units of the two grids (eV in an ENDF tape).
+    E_leg, E_tab : numpy.ndarray
+        The energies of the Legendre part and of the tabulated part.
+
+    Returns
+    -------
+    str
+        ``"leg"`` or ``"tab"``; ``"none"`` when both arrays are empty.
     """
     has_leg = E_leg.size > 0
     has_tab = E_tab.size > 0

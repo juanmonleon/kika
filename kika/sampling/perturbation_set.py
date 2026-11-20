@@ -133,22 +133,80 @@ def _legendrePositivity(angular, maxPerturbedOrder: int, *, repair: bool) -> dic
 class PerturbationSet:
     """One drawn realisation of an evaluation, over one or more quantities.
 
+    A user gets one from ``RunResult.samples[i]["set"]`` after ``perturbFromModel``,
+    or back from files with ``read`` (a per-sample JSON) and ``fromRun`` (the run's
+    factors table). ``fromDraw`` builds one from a draw. The constructor checks the
+    parts against each other and raises the ``ValueError`` listed below.
+
     Parameters
     ----------
     label
-        The §9.3 style label this realisation will be written under --
+        The label this realisation is written under, such as
         ``'realization-0007'``. It is the name the perturbed forms take inside a
-        :class:`~kika.nuclear_data.model.suite.ReactionSuite`, so it belongs to
-        the perturbation and not to whoever applies it.
+        ``ReactionSuite``, so it belongs to the perturbation and not to whoever
+        applies it.
     factors
-        ``ComponentKey -> one factor per bin``.
+        ``ComponentKey -> one value per bin`` (a NumPy array). A factor
+        multiplies the evaluated value on its bin. A block with additive
+        semantics holds absolute deltas, and a delta is not added to the value on
+        its bin: the only additive-absolute blocks a draw produces are MF35's, and
+        each delta is an absolute change of the group-integrated probability of
+        ``chi(E'|E)`` over that outgoing-energy bin. ``pfns_ratio_rule`` turns
+        each delta into a ratio (1 plus the delta over the group's evaluated
+        probability, projected so that no ratio is negative and the group
+        probabilities still sum to the same total), and ``applySpectrumFactors``
+        scales the table of each incident energy group by group and renormalises
+        it.
     binEdges
-        ``ComponentKey -> the bin boundaries those factors are stated on``, one
-        longer than the factors.
+        ``ComponentKey -> the bin boundaries those values are stated on``, one
+        longer than the values. They are the covariance grid, not converted: the
+        cross-section applier takes them as energies in eV, and for MF31, MF34 and
+        MF35 the unit is whatever the covariance grid carries. For MF35 they are
+        outgoing energies. Must have the same keys as *factors*.
     groups
         The components that were drawn together, one tuple per block. Two
         components in different tuples were drawn independently, which is a
         statement about what the evaluation correlates and is worth keeping.
+        Empty means not recorded; otherwise the tuples must cover exactly the
+        components of *factors*.
+    semantics
+        How the blocks act unless *componentSemantics* says otherwise:
+        ``"multiplicative-relative"`` (default, the values are factors) or
+        ``"additive-absolute"`` (the values are deltas).
+    componentSemantics
+        ``ComponentKey -> semantics`` for a block that acts differently from
+        *semantics*. A request for cross sections and a fission spectrum draws
+        factors for one and absolute deltas for the other.
+    outerDomains
+        ``ComponentKey -> (low, high)``, the incident-energy band that a block is
+        stated over but not on, as ``(domainMin, domainMax)`` of the covariance
+        section's incident-energy slice and in the unit that slice carries (not
+        converted). Required for every MF35 component and empty for the other
+        quantities.
+    componentFrames
+        ``ComponentKey -> "LAB" or "CM"`` for an MF34 block whose coefficients
+        are stated in another frame than the angular distribution's own. Absent
+        means the distribution's own frame. Only MF34 components may have one.
+    edgeRule
+        The convention used at a bin edge, where a block is piecewise constant
+        and says nothing about its own steps. ``"endf-step-duplicate"`` is the
+        only value kika writes; the field records it and the applier does not
+        read it.
+    provenance
+        Free-form facts about where the draw came from (``perturbFromModel``
+        records ``seed``, ``sample``, ``space``, ``grouping``, ``source`` and
+        ``sourceFormat``). Written with the set and read back with it; kika does
+        not act on it.
+
+    Raises
+    ------
+    ValueError
+        From the constructor, if a semantics is not one of ``SEMANTICS``; an
+        MF35 component has no entry in *outerDomains*; *factors* and *binEdges*
+        have different keys, or a block's values are not one fewer than its
+        edges; a frame is given for a component that is not MF34 or is not
+        ``"LAB"`` or ``"CM"``; or *groups* is not empty and does not cover the
+        components of *factors*.
     """
 
     label: str
@@ -229,19 +287,42 @@ class PerturbationSet:
                  ) -> "PerturbationSet":
         """Cut one realisation out of what a draw returned.
 
-        *index* is what :func:`~kika.sampling.joint_blocks.requestIndex`
-        returned. *drawn* is either ``{blockKey: one row of factors}`` -- sample
-        *i* of what :func:`~kika.sampling.core.draw_samples` produced, which is
-        the normal case -- or, when the index has exactly one block, that row on
-        its own.
+        Each component takes the first ``widths`` entries of its ``stride``-long
+        slice of the block's row. Under the ``global`` union every component is
+        ``stride`` wide; under ``per-component`` the tail of a slice is the zero
+        padding a uniform stride implies, and it is dropped. The semantics of a
+        block follows from its MF (MF35 is additive, the others multiplicative),
+        and the outer domains and frames come from the index.
 
-        ``widths`` is read rather than assumed. Under the ``global`` union every
-        component is ``stride`` wide and the two are the same number; under
-        ``per-component`` they are not, and the tail of each component's stride
-        is the zero padding a uniform stride implies. Slicing by ``stride``
-        there would hand a component its neighbour's padding as if it were its
-        own factors -- and a factor of zero is not a small perturbation, it is a
-        deleted cross section.
+        Parameters
+        ----------
+        drawn
+            ``{blockKey: one row of values}``, sample *i* of what
+            ``kika.sampling.core.draw_samples`` produced (the normal case), or,
+            when *index* has exactly one block, that row on its own.
+        index
+            The request index of the run (``joint_blocks.requestIndex``): per
+            block key, a dict with ``components``, ``stride``, ``widths``,
+            ``grids`` and optionally ``domains`` and ``frames``.
+        label
+            The label of the realisation.
+        provenance
+            Stored on the set; ``None`` is an empty dict.
+
+        Returns
+        -------
+        PerturbationSet
+            One set holding every block of *index*, with ``groups`` giving the
+            components of each block.
+
+        Raises
+        ------
+        ValueError
+            If *drawn* is a bare row and *index* has not exactly one block; a
+            block of *index* is missing from *drawn*; a row does not have
+            ``len(components) * stride`` values; a component of an old-style index
+            cannot be placed because its block key names no MF; or the set it
+            builds fails its own checks.
         """
         if not isinstance(drawn, Mapping):
             if len(index) != 1:
@@ -349,7 +430,18 @@ class PerturbationSet:
         return tuple(sorted({component.mt for component in self.factors}))
 
     def semanticsOf(self, component: ComponentKey) -> str:
-        """How this component's block acts -- its own statement, or the set's."""
+        """How this component's block acts: its own statement, or the set's.
+
+        Parameters
+        ----------
+        component
+            A component key (it need not be in the set).
+
+        Returns
+        -------
+        str
+            ``"multiplicative-relative"`` or ``"additive-absolute"``.
+        """
         return self.componentSemantics.get(component, self.semantics)
 
     def quantities(self) -> Tuple[str, ...]:
@@ -359,8 +451,30 @@ class PerturbationSet:
     def block(self, mt: int, *, mf: int = 33, order: int = 0, za: Optional[int] = None):
         """``(factors, binEdges)`` for one component, addressed the readable way.
 
-        A convenience for callers and tests that know which reaction they mean
-        but not which ZA the tape stated it under.
+        A convenience for callers that know which reaction they mean but not
+        which ZA the tape stated it under.
+
+        Parameters
+        ----------
+        mt
+            The ENDF reaction number.
+        mf
+            The covariance file the component came from: 31, 33, 34 or 35.
+        order
+            The third coordinate of the component: the Legendre order for MF34,
+            the band for MF35, and 0 for the others.
+        za
+            The ZA to match; ``None`` matches any.
+
+        Returns
+        -------
+        tuple of numpy.ndarray
+            ``(factors, binEdges)`` of the one component that matches.
+
+        Raises
+        ------
+        KeyError
+            If no component matches, or more than one does (different ZA).
         """
         matches = [component for component in self.factors
                    if component.mt == mt and component.mf == mf
@@ -394,12 +508,27 @@ class PerturbationSet:
     def apply(self, function1d, component: ComponentKey):
         """Perturb *function1d* with this set's block for *component*.
 
-        Returns ``(perturbed, diagnostics)``, the pair
-        :func:`~kika.nuclear_data.model.perturbation.applyFactors` returns.
-        Raises :class:`KeyError` for a component this set does not carry, rather
-        than returning the function unchanged: "no perturbation for this one"
-        and "a perturbation of one" are different answers, and silently
-        conflating them is how an ensemble comes to be narrower than it claims.
+        A component this set does not carry is refused, and the function is not
+        returned unchanged: "no perturbation for this one" and "a perturbation of
+        one" are different answers.
+
+        Parameters
+        ----------
+        function1d
+            The function to perturb, as
+            :func:`~kika.nuclear_data.model.perturbation.applyFactors` takes it.
+        component
+            The component whose block (factors and bin edges) is applied.
+
+        Returns
+        -------
+        tuple
+            ``(perturbed, diagnostics)``, the pair ``applyFactors`` returns.
+
+        Raises
+        ------
+        KeyError
+            If this set does not carry *component*.
         """
         from kika.nuclear_data.model.perturbation import applyFactors
 
@@ -596,52 +725,77 @@ class PerturbationSet:
         """Put a perturbed form under :attr:`label` on every node this set covers.
 
         The evaluated form is left where it is and the realisation goes beside
-        it, which is what §9.1's multi-form container and §9.3's ``realization``
-        style are for -- and what ``encodeMF3MT(..., label=)`` then writes out.
-        Nodes this set does not cover are not touched and not reported as
-        perturbed.
+        it, as a form labelled with ``label`` (the multi-form container of the
+        model); the writers pick it by that label. Nodes this set does not cover
+        are not touched and not reported as perturbed.
 
-        Three dispatches, by what the component *is* rather than by which file
-        it came from:
+        The components are applied in four groups, by what each one is:
 
-        * ``crossSection`` -- MF33, and MF34's L=0 magnitude, which lands on the
-          same node. See :meth:`_crossSectionBlocks` for why both at once is
-          refused. With *crossSectionSums* (the default) MF3's sum rules hold
+        * ``crossSection``: MF33, and MF34's L=0 magnitude, which lands on the
+          same node. Both on one reaction is refused, because it would multiply
+          the cross section twice. With *crossSectionSums* MF3's sum rules hold
           on the realisation: partials govern, every sum with a moved partial
           is re-derived, and a sum's own block moves its partials only where
-          the file does not decompose it (*sumBlocks*, ``"undecomposed"`` by
-          default; ``"fill"`` and ``"never"`` as in
-          :mod:`~kika.sampling.cross_section_sums`) -- see
-          :meth:`_applyCrossSectionsWithSums`. *lumped* and *remainders* are
-          what :func:`~kika.sampling.cross_section_sums.readSumStatements`
-          reads off the tape's MF33: lumped reactions move their members, and
-          a partial stated as a total minus the rest takes the difference.
-          ``crossSectionSums=False`` scales each named MT by its own block and
-          nothing else, which leaves the sums stale; it exists for the
-          equivalence gate against ``perturb_PENDF_files``, which does not
-          re-derive.
-        * ``angularDistribution`` -- MF34's L>=1, all orders of one reaction in
+          the file does not decompose it (*sumBlocks*). The blocks must be
+          multiplicative.
+        * ``angularDistribution``: MF34's L>=1, all orders of one reaction in
           one call, because a Legendre vector is perturbed once and not once per
           order.
-        * ``energyDistribution`` -- MF35, every band of one reaction in one
-          call, because the bands are drawn apart and written together. See
-          :meth:`_applyEnergyDistribution`; *maxOutgoingPoints* caps how large
-          one perturbed table may grow and is reported when it bites.
-        * ``multiplicity`` -- MF31, beside the evaluation like the other two
-          since ``Multiplicity`` became a
-          :class:`~kika.nuclear_data.model.component.Component`. It needs
-          *multiplicityResolver*, and without one it raises rather than skipping:
-          a nu-bar silently left unperturbed inside a realisation that claims to
-          carry it is exactly the failure this class exists to prevent.
+        * ``energyDistribution``: MF35, every band of one reaction in one call,
+          because the bands are drawn apart and written together.
+        * ``multiplicity``: MF31. It needs *multiplicityResolver*, and without
+          one it raises: a nu-bar silently left unperturbed inside a realisation
+          that claims to carry it would be a wrong result.
 
         Parameters
         ----------
+        suite
+            The ``ReactionSuite`` to put the realisation on. It is modified in
+            place; remove the labelled forms when done with it.
         multiplicityResolver
-            ``callable(suite, mt) -> Multiplicity``, for MF31 only. The model
-            does not know which node an ENDF MT names -- that is the adapter's
-            question, and ``kika.endf.model_adapter.multiplicity.nubarNode`` is
-            its answer, the same one the MF1 encoders use. Passing it in rather
-            than importing it is what keeps the sampling layer off the adapter.
+            ``callable(suite, mt) -> Multiplicity``, for MF31 only. It names the
+            node an ENDF MT lives on in the model;
+            ``kika.endf.model_adapter.multiplicity.nubarNode`` is the one the MF1
+            encoders use.
+        maxOutgoingPoints
+            MF35 only: the most points one perturbed outgoing table may hold;
+            ``None`` for no cap. When it bites, the diagnostics say how many
+            steps were dropped.
+        crossSectionSums
+            Hold MF3's sum rules (default). ``False`` scales each named MT by its
+            own block and nothing else, which leaves the sums stating a total that
+            is not the sum of their parts.
+        sumBlocks
+            What a sum's own block does, with *crossSectionSums* on:
+            ``"undecomposed"`` (default), ``"fill"`` or ``"never"``, as in
+            ``perturbFromModel``.
+        lumped, remainders
+            What MF33 states through other sections, with *crossSectionSums* on:
+            ``{MTL: members}`` for lumped reactions (their members move by the
+            lump's block) and ``{partial: statements}`` for a partial stated as a
+            total minus the others (it takes the difference). ``None`` for none.
+            ``perturbFromModel`` reads them off the tape.
+        angularPositivity
+            ``"report"`` (default) counts the angular distributions that go
+            negative and leaves them; ``"repair"`` moves the perturbed orders by
+            the least amount that makes them non-negative.
+
+        Returns
+        -------
+        dict
+            ``{ComponentKey: diagnostics dict}`` for every component the applier
+            moved. It holds more than this set's components when the sum rules
+            moved others (a sum re-derived, a partial that rode a sum's block);
+            those are keyed by a ``ComponentKey`` of MF33.
+
+        Raises
+        ------
+        ValueError
+            If a cross-section reaction is claimed by both MF33 and MF34's L=0;
+            a block under the sum rules is not multiplicative; the set holds MF31
+            components and *multiplicityResolver* is ``None``; or
+            *angularPositivity* is not one of the two above (when an angular
+            distribution is perturbed).
         """
         from kika.nuclear_data.model import EVAL_LABEL
 
@@ -1197,6 +1351,25 @@ class PerturbationSet:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "PerturbationSet":
+        """A set back from the mapping ``to_dict`` returns (or its JSON).
+
+        Parameters
+        ----------
+        data
+            A mapping with the keys ``format``, ``label``, ``blocks`` and,
+            optionally, ``semantics``, ``edgeRule``, ``provenance`` and
+            ``groups``. Format versions 2 and 3 are read.
+
+        Returns
+        -------
+        PerturbationSet
+
+        Raises
+        ------
+        ValueError
+            If the format version is not one this kika reads, or the set fails its
+            own checks.
+        """
         version = int(data.get("format", 0))
         if version not in _READABLE_VERSIONS:
             raise ValueError(
@@ -1229,12 +1402,40 @@ class PerturbationSet:
                    provenance=dict(data.get("provenance", {})))
 
     def write(self, path) -> Path:
+        """Write the set as JSON (``to_dict``, indented), overwriting *path*.
+
+        Parameters
+        ----------
+        path
+            The file to write; its folder must exist.
+
+        Returns
+        -------
+        pathlib.Path
+            *path*.
+        """
         path = Path(path)
         path.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
         return path
 
     @classmethod
     def read(cls, path) -> "PerturbationSet":
+        """A set back from a JSON file written by ``write``.
+
+        Parameters
+        ----------
+        path
+            The JSON file.
+
+        Returns
+        -------
+        PerturbationSet
+
+        Raises
+        ------
+        ValueError
+            As ``from_dict``.
+        """
         return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
 
     @classmethod
@@ -1242,8 +1443,31 @@ class PerturbationSet:
                 ) -> "PerturbationSet":
         """Realisation *sample* of a run, back from its factors table.
 
-        The one-file-per-run counterpart of :meth:`read`; see
-        :func:`writeFactorsTable`.
+        The one-file-per-run counterpart of :meth:`read`: the table is the
+        ``factors.parquet`` that ``perturbFromModel`` writes. That file exists
+        only when the run was given an ``outputDir``, ``writeFactors`` was true
+        and the run had samples. Only the rows of *sample* are read. ``provenance["sample"]`` is set to *sample*.
+
+        Parameters
+        ----------
+        directory
+            The run directory, or the path of the parquet file itself.
+        sample
+            The sample number, from 0.
+        name
+            The file stem of the table, ``"factors"`` by default.
+
+        Returns
+        -------
+        PerturbationSet
+
+        Raises
+        ------
+        IndexError
+            If *sample* is outside the run's samples.
+        ValueError
+            If the file carries no kika index or one of an unreadable version, or
+            its rows are incomplete for the sample.
         """
         return readFactorsTable(directory, sample, name=name)
 

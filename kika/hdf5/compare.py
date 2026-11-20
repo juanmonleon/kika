@@ -5,15 +5,18 @@ tabulations differ, the official one came through NJOY -- so the comparison is
 physical and every difference is meant to be attributed:
 
 - **structure**: reactions present in one file only, and per reaction the
-  ``redundant`` flag, the product particles and the distribution types;
+  ``redundant`` and ``center_of_mass`` flags, the number of products, the product
+  particles and the distribution types;
 - **cross sections**: for every reaction and temperature in both, both read
   lin-lin (what the C++ does) on the union of the two grids, the largest
-  relative difference and where it is, with differences below an absolute
-  floor ignored;
+  relative difference and where it is. The difference is divided by the larger
+  of the two values, never by less than ``floor`` times the largest value of
+  either cross section, so nothing is ignored;
 - **integrals that do not depend on the grid**: the resonance integral
   (0.5 eV to 1 MeV, 1/E weight) and the Maxwellian average at the file's kT,
   for capture, elastic and fission;
-- **size**: bytes on disk, and the ratio of the two.
+- **size**: the bytes of the datasets (number of elements times item size, for
+  the temperatures both files hold), and the ratio of the two.
 
 :func:`compareNeutron` returns a :class:`Comparison`; :meth:`Comparison.summary`
 renders it.
@@ -33,6 +36,40 @@ __all__ = ["Comparison", "compareNeutron", "resonanceIntegral", "maxwellianAvera
 
 @dataclass
 class Comparison:
+    """The differences between two neutron files, as :func:`compareNeutron` finds them.
+
+    A report and not a verdict: nothing in it is a pass or a fail, and no tolerance
+    is applied. Reactions are named as in the files (``"reaction_102"``) and
+    temperatures as their group names (``"294K"``).
+
+    Attributes
+    ----------
+    first, second : str
+        The two file paths, as given.
+    sizeRatio : float
+        Bytes of the datasets of the first file over those of the second, counting
+        only the temperatures both files hold (and ``0K``). NaN until computed.
+    onlyFirst, onlySecond : list of str
+        Reactions present in one file only, sorted.
+    structural : list of str
+        One line per difference in the ``redundant`` or ``center_of_mass``
+        attribute, the number of products, or the product particle or
+        distribution types of a reaction in both files.
+    crossSections : dict
+        ``(reaction, temperature) -> (difference, energy)``: the largest relative
+        difference of the two cross sections (dimensionless) and the energy in eV
+        where it occurs.
+    thresholds : dict
+        ``reaction -> (first, second)``: the first energy in eV of the reaction's
+        cross section in each file, for the reactions where the two differ. A
+        reaction compared at several temperatures keeps the last one.
+    integrals : dict
+        ``(mt, temperature, quantity) -> (first, second, difference)`` for MT 2,
+        18 and 102, with ``quantity`` ``"RI"`` or ``"maxwellian"`` (both in barn);
+        ``difference`` is ``(first - second) / second`` (signed, a fraction), or 0
+        when ``second`` is 0.
+    """
+
     first: str
     second: str
     sizeRatio: float = float("nan")
@@ -47,9 +84,30 @@ class Comparison:
     integrals: Dict[Tuple[int, str, str], Tuple[float, float, float]] = field(default_factory=dict)
 
     def worst(self, n=10):
+        """The ``n`` entries of ``crossSections`` with the largest difference.
+
+        Parameters
+        ----------
+        n
+            How many entries to return.
+
+        Returns
+        -------
+        list
+            ``((reaction, temperature), (difference, energy))`` in descending order of
+            ``difference``, at most ``n`` of them.
+        """
         return sorted(self.crossSections.items(), key=lambda kv: -kv[1][0])[:n]
 
     def summary(self) -> str:
+        """The comparison as text, for printing.
+
+        The first line gives the two file names (without directory) and the size
+        ratio. Then come the reactions in one file only, the first 20 structural
+        lines, one line per integral (MT, temperature, quantity, the two values and
+        the signed difference in per cent) and the ten largest cross-section
+        differences with their energy in eV.
+        """
         lines = [f"{Path(self.first).name} vs {Path(self.second).name}: size ratio {self.sizeRatio:.3f}"]
         if self.onlyFirst or self.onlySecond:
             lines.append(f"  reactions only in first {self.onlyFirst}, only in second {self.onlySecond}")
@@ -69,7 +127,21 @@ def _xs(tree, name, rx, T):
 
 
 def resonanceIntegral(E, sigma, lo=0.5, hi=1.0e6):
-    """∫ σ(E) dE/E over [lo, hi], lin-lin σ, exact per panel."""
+    """∫ σ(E) dE/E over [lo, hi], lin-lin σ, exact per panel.
+
+    Parameters
+    ----------
+    E, sigma
+        The table: energies in eV, ascending, and cross sections in barn. σ is
+        taken as 0 outside ``E[0]``..``E[-1]``.
+    lo, hi
+        Limits of the integral in eV (defaults 0.5 eV and 1 MeV).
+
+    Returns
+    -------
+    float
+        The integral in barn (``dE/E`` is dimensionless).
+    """
     E, sigma = np.asarray(E, float), np.asarray(sigma, float)
     grid = np.unique(np.concatenate([[lo, hi], E[(E > lo) & (E < hi)]]))
     s = np.interp(grid, E, sigma, left=0.0, right=0.0)
@@ -79,7 +151,25 @@ def resonanceIntegral(E, sigma, lo=0.5, hi=1.0e6):
 
 
 def maxwellianAverage(E, sigma, kT):
-    """⟨σ⟩ over a Maxwellian flux E e^{-E/kT}/kT², up to 50 kT, lin-lin σ."""
+    """⟨σ⟩ over a Maxwellian flux E e^{-E/kT}/kT², up to 50 kT, lin-lin σ.
+
+    The average is the integral of σ times the flux over the integral of the
+    flux, both by the trapezoid rule on a grid of 4000 points spaced
+    geometrically from ``max(E[0], 1e-5 eV)`` to 50 kT, plus every point of ``E``
+    below 50 kT. σ is 0 outside ``E[0]``..``E[-1]``.
+
+    Parameters
+    ----------
+    E, sigma
+        The table: energies in eV, ascending, and cross sections in barn.
+    kT
+        Temperature in eV (the value stored under ``kTs/<T>`` in the file).
+
+    Returns
+    -------
+    float
+        The flux-weighted average cross section in barn.
+    """
     E, sigma = np.asarray(E, float), np.asarray(sigma, float)
     hi = 50.0 * kT
     grid = np.unique(np.concatenate([np.geomspace(max(E[0], 1e-5), hi, 4000), E[E < hi]]))
@@ -107,7 +197,37 @@ def _datasetBytes(tree, temperatures) -> int:
 
 
 def compareNeutron(first, second, *, floor: float = 1.0e-6, reactions=None) -> Comparison:
-    """``floor`` is relative to each reaction's largest value at that temperature."""
+    """Compare two neutron files of the same evaluation; nothing is passed or failed.
+
+    The temperatures compared are the ``kTs`` groups both files have, and the
+    reactions those both have. For each reaction and temperature the two cross
+    sections (read lin-lin, from each file's threshold) are put on the union of
+    their grids, from the larger of the two second energies up to the smaller of
+    the two last ones. The first interval above a threshold is left out because
+    RECONR moves a threshold, so a zero meets a non-zero there; the thresholds
+    that differ are reported in ``thresholds``. The difference at each point is
+    ``|a - b| / max(|a|, |b|, floor * peak)``, with ``peak`` the largest absolute
+    value of either cross section on that grid; the largest is kept with its
+    energy. The integrals are on each file's own grid, with the kT of the first
+    file. Structure, integrals and size are as described in :class:`Comparison`.
+
+    Parameters
+    ----------
+    first, second
+        Paths of the two ``.h5`` files; each holds one nuclide.
+    floor
+        Relative to ``peak``: the denominator of the difference is never smaller
+        than ``floor * peak``, so a point far below the reaction's own scale does
+        not dominate the maximum.
+    reactions
+        Collection of MT numbers to compare in the cross sections and the
+        structure; ``None`` is all the reactions both files have. The lists of
+        reactions present in one file only are not filtered by it.
+
+    Returns
+    -------
+    Comparison
+    """
     out = Comparison(str(first), str(second))
     with R.openFile(first) as a, R.openFile(second) as b:
         na, nb = next(iter(a.children)), next(iter(b.children))

@@ -108,3 +108,5 @@ Photo-atomic tables
 .. automodule:: kika.ace.processing.photoatomic.electrons
    :members: electronBlocks
 
+.. autoclass:: kika._process.PhotoatomicProcessing
+   :no-members:

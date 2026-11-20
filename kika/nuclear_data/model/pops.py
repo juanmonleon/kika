@@ -130,6 +130,38 @@ class PoPs:
     it is a whole file -- a decay sublibrary evaluation is one -- and then it
     carries its own ``styles`` and, when it was read from ENDF, the
     ``provenance`` the ENDF writer needs to give the tape back.
+
+    ``suite.PoPs`` of a :class:`~kika.nuclear_data.model.suite.ReactionSuite` is
+    one. :func:`kika.read` returns a standalone one for an ENDF decay, fission-yield
+    or atomic-relaxation tape and for a GNDS file whose root is ``PoPs``. It is
+    also built by hand and filled with ``add``.
+
+    ``pops["Fe56"]`` returns the particle with that id, following a metastable
+    alias when the id is one (``KeyError`` when there is none), ``pid in pops``
+    tests for it, and iterating gives the particle ids.
+
+    Attributes
+    ----------
+    particles : dict
+        Particle id (``"n"``, ``"Fe56"``, ``"Fe56_e1"``...) to its
+        ``Particle``.
+    name, version : str or None
+        The database's name and version, when the file states them.
+    aliases : dict
+        Alias id (``"Am242_m1"``) to the ``MetaStable`` that names the level
+        (``"Am242_e2"``) it stands for.
+    chemicalElements : dict
+        Element symbol to the ``ChemicalElement`` that carries data of its own
+        (the atomic-relaxation sublibrary). The isotopes and nuclides of an element
+        stay in ``particles``.
+    styles : list
+        The styles of a standalone file.
+    provenance
+        What the ENDF writer needs to give the tape back, when the object was read
+        from ENDF; None otherwise.
+    report
+        The conversion report of the read that built a standalone PoPs; None when
+        it was not built by a read.
     """
 
     particles: Dict[str, Particle] = field(default_factory=dict)

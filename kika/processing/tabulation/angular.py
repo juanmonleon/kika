@@ -31,7 +31,20 @@ def _m():
 
 
 def legendreDensity(coefficients):
-    """``p(mu) = sum_l (2l+1)/2 a_l P_l(mu)`` as a vectorised function."""
+    """``p(mu) = sum_l (2l+1)/2 a_l P_l(mu)`` as a vectorised function.
+
+    Parameters
+    ----------
+    coefficients
+        The Legendre coefficients ``a_l`` from ``l = 0``. They are not normalised
+        here.
+
+    Returns
+    -------
+    callable
+        ``density(mu)``: takes a scalar or an array of cosines and returns the
+        density, a float for a scalar and an array of the same shape otherwise.
+    """
     from numpy.polynomial import legendre
 
     c = np.asarray(coefficients, dtype=float)
@@ -140,7 +153,40 @@ def _tableMoments(table):
 
 
 def muTable(function, options: TabulationOptions, outer=None, what="angular"):
-    """One P(mu) (Legendre or tabulated) → ``(Xs_pdf_cdf1d, clipped)``."""
+    """One P(mu) (Legendre or tabulated) → ``(Xs_pdf_cdf1d, clipped)``.
+
+    A Legendre series is refined until the table reproduces its first and second
+    moments to ``options.angularMomentAtol``, then points the shape does not need
+    are dropped (the points at -1, 0 and 1 stay). A tabulated function keeps its
+    own points, converted to lin-lin (tolerance 1e-4) if stated under a law other
+    than lin-lin or histogram.
+
+    Parameters
+    ----------
+    function
+        A model ``Legendre``, ``XYs1d`` or ``Regions1d`` giving the density in mu.
+    options : TabulationOptions
+        Tolerances and the negative-density policy.
+    outer
+        Incident energy in eV the table is for, stored as its outer coordinate.
+    what
+        Name of the table, used in error messages.
+
+    Returns
+    -------
+    tuple
+        ``(table, clipped)``: the normalised table with its cumulative, and whether
+        negative densities were set to zero.
+
+    Raises
+    ------
+    ValueError
+        If a Legendre law has no positive finite integral, goes negative under the
+        ``"raise"`` policy, or its refinement exceeds ``maxPoints`` or does not
+        converge; or the density integrates to zero.
+    TypeError
+        If *function* is neither a Legendre law nor a tabulated function.
+    """
     m = _m()
     if isinstance(function, m.Legendre):
         density = legendreDensity(function.coefficients)
@@ -198,8 +244,34 @@ def _functions(form) -> List:
 def tabulateAngular(form, options: TabulationOptions = TabulationOptions()) -> Tuple[object, int]:
     """P(mu|E) → ``(XYs2d of Xs_pdf_cdf1d, number of tables clipped)``.
 
-    ``Isotropic2d`` and ``None`` come back as :class:`Isotropic2d`: the writer
+    ``Isotropic2d`` and ``None`` come back as ``Isotropic2d``: the writer
     leaves the angle out and OpenMC samples mu uniformly.
+
+    Parameters
+    ----------
+    form
+        A model ``XYs2d`` or ``Regions2d`` of Legendre or tabulated functions in
+        mu, one per incident energy (eV); an ``Isotropic2d``; or None.
+    options : TabulationOptions
+        Default ``TabulationOptions()``: ``rtol=1e-3``, ``atol=1e-3``,
+        ``maxPoints=2000``, ``negative="clip"``.
+
+    Returns
+    -------
+    tuple
+        ``(tables, clipped)``: an ``XYs2d`` labelled ``"MonteCarlo"`` with one
+        ``Xs_pdf_cdf1d`` per incident energy, and the number of tables that had
+        negative densities set to zero; or ``(Isotropic2d(), 0)``. Where an
+        incident energy repeats (a jump), the left table is moved to the previous
+        representable energy.
+
+    Raises
+    ------
+    TypeError
+        If *form* is of another type.
+    ValueError
+        If the incident energies decrease, or a table cannot be made (see
+        :func:`muTable`).
     """
     m = _m()
     if form is None or isinstance(form, m.Isotropic2d):

@@ -23,35 +23,70 @@ def compute_sensitivity(inputfile: str, mctalfile: str, tally: int,
                         cell: int = 0,
                         pert_metadata: Optional[List[Tuple[int, int, int, int]]] = None
                         ) -> SensitivityData:
-    """Compute sensitivity coefficients from MCNP input and output files.
+    r"""Sensitivities of a tally to the cross-sections of a nuclide, from PERT tallies.
 
-    :param inputfile: Path to MCNP input file containing the PERT cards
-    :type inputfile: str
-    :param mctalfile: Path to MCNP MCTAL output file
-    :type mctalfile: str
-    :param tally: Tally number to analyze
-    :type tally: int
-    :param zaid: ZAID of the nuclide being perturbed. If None and pert_metadata is
-        provided, extracted from the metadata (must be a single unique ZAID).
-    :type zaid: int, optional
-    :param label: Label for the sensitivity data set
-    :type label: str
-    :param material: Optional material number to filter perturbations by.
-        If None, all perturbations are used (backward-compatible behavior).
-    :type material: int, optional
-    :param cell: Cell ID to use for multi-cell tallies. Default is 0, which is
-        the total-over-cells bin in MCNP (added by the T parameter in the tally
-        definition). For single-cell tallies this parameter is ignored.
-    :type cell: int
-    :param pert_metadata: Optional list of (start_pert, end_pert, zaid, material) tuples.
-        Assigns zaid and original_material to PERT cards in the given ranges.
-        When provided, zaid and material can be inferred from the metadata.
-    :type pert_metadata: list of tuple, optional
-    :returns: Object containing computed sensitivity coefficients
-    :rtype: SensitivityData
-    :raises ValueError: If no zaid is given and none can be resolved from
-        pert_metadata or PERT-card metadata, or if pert_metadata contains
-        multiple ZAIDs (use compute_total_sensitivity instead).
+    For every reaction (``RXN=``) and perturbation energy bin ``j`` of the PERT cards,
+    and for every detector energy bin ``i`` of the tally, the sensitivity is the
+    METHOD=2 PERT value over the unperturbed result,
+
+    .. math::
+
+        S_{ij} = \frac{c_{1,ij}}{R_{0,i}},
+
+    with ``c1`` stored as the tally gives it (MCNP's first-order term). This is the
+    relative sensitivity ``(dR/R) / (d sigma / sigma)`` only for the +100 % perturbation
+    that :func:`~kika.mcnp.pert_generator.perturb_material` writes; nothing checks the
+    size of other cards. Its relative error is
+    ``sqrt(e0**2 + e1**2)``, the relative errors that MCNP gives for ``R0`` and for the
+    PERT value added in quadrature, which treats them as independent. The same is done
+    for the tally's total energy bin, stored under ``"integral"``. When the cards also
+    have METHOD=3 tallies for a reaction, the values ``c1`` and ``c2`` and their
+    ratio ``c2 / c1`` are stored as
+    :class:`~kika.sensitivities.sensitivity.TaylorCoefficients`; no check on that ratio
+    is made here.
+
+    Parameters
+    ----------
+    inputfile
+        MCNP input file with the PERT cards.
+    mctalfile
+        MCTAL file of the same run.
+    tally
+        Tally number. It may be binned only in cells (or surfaces) and energy.
+    zaid
+        ZAID of the perturbed nuclide. None takes the single ZAID of *pert_metadata*.
+        When the input has no per-card ZAID (no *pert_metadata* and no
+        ``kika:pert_zaid`` comment), this ZAID is given to every PERT card.
+    label
+        Label stored in the result.
+    material : int, optional
+        Number of the original material whose perturbation to use (the
+        ``pert_mat`` of the cards, else their ``MAT=``). None takes it from
+        *pert_metadata* when that names one material, else from the cards of
+        *zaid* when they name one; if none is found, every card of *zaid* is used.
+    cell
+        Cell (or surface) of the tally to use. 0, the default, is the total over cells
+        that the ``T`` option of the tally card adds. A tally with a single cell
+        ignores it.
+    pert_metadata : list of tuple, optional
+        ``(first_pert, last_pert, zaid, material)`` tuples that label the PERT cards of
+        each range with a nuclide and a material.
+
+    Returns
+    -------
+    SensitivityData
+        Energies in MeV; the detector bins are the tally's energy bins, the first
+        one starting at 0.0.
+
+    Raises
+    ------
+    ValueError
+        If no ZAID is given or found; if *pert_metadata* holds several ZAIDs and
+        *zaid* is None; if several materials are found and *material* is None
+        (:func:`~kika.sensitivities.sensitivity_processing.compute_total_sensitivity`
+        sums them); if the input
+        has no PERT cards; if the tally is binned in anything besides cells and
+        energy; or if *cell* is not a cell of the tally.
     """
     input_data = read_mcnp(inputfile, pert_metadata=pert_metadata)
     mctal = read_mctal(mctalfile)
@@ -365,8 +400,18 @@ def compute_total_sensitivity(
 
         S_{\\text{total}}(E) = \\sum_m S_m(E) = \\sum_m \\frac{c_{1,m}(E)}{r_0}
 
-    Errors are propagated in quadrature (assuming statistical independence
-    between material perturbations).
+    Each ``S_m`` is that of
+    :func:`~kika.sensitivities.sensitivity_processing.compute_sensitivity` for the
+    material ``m``: a relative sensitivity per perturbation bin, with the same
+    energy bins and ``"integral"`` entry. The absolute errors ``|S_m| * e_m``
+    (``e_m`` the relative error) are added in quadrature, which assumes the
+    material perturbations are statistically independent, and the total relative
+    error is that sum over ``|S_total|`` (0 where ``S_total`` is 0). The Taylor
+    coefficients ``c1`` and ``c2`` are summed over the materials in the same way,
+    and their ratio ``c2 / c1`` is recomputed from the sums (``nan`` where ``c1`` is
+    0). ``r0`` and ``e0`` are those of the first material. With a single material
+    the result is that of
+    :func:`~kika.sensitivities.sensitivity_processing.compute_sensitivity`.
 
     Parameters
     ----------
@@ -395,13 +440,19 @@ def compute_total_sensitivity(
     Returns
     -------
     SensitivityData
-        Total sensitivity (summed across materials).
+        Total sensitivity (summed across materials), labelled *label*. Energies in MeV.
 
     Raises
     ------
     ValueError
         If no materials are found, or perturbation energy grids differ
-        between materials.
+        between materials; also those of
+        :func:`~kika.sensitivities.sensitivity_processing.compute_sensitivity` for
+        several ZAIDs in *pert_metadata*, tally binning and *cell*.
+    TypeError
+        If *zaid* is None and there is no *pert_metadata*: there is no check, the
+        cards without a ZAID are selected, and ``SensitivityData`` fails on the
+        missing ZAID (or "No materials found" is raised first).
     """
     # Parse files once — shared across all per-material computations
     input_data = read_mcnp(inputfile, pert_metadata=pert_metadata)
@@ -597,22 +648,35 @@ def plot_sens_comparison(sens_list: List[SensitivityData],
                   energy: Union[str, List[str]] = None, 
                   reactions: Union[List[int], int] = None, 
                   energy_range: tuple = None, xlog: bool = False, ylog: bool = False):
-    """Plot comparison of multiple sensitivity datasets.
+    """Plot the sensitivities per unit lethargy of several data sets on common axes.
+
+    One figure per detector energy, one panel per reaction, with a step curve and
+    error bars (``|value * relative error / lethargy|``, one sigma) for each data
+    set, labelled with its ``label`` and plotted against energy in MeV. A data set
+    without the reaction or the detector energy is left out of that panel; a panel
+    with no data says so. The figures are shown, and nothing is returned.
 
     Parameters
     ----------
-    sens_list : List[SensitivityData]
-        List of sensitivity datasets to compare.
-    energy : Union[str, List[str]], optional
-        Energy string(s) to plot. If None, uses first dataset's energies.
-    reactions : Union[List[int], int], optional
-        Reaction number(s) to plot. If None, uses reactions from first dataset.
-    energy_range : tuple, optional
-        Optional x-axis limits as (min, max).
-    xlog : bool, optional
-        Whether to use logarithmic scale for x-axis. Default is False.
-    ylog : bool, optional
-        Whether to use logarithmic scale for y-axis. Default is False.
+    sens_list
+        The data sets to compare, drawn in this order with the colours of the
+        matplotlib cycle.
+    energy : str or list of str, optional
+        Detector energy keys (``"lower_upper"`` in MeV, or ``"integral"``). None
+        takes all the keys of the first data set.
+    reactions : int or list of int, optional
+        MT numbers to plot. None takes those of the first data set at the first
+        detector energy.
+    energy_range : tuple of float, optional
+        ``(min, max)`` of the energy axis in MeV.
+    xlog
+        If True the energy axis is logarithmic.
+    ylog
+        If True the sensitivity axis is logarithmic.
+
+    Returns
+    -------
+    None
     """
     # If no energy specified, use all energies
     if energy is None:
@@ -720,24 +784,49 @@ def create_sdf_data(
     title: str,
     response_values: Tuple[float, float] = None
     ) -> SDFData:
-    """Create a SDFData object from a list of SensitivityData objects.
-    
-    :param sens_list: List of SensitivityData objects or tuples of (SensitivityData, reactions_list)
-    :type sens_list: Union[List[SensitivityData], List[Tuple[SensitivityData, List[int]]]]
-    :param energy: Energy value to use for sensitivity data
-    :type energy: str
-    :param title: Title for the SDF dataset
-    :type title: str
-    :param response_values: Optional tuple of (r0, e0) to override the reference values from sensitivity data.
-                           This allows combining data from different sources that might have different base values.
-                           r0 is the unperturbed tally result (reference response value),
-                           e0 is the absolute error of the unperturbed tally result (not relative).
-                           Use this to ensure consistency when merging sensitivity data from different calculations.
-    :type response_values: Tuple[float, float], optional
-    :returns: SDFData object containing the combined sensitivity data
-    :rtype: SDFData
-    :raises ValueError: If pert_energies don't match across sensitivity data objects
-    :raises ValueError: If r0 and e0 values don't match across sensitivity data objects and no response_values are provided
+    """Combine the sensitivities of one detector energy bin into an SDF.
+
+    The first-order sensitivities of ``data[energy]`` of each object become one
+    :class:`~kika.sensitivities.sdf.SDFReactionData` per reaction, so the SDF holds the
+    relative sensitivity per perturbation bin (not per unit lethargy) of the response
+    ``R0``. The relative errors of the sensitivities become absolute one-sigma errors,
+    ``|sensitivity| * relative error``. A reaction whose sensitivities are all zero is
+    left out, with a message printed. An object without the key *energy*, and a
+    reaction not listed in its filter, contribute nothing.
+
+    Parameters
+    ----------
+    sens_list
+        The objects to combine, or ``(object, reactions)`` tuples that keep only
+        the MT numbers in *reactions* (all tuples or none: a mix is an error). The
+        file's energy grid is the ``pert_energies`` of the first object, in MeV.
+    energy
+        Key of the detector energy bin to take, ``"lower_upper"`` or ``"integral"``.
+        It is also the energy label of the result, and so part of the file name
+        :meth:`~kika.sensitivities.sdf.SDFData.write_file` makes.
+    title
+        Title of the result.
+    response_values : tuple of float, optional
+        ``(r0, e0)``: the response and its **absolute** one-sigma error, used in place
+        of the values of the objects. None takes ``r0`` and the relative error
+        ``e0`` of the first reaction of each object at *energy*, which must be equal
+        in all of them, and stores ``e0`` as ``|r0| * e0``.
+
+    Returns
+    -------
+    ~kika.sensitivities.sdf.SDFData
+        Sensitivities per group in the order of ``pert_energies`` (ascending, MeV);
+        ``r0`` and ``e0`` are None when no object has *energy* and no
+        *response_values* is given.
+
+    Raises
+    ------
+    ValueError
+        If an item is not a two-element tuple while others are tuples; if the
+        ``pert_energies`` of the objects differ; if their ``r0`` or ``e0`` differ and
+        no *response_values* is given; or if the result fails the checks of
+        :class:`~kika.sensitivities.sdf.SDFData` (for example a reaction whose
+        number of values is not the number of groups).
     """
     # Check if we have a list of SensitivityData objects or tuples
     has_tuples = any(isinstance(item, tuple) for item in sens_list)
@@ -859,33 +948,56 @@ def create_sdf_from_serpent(
     mt_filter: Union[int, List[int]] = None,
     response_values: Tuple[float, float] = None
 ) -> SDFData:
-    """Create a SDFData object from SERPENT sensitivity results.
-    
-    Note: SERPENT provides relative errors, which are converted once to absolute
-    standard deviations when constructing SDFReactionData.
-    
-    :param serpent_file: SERPENT sensitivity file object(s). Can be a single file or list of files.
-    :type serpent_file: Union[SensitivityFile, List[SensitivityFile]]
-    :param response_name: Name(s) of the response to extract. Can be a single response name 
-                         (used for all files) or a list matching the number of files.
-                         Examples: 'sens_ratio_BIN_2' or ['sens_ratio_BIN_1', 'sens_ratio_BIN_2']
-    :type response_name: Union[str, List[str]]
-    :param title: Title for the SDF dataset
-    :type title: str
-    :param material_filter: Material name(s) to include. If None, uses all materials.
-    :type material_filter: Union[str, List[str]], optional
-    :param nuclide_filter: Nuclide ZAI(s) to include. If None, uses all nuclides.
-    :type nuclide_filter: Union[int, List[int]], optional
-    :param mt_filter: MT reaction number(s) to include. If None, uses all MT reactions (including Legendre coefficients MT=4001+).
-    :type mt_filter: Union[int, List[int]], optional
-    :param response_values: Tuple of (r0, e0) reference response values. If None, uses (1.0, 0.01).
-                           r0 is the unperturbed tally result (reference response value),
-                           e0 is the absolute standard deviation of the response.
-                           The default 0.01 is therefore an absolute one-sigma uncertainty.
-    :type response_values: Tuple[float, float], optional
-    :returns: SDFData object containing the SERPENT sensitivity data
-    :rtype: SDFData
-    :raises ValueError: If the specified response is not found or file lists don't match
+    """Build an SDF from the sensitivities of Serpent files.
+
+    One :class:`~kika.sensitivities.sdf.SDFReactionData` is made for each material,
+    nuclide and MT of each file, from the energy-dependent sensitivity that Serpent
+    writes per energy bin (not per unit lethargy); kika stores the values unchanged.
+    Serpent gives relative statistical errors, which become absolute one-sigma errors,
+    ``|sensitivity| * relative error``. The SDF carries no material label, so the
+    profiles of several materials of the same nuclide and MT are separate entries
+    with the same ZAID and MT. A profile whose values are all below ``1e-15`` in
+    absolute value is left out. When a file has several perturbations with the same
+    MT, the profile is their mean, and its relative error is the root mean square
+    of their relative errors. A material or nuclide named in a filter that is not in a
+    file is skipped with a warning. A profile that cannot be read from the file is
+    skipped with a message printed.
+
+    Parameters
+    ----------
+    serpent_file
+        One file or a list of files. They must share the energy grid (checked with
+        ``numpy.allclose``).
+    response_name : str or list of str
+        Response of each file: one name for all files, or one per file. A full name
+        such as ``"sens_ratio_BIN_2"`` selects that response. A base name that the
+        file has selects the first response of the file (``responses[0]``).
+    title
+        Title of the result.
+    material_filter : str or list of str, optional
+        Material names to keep. None keeps all.
+    nuclide_filter : int or list of int, optional
+        ZAIs to keep. None keeps all.
+    mt_filter : int or list of int, optional
+        MT numbers to keep. None keeps every MT of the file, the Legendre moments
+        (MT 4001 and above) included.
+    response_values : tuple of float, optional
+        ``(r0, e0)``: the response and its **absolute** one-sigma error, stored as
+        given (``e0`` as its absolute value). None gives ``(1.0, 0.01)``.
+
+    Returns
+    -------
+    ~kika.sensitivities.sdf.SDFData
+        ``pert_energies`` is the energy grid of the first file as read: SDFData
+        takes it as MeV and kika does not convert it. The energy label is the response
+        name, or ``"MultiResponse"`` when the files use different names.
+
+    Raises
+    ------
+    ValueError
+        If *response_name* is a list of another length than the files; if a response is
+        not in its file; if the energy grids of the files differ; or if the result
+        fails the checks of :class:`~kika.sensitivities.sdf.SDFData`.
     """
     from kika.serpent.sens import SensitivityFile
     import numpy as np

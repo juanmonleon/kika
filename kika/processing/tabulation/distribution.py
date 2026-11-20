@@ -45,7 +45,19 @@ def _m():
 
 
 def isLevelMT(mt: int) -> bool:
-    """A discrete-level two-body reaction: the outgoing particle's energy follows from Q."""
+    """A discrete-level two-body reaction: the outgoing particle's energy follows from Q.
+
+    Parameters
+    ----------
+    mt
+        Reaction number.
+
+    Returns
+    -------
+    bool
+        True for MT 51 to 90, 600 to 648, 650 to 698, 700 to 748, 750 to 798, 800
+        to 848 and 875 to 890.
+    """
     return 51 <= mt <= 90 or 600 <= mt <= 648 or 650 <= mt <= 698 or 700 <= mt <= 748 \
         or 750 <= mt <= 798 or 800 <= mt <= 848 or 875 <= mt <= 890
 
@@ -61,6 +73,23 @@ def levelEnergy(Q: float, awr: float, awp: float = 1.0):
     A particle of mass ratio ``awp`` (ACE law 33, as NJOY's ACER writes it for
     p, d, t, ³He, α): ``C1 = -(A+1)/A Q``, signed, and ``C2 = A (A+1-awp)/(A+1)²``,
     the residual taking the rest of the mass.
+
+    Parameters
+    ----------
+    Q
+        Reaction Q in eV.
+    awr
+        Target mass ratio ``A``.
+    awp
+        Mass ratio of the emitted particle to the neutron. 1.0 (the default) means
+        a neutron.
+
+    Returns
+    -------
+    LevelEnergy
+        The model law with ``threshold`` in eV (``C1``) and the dimensionless
+        ``massRatio`` (``C2``): the outgoing centre-of-mass energy is
+        ``massRatio * (E - threshold)`` for an incident energy ``E`` in eV.
     """
     A = float(awr)
     if awp == 1.0:
@@ -71,7 +100,34 @@ def levelEnergy(Q: float, awr: float, awp: float = 1.0):
 
 @dataclass
 class TabulationContext:
-    """What a tabulation needs beyond the form: the reaction and the nuclide."""
+    """What a tabulation needs beyond the form: the reaction and the nuclide.
+
+    Attributes
+    ----------
+    awr : float
+        Target mass ratio.
+    zaTarget : int
+        ZA (``1000 Z + A``) of the target.
+    mt : int
+        Reaction number.
+    Q : float or None
+        Reaction Q in eV. Without it a level reaction (see :func:`isLevelMT`) and
+        a two-body photon get no Monte Carlo form.
+    pid : str
+        Identifier of the product: ``"n"`` (default), ``"photon"`` or a light
+        particle (``"H1"``, ``"H2"``, ``"H3"``, ``"He3"``, ``"He4"``).
+    zaEmitted : int
+        ZA of the emitted particle, for Kalbach's systematics. Default 1.
+    discrete : sequence of int or None
+        Per incident energy, how many leading outgoing points are lines.
+    options : TabulationOptions
+        Default ``TabulationOptions()``.
+    report
+        Object with an ``approximated(str)`` method that receives a line when
+        negative densities were clipped; None records nothing.
+    projectile : {"n", "photon"}
+        ``"photon"`` makes a Kalbach-Mann product follow ENDF-6 Eq. 6.5 and 6.6.
+    """
 
     awr: float
     zaTarget: int
@@ -104,7 +160,28 @@ def _uncorrelated(angular, energy, frame, context):
 
 
 def tabulateDistribution(form, context: TabulationContext):
-    """One evaluated form → its Monte Carlo form, or ``None`` when there is none to give."""
+    """One evaluated form → its Monte Carlo form, or ``None`` when there is none to give.
+
+    Parameters
+    ----------
+    form
+        The product's evaluated distribution (two-body angular, uncorrelated,
+        Kalbach-Mann, energy-angular or angle-energy). Energies in eV.
+    context : TabulationContext
+        The reaction and nuclide.
+
+    Returns
+    -------
+    object or None
+        The form labelled ``"MonteCarlo"``. None for a recoil, an unspecified or
+        branching product, a two-body product that is neither elastic, a level
+        reaction nor a photon with Q and awr known.
+
+    Raises
+    ------
+    TypeError
+        If *form* is of a type with no tabulation.
+    """
     m = _m()
     options = context.options
     if isinstance(form, m.AngularTwoBody):

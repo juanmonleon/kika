@@ -43,12 +43,21 @@ def _z(model) -> Optional[int]:
 
 
 class PhotoatomicProcessing:
-    """The EPRDATA table of an element, built; :meth:`write_ace` writes it.
+    """The EPRDATA table of an element, built; ``write_ace`` writes it.
 
-    ``table`` is the :class:`~kika.ace.classes.photoatomic.PhotoatomicAce` (every
+    ``table`` is the ``PhotoatomicAce`` (every
     block decoded, energies in eV); ``notes`` lists what the build decided that a
     user should know (Compton shells joined or dropped, transitions whose energy
     from the binding energies is not positive).
+
+    :func:`~kika.endf.process_photoatomic` returns one.
+
+    Parameters
+    ----------
+    table : PhotoatomicAce
+        The table, with energies in eV.
+    notes : list of str
+        The messages of the build.
     """
 
     def __init__(self, table, notes: List[str]):
@@ -61,10 +70,38 @@ class PhotoatomicProcessing:
 
         Every word as ``%20.12E``, the EPRDATA layout (NXS(6) = 3). The file is read
         back in strict mode and compared word for word before it replaces one, and
-        its line is added to ``directory/xsdir`` unless ``xsdir`` is false.
+        its line is added to ``directory/xsdir`` unless ``xsdir`` is false. The table
+        file is written first and replaces any file of the same name; ``replace``
+        governs only the xsdir entry.
 
-        Raises :class:`~kika.endf.ProcessingOutputError`: ``ace-table-exists`` when the
-        xsdir already names the table (unless ``replace``), ``ace-failed`` otherwise.
+        Parameters
+        ----------
+        directory
+            Output folder, created if missing.
+        extension
+            Suffix of the table, with or without the leading dot (``"00p"`` or
+            ``".00p"``). It is stored on ``table.header``, so it stays the
+            suffix of later calls. ``None`` keeps the table's own (``.00p``).
+        xsdir
+            Add the line of the table to ``directory/xsdir``, created if
+            missing.
+        replace
+            When the table name is already in the xsdir, ``False`` refuses and
+            ``True`` replaces that entry. It does nothing when ``xsdir`` is
+            false.
+
+        Returns
+        -------
+        pathlib.Path
+            The table file written, in *directory*.
+
+        Raises
+        ------
+        ~kika.endf.ProcessingOutputError
+            ``ace-table-exists`` when the xsdir already names the table and
+            *replace* is false (the table file has then been written, and
+            only the xsdir is unchanged); ``ace-failed`` for any other
+            failure.
         """
         from kika.ace.encoders.photoatomic import encode_photoatomic
         from kika.ace.writers.write_ace import write_ace_checked
@@ -95,13 +132,23 @@ class PhotoatomicProcessing:
 def process_photoatomic(photoat, relaxation, electrons) -> PhotoatomicProcessing:
     """The EPRDATA table of an element from its three ENDF evaluations.
 
-    ``photoat``, ``relaxation`` and ``electrons`` are paths to the photo-atomic,
-    atomic-relaxation and electro-atomic tapes (or the models :func:`kika.read`
-    returns for them), all of the same element. The method is the methods page
-    "Writing photo-atomic tables" of the manual.
+    Parameters
+    ----------
+    photoat, relaxation, electrons
+        The photo-atomic (NSUB=3), atomic-relaxation (NSUB=6) and electro-atomic
+        (NSUB=113) tapes, each a path or the model that ``kika.read`` returns for
+        it, all of the same element.
 
-    Raises :class:`ValueError` when one is missing, is not the sublibrary it should
-    be, or names another element.
+    Returns
+    -------
+    PhotoatomicProcessing
+        The built table and the notes of the build; ``write_ace`` writes it.
+
+    Raises
+    ------
+    ValueError
+        When one evaluation is ``None``, is not the sublibrary it should be, or
+        the three are not of one element.
     """
     from kika import __version__
     from kika.nuclear_data.model import ATOMIC_INTERACTION, PoPs

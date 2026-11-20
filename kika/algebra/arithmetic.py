@@ -3,13 +3,13 @@
 A sum of tables is lin-lin on the union of their grids only once every table
 *is* lin-lin: two log-log partials summed at their union nodes and read lin-lin
 are right at the nodes and up to 10 % wrong between them (8.1 % on B-10 of
-ENDF/B-VIII.1). So each table goes through :func:`~kika.algebra.refine.to_linlin`
+ENDF/B-VIII.1). So each table goes through :func:`~kika.algebra.to_linlin`
 first, and the sum is then exact up to that tolerance.
 
 Each table is zero outside its own domain. One that starts or ends at a
 non-zero value inside the range of the sum puts a step in the sum there; the
-union grid carries that abscissa twice (:func:`~kika.algebra.grid.union`'s
-*steps*), and :func:`~kika.algebra.evaluate.sample_on_union` gives its first
+union grid carries that abscissa twice (:func:`~kika.algebra.union`'s
+*steps*), and :func:`~kika.algebra.sample_on_union` gives its first
 copy the left limit and its second the right one. Leaving it out turned the
 step into a ramp across the neighbouring interval: +66 % in the case that found
 it. FUDGE refuses the same situation (``nfu_domainsNotMutual``) unless told to
@@ -52,9 +52,42 @@ def add(tables: Sequence, coefficients: Optional[Sequence[float]] = None, *,
 
     *tables* are ``(x, y, laws)`` triples; *coefficients* default to one each.
     Every table is re-expressed lin-lin to *tol* (with *snap*, see
-    :func:`~kika.algebra.refine.refine`), and the result lives on the union of
+    :func:`~kika.algebra.refine`), and the result lives on the union of
     those grids, plus any extra *grids* the caller wants carried. Its range is
-    the union of the tables' domains; each table is zero off its own.
+    the union of the tables' domains and of the extra grids' ranges; each table
+    is zero off its own.
+
+    Parameters
+    ----------
+    tables : sequence of (x, y, laws)
+        The tables to sum: each with abscissae (non-decreasing), ordinates and
+        one interpolation law per interval (codes 1-5, or one code for all).
+    coefficients : sequence of float, optional
+        One coefficient per table. None is 1 for every table.
+    tol : float
+        Relative tolerance of the lin-lin re-expression of each table
+        (:func:`~kika.algebra.to_linlin`).
+    snap : callable, optional
+        As in :func:`~kika.algebra.refine`.
+    grids : sequence of array_like
+        Extra abscissae the result must carry; empty grids are ignored. The
+        sum is zero where such a grid reaches past every table.
+
+    Returns
+    -------
+    tuple of numpy.ndarray
+        ``(x, y)``: the abscissae, non-decreasing, with a repeated abscissa at
+        each step, and the sum there. Both are empty when no table or grid has
+        a point.
+
+    Raises
+    ------
+    ValueError
+        If a table is not valid (:func:`~kika.algebra.validate`), or the
+        number of *coefficients* differs from the number of tables.
+    RefinementError
+        If the lin-lin re-expression of a table does not converge
+        (:func:`~kika.algebra.to_linlin`).
     """
     tables = [validate(*t) for t in tables]
     if coefficients is None:
@@ -81,17 +114,41 @@ def on_common_grid(tables: Sequence, grid: Union[str, int] = "union"):
 
     *tables* are ``(x, y, laws)`` triples, each read under its own laws.
     *grid* is ``"union"`` -- every abscissa of every table, steps kept
-    (:func:`~kika.algebra.grid.union`) -- or the index of the table whose own
+    (:func:`~kika.algebra.union`) -- or the index of the table whose own
     abscissae are used. Returns ``(u, values)`` with ``values`` of shape
     ``(len(tables), u.size)``; a repeated abscissa of *u* carries the left
     limit on its first copy and the right limit on its last
-    (:func:`~kika.algebra.evaluate.sample_on_union`).
+    (:func:`~kika.algebra.sample_on_union`).
 
     This is how two tables are compared point by point. On the union no
     table loses a node: the difference of two lin-lin tables is itself lin-lin
     there, so its extremes are among the returned points. On one table's grid
     the other is only sampled, and a peak of it that falls between the chosen
     nodes is not in the result at all.
+
+    Parameters
+    ----------
+    tables : sequence of (x, y, laws)
+        The tables to read: each with abscissae (non-decreasing), ordinates and
+        one interpolation law per interval (codes 1-5, or one code for all).
+        Each must have at least one point.
+    grid : {"union"} or int
+        ``"union"`` or the index of the table whose abscissae are used. Only
+        the part inside the span shared by every table is kept.
+
+    Returns
+    -------
+    tuple of numpy.ndarray
+        ``(u, values)``: the abscissae, non-decreasing, and the readings, one
+        row per table. A step at either end of the shared span appears once, as
+        a value.
+
+    Raises
+    ------
+    ValueError
+        If a table is not valid (:func:`~kika.algebra.validate`); if
+        *tables* is empty or holds an empty table; if the tables share no span
+        of positive width; or if *grid* is a string other than ``"union"``.
     """
     tables = [validate(*t) for t in tables]
     if not tables:

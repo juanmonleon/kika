@@ -36,16 +36,20 @@ class ExforExperiment(ExforEntry):
 
     Attributes
     ----------
+    entry, subentry, quantity, citation, reaction, facility, method, detector, sample
+        As in :class:`~kika.exfor.ExforEntry`.
     quantity_description : str
-        Human-readable description of the quantity
+        Human-readable description of the quantity. Empty, it is taken from
+        ``EXFOR_QUANTITY_CODES``.
     independent_vars : List[str]
         Names of independent variables (e.g., ["energy"], ["energy", "angle"])
     dependent_var : str
         Name of dependent variable (e.g., "cross_section", "yield")
     units : Dict[str, str]
-        Units for each variable
-    _data : pd.DataFrame
-        Raw data as DataFrame with columns for each variable
+        Unit of each variable. In objects made by the database's general loader,
+        energies are in MeV and cross-sections in b, b/sr or b/MeV, the error
+        following its value; other quantities (transmission, yields, angles) keep
+        the unit string and values of the source.
 
     Examples
     --------

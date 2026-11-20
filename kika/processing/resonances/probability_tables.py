@@ -43,7 +43,7 @@ energy until every error it checks is at most 5e-3 (at most 4096).
 The random numbers are kika's (NumPy, seeded), so the tables agree with PURR's
 statistically, band by band, not bit for bit.
 
-Every table carries its statistical error (:class:`ProbabilityTableStatistics`):
+Every table carries its statistical error (``ProbabilityTableStatistics``):
 the ladder is the statistical unit -- the samples of one ladder share its
 resonances and are not independent -- so the errors are delete-one-ladder
 jackknife errors over the ladders, with the bands held at their bounds (as
@@ -51,7 +51,7 @@ FRENDY's ``check_statistical_error``, which uses the CLT on each band's
 ``p · σ``). ``errorTarget`` stops drawing ladders once they are small enough,
 with ``ladders`` as the cap.
 
-``background`` adds the smooth cross section PURR takes from MF3 (:func:`purrInputs`):
+``background`` adds the smooth cross section PURR takes from MF3 (``purrInputs``):
 for LSSF=0 the file's MF3 values; for LSSF=1, where MF3 already holds the dilute
 average, no elastic, fission or capture background, and only the competition kept in
 the total.
@@ -82,6 +82,43 @@ REACH_DOPPLER = 20.0
 
 @dataclass(frozen=True)
 class ProbabilityTableOptions:
+    """The numerical choices of :func:`probabilityTables`.
+
+    Attributes
+    ----------
+    bins : int
+        Probability bands per table. Default 20.
+    ladders : int
+        Most resonance ladders drawn at one energy. Default 4096. Fewer are drawn
+        when ``errorTarget`` is met.
+    samples : int
+        Random energies evaluated inside each ladder. Default 10000.
+    seed : int
+        Seed of the random numbers (each energy has its own stream derived from
+        it, so a table does not depend on ``workers``). Default 1.
+    native : bool
+        Use the compiled line-shape kernel when it is built; False evaluates the
+        Faddeeva function exactly in NumPy. Default True.
+    errorTarget : float or None
+        Statistical error, as a fraction, at which drawing ladders stops: every
+        band's share of the dilute average and the relative error of the
+        self-shielding factor at each ``sigma0`` must be at most this. None draws
+        all ``ladders``. Must be positive. Default 5e-3.
+    checkEvery : int
+        Ladders between two checks of the target, at least 2. Default 10.
+    minimumLadders : int
+        Ladders drawn before the target is first checked, at least 2; the band
+        bounds are placed on their totals. Default 64.
+    sigma0 : tuple of float
+        Background cross sections in barn of the self-shielding factors in the
+        statistics. Default ``(1, 10, 100, 1000, 10000)``.
+
+    Raises
+    ------
+    ValueError
+        On construction, if ``errorTarget`` is not positive, ``checkEvery`` is
+        below 2 or ``minimumLadders`` is below 2.
+    """
     bins: int = 20
     #: Ladders per energy; with :attr:`errorTarget` the most that are drawn.
     ladders: int = 4096
@@ -125,7 +162,24 @@ def _nativeKernel():
 
 
 def bandBounds(totals: np.ndarray, bins: int) -> np.ndarray:
-    """PURR's band boundaries (``tval``) from one ladder's totals; the last is +inf."""
+    """PURR's band boundaries (``tval``) from one ladder's totals; the last is +inf.
+
+    Parameters
+    ----------
+    totals
+        Total cross sections of the samples, in barn (any number of samples
+        large enough for the bins).
+    bins
+        Number of bands.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``bins`` upper bounds in barn, increasing, the last ``inf``. Each of the
+        others is one of the sorted samples, chosen so that the bands are finer in
+        both tails; a bound that does not exceed the previous one is set to 1.05
+        times it.
+    """
     es = np.sort(np.asarray(totals, dtype=float))
     nsamp = len(es)
     nebin = int(nsamp / (bins - 10 + 1.76))
@@ -161,7 +215,21 @@ def bandBounds(totals: np.ndarray, bins: int) -> np.ndarray:
 
 
 def competitionFlags(competingMTs: Sequence[int]):
-    """``(inelastic, absorption)`` as PURR sets them from the competing reactions."""
+    """``(inelastic, absorption)`` as PURR sets them from the competing reactions.
+
+    Parameters
+    ----------
+    competingMTs
+        MTs of the reactions that compete in the URR. MT 4 and below, 18, 19 and
+        102 are ignored.
+
+    Returns
+    -------
+    tuple of int
+        ``inelastic``: -1 if no MT from 51 to 91 competes, that MT if exactly one
+        does, 4 if several do. ``absorption``: -1 if no other MT competes, that MT
+        if exactly one does, 0 if several do.
+    """
     inelastic, absorption = -1, -1
     for mt in competingMTs:
         if mt <= 4 or mt in (18, 19, 102):
@@ -475,22 +543,80 @@ def probabilityTables(region, context, energies, temperatures, *,
                       workers: int = 1, transportXS=None, competitiveThreshold: float = np.inf):
     """``{T: ProbabilityTables}`` at the temperatures (K) on ``energies`` (eV).
 
-    ``region`` is the model's :class:`UnresolvedRegion`, ``context`` the
-    :class:`NeutronContext`. ``background`` gives a smooth cross section per
-    MT (1, 2, 18, 102) at each energy (:func:`purrInputs`); ``competing`` the
-    MTs whose smooth cross sections compete in the URR, for the flags;
-    ``competitiveThreshold`` (:func:`competitionThreshold`) where a competitive
-    width that rises from zero opens.
-    ``workers`` computes that many energies at once, one process each.
+    ``region`` is the model's ``UnresolvedRegion``, ``context`` the
+    :class:`~kika.processing.resonances.NeutronContext`. ``background`` gives a
+    smooth cross section per MT (1, 2, 18, 102) at each energy (``purrInputs``);
+    ``competing`` the MTs whose smooth cross sections compete in the URR, for
+    the flags; ``competitiveThreshold`` (``competitionThreshold``) where a
+    competitive width that rises from zero opens.
 
     Each table carries its statistical error as ``statistics``
-    (:class:`ProbabilityTableStatistics`); ``options.errorTarget`` draws
+    (``ProbabilityTableStatistics``); ``options.errorTarget`` draws
     ladders at each energy only until that error is reached. ``transportXS``
     optionally maps each kelvin temperature to an (nE, 4) array of smooth
     elastic, fission, non-fission absorption and competing inelastic XS (b).
     With it, shielding and its stopping error follow OpenMC's actual reader;
     without it they describe the unscaled ladder cross sections. Fixed-count
     table values are unaffected by this diagnostic choice.
+
+    Parameters
+    ----------
+    region
+        The unresolved region of a model ``Resonances``, with its tabulated
+        widths. If they are self-shielding only (LSSF=1) the tables hold factors
+        on the smooth cross sections; otherwise absolute cross sections in barn.
+    context : NeutronContext
+        Target mass ratio and spin.
+    energies
+        One-dimensional array of energies in eV at which a table is made.
+    temperatures
+        A temperature or a sequence of them, in K. All are computed together on
+        the same ladders.
+    background
+        Mapping from MT to an array of smooth cross sections in barn, one value
+        per energy. MTs 2, 18 and 102 give the backgrounds of elastic, fission
+        and capture; MT 1, if present, adds the competition (total minus those
+        three) to the total. A missing MT is zero. None means no background.
+    competing
+        MTs of the competing reactions, used only for the flags
+        ``inelastic`` and ``absorption`` of the result.
+    options : ProbabilityTableOptions
+        Default ``ProbabilityTableOptions()``: 20 bands, between 64 and 4096
+        ladders of 10000 samples each, stopping at a statistical error of 5e-3,
+        seed 1.
+    workers
+        Processes, each taking a whole energy at a time. 1, the default, runs in
+        this process; more is used only when there is more than one energy and
+        this process may start processes. ``KIKA_WORKERS`` is not read. The tables
+        do not depend on it.
+    transportXS
+        Mapping from every temperature in K (as a float) to a finite, non-negative
+        array of shape ``(len(energies), 4)`` in barn: smooth elastic, fission,
+        non-fission absorption and inelastic. None describes the ladder cross
+        sections themselves.
+    competitiveThreshold
+        Energy in eV at which a competitive width that rises from zero opens.
+        ``inf``, the default, changes nothing.
+
+    Returns
+    -------
+    dict of float to ProbabilityTables
+        One entry per temperature (as a float, in K). Each holds ``energies``,
+        ``table`` of shape ``(len(energies), 6, bins)``, the interpolation law 2,
+        the ``inelastic`` and ``absorption`` flags and the ``statistics``. In
+        ``table``, row 0 is the cumulative probability of the bands and rows 1 to
+        4 the total, elastic, fission and capture values of each band (factors for
+        a self-shielding-only region, barn otherwise); row 5 is filled with 1e6
+        and is not used in transport.
+
+    Raises
+    ------
+    ValueError
+        If a ``transportXS`` array is not finite, non-negative and of shape
+        ``(len(energies), 4)``, or the ladder is too short for the margins that
+        the Doppler reach requires.
+    KeyError
+        If ``transportXS`` lacks one of the temperatures.
     """
     from kika.nuclear_data.model import ProbabilityTables, ProbabilityTableStatistics
 

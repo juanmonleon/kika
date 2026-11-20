@@ -52,13 +52,13 @@ form on a table, because a table is only ever evaluated:
     b_l = int f(mu) P_l(m(mu)) dmu,       Δf(mu_i) = Δg(m(mu_i)) m'(mu_i)
 
 with ``m`` the cosine map into the covariance's frame and ``Δg`` the finite
-Legendre series of the shifts there (:func:`kika._legendre_frames.correctionBasis`).
+Legendre series of the shifts there (``kika._legendre_frames.correctionBasis``).
 The LAB orders the covariance does not name come out exactly unperturbed, and
 this is the limit the Legendre path's padded solve
-(:func:`kika._legendre_frames.scaleInOtherFrame`) converges to -- measured at
-1e-12 against it for A = 12 to 236. ``int Δf = Δb_0 = 0`` in the continuum, as
-before. The integrand of ``b_l`` is no longer a polynomial, only smooth inside a
-panel, so it takes :data:`FRAME_PANEL_POINTS` per panel.
+(``kika._legendre_frames.scaleInOtherFrame``) converges to: they agree to 1e-12
+for A = 12 to 236. ``int Δf = Δb_0 = 0`` in the continuum, as
+before. The integrand of ``b_l`` is not a polynomial, only smooth inside a
+panel, so it takes ``FRAME_PANEL_POINTS`` (16) Gauss points per panel.
 
 Positivity is **reported, not enforced**, which is what the Legendre applier
 does too: whether a sample may carry a negative probability is the sampler's
@@ -129,13 +129,44 @@ def legendreMoments(mu, p, orders: Sequence[int],
                     ) -> Dict[int, float]:
     """``{l: a_l}`` with ``a_l = int_{-1}^{1} f(mu) P_l(mu) dmu``, exactly.
 
-    *pairs* is the table's ``(NBT, INT)`` list; ``None`` means one lin-lin
-    region. No normalisation is applied: ``a_0`` is the table's own integral,
-    and a relative factor on ``a_l`` means the same thing either way.
+    No normalisation is applied: ``a_0`` is the table's own integral, and a
+    relative factor on ``a_l`` means the same thing either way. Each panel is
+    integrated by Gauss-Legendre, which is exact for a histogram or lin-lin panel.
+    With *frame* the integral is not exact but uses ``FRAME_PANEL_POINTS`` (16)
+    points per panel, or more when the order needs more.
 
-    With *frame* ``(γ, direction)`` these are the other frame's coefficients,
-    ``int f(mu) P_l(m(mu)) dmu`` -- the change of variable absorbs the Jacobian
-    -- integrated with :data:`FRAME_PANEL_POINTS` per panel instead of exactly.
+    Parameters
+    ----------
+    mu, p
+        The table: cosines over [-1, 1], ascending, and ``f`` at each (the same
+        shape, at least two points).
+    orders
+        The Legendre orders ``l`` to return. An empty sequence gives ``{}``.
+    pairs
+        The table's ``(NBT, INT)`` list (cumulative point counts and ENDF
+        interpolation codes). None means one lin-lin region. Only INT 1 (histogram)
+        and 2 (lin-lin) are accepted.
+    frame
+        ``(γ, direction)`` for the coefficients of the other frame, ``int f(mu)
+        P_l(m(mu)) dmu`` with ``m`` the cosine map (the change of variable absorbs
+        the Jacobian). ``γ`` is the ratio of the centre-of-mass speed to the
+        neutron's speed in the CM frame (``1/A`` for elastic scattering), ``0 <= γ <
+        1``; *direction* is ``"CM->LAB"`` or ``"LAB->CM"``, from the distribution's
+        frame to the other. None gives the table's own coefficients.
+
+    Returns
+    -------
+    dict
+        ``{l: a_l}`` for each order, as floats.
+
+    Raises
+    ------
+    ValueError
+        If the table has fewer than two points, *mu* and *p* differ in shape, *mu*
+        decreases anywhere or does not span [-1, 1] (to 1e-9), or *frame* has
+        ``γ`` outside [0, 1) or an unknown direction.
+    NotImplementedError
+        If an interpolation law other than histogram or lin-lin occurs.
     """
     mu = np.asarray(mu, dtype=float)
     p = np.asarray(p, dtype=float)
@@ -174,7 +205,24 @@ def _unit(order: int) -> np.ndarray:
 
 
 def tableIntegral(mu, p, pairs=None) -> float:
-    """``int f dmu`` under the table's own law, panel by panel."""
+    """``int f dmu`` under the table's own law, panel by panel.
+
+    A histogram panel contributes ``f_i * width`` and every other panel the
+    trapezoid, so the result is exact only for histogram and lin-lin tables. No
+    table check is made.
+
+    Parameters
+    ----------
+    mu, p
+        The table: ascending cosines and ``f`` at each.
+    pairs
+        The table's ``(NBT, INT)`` list. None means one lin-lin region.
+
+    Returns
+    -------
+    float
+        The integral of the table over its own cosine range.
+    """
     mu = np.asarray(mu, dtype=float)
     p = np.asarray(p, dtype=float)
     laws = _panelLaws(mu, list(pairs) if pairs else [(mu.size, 2)])
@@ -194,25 +242,37 @@ def perturbTabulatedAngular(mu, p, orderFactors: Mapping[int, float], *,
     mu, p
         The table: ascending cosines over [-1, 1] and ``f`` at each.
     orderFactors
-        ``{l: c_l}`` for this incident energy, ``l >= 1``. Order 0 is the cross
+        ``{l: c_l}`` for this incident energy, ``l >= 1``, each ``c_l`` multiplying
+        ``a_l`` (so 1 leaves the order unchanged). Order 0 is the cross
         section's magnitude and is refused, as it is by the Legendre applier.
     pairs
         The table's ``(NBT, INT)``; ``None`` is one lin-lin region.
     frame
         ``(γ, direction)`` when the factors were drawn for the coefficients of
-        the other frame (:class:`kika._legendre_frames.FrameConversion`, its
-        ``gamma(E)`` and ``direction``); ``None`` when they are this table's.
-        ``γ`` must be below 1: the caller leaves a node at or above it alone.
+        the other frame (``kika._legendre_frames.FrameConversion``, its
+        ``gamma(E)`` and ``direction``), as in :func:`legendreMoments`; ``None``
+        when they are this table's. ``γ`` must be below 1: the caller leaves a node
+        at or above it alone.
 
     Returns
     -------
-    pPrime
-        ``f'`` on the same nodes, same length, same law.
-    info
+    pPrime : numpy.ndarray
+        ``f'`` on the same nodes, same length, same law. With every factor 1 it is
+        a copy of ``p`` (bit for bit).
+    info : dict
         ``moments`` (``a_l``), ``deltas`` (``(c_l - 1) a_l``), ``min_p``,
         ``n_negative`` (nodes with ``f' < 0``), ``integral_before`` and
         ``integral_after`` under the table's law, and ``frame`` as given. In
-        another frame, ``moments`` and ``deltas`` are that frame's.
+        another frame, ``moments`` and ``deltas`` are that frame's. Negative values
+        are reported here and not removed.
+
+    Raises
+    ------
+    ValueError
+        If *orderFactors* has order 0, or the table or *frame* is refused as in
+        :func:`legendreMoments`.
+    NotImplementedError
+        If the table carries an interpolation law other than histogram or lin-lin.
     """
     mu = np.asarray(mu, dtype=float)
     p = np.asarray(p, dtype=float)

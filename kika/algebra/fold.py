@@ -104,7 +104,7 @@ def gaussian_fold_nodes(
     :math:`x_0 \pm` ``half_width_sigmas`` :math:`\sigma`, plus the two window
     edges and ``x0`` itself, so a caller can read the unfolded value off the
     same evaluations.  The weights are exact for the integrand's piecewise-linear
-    interpolant on those nodes (see :func:`_panel_terms`) and sum to one, so
+    interpolant on those nodes (see ``_panel_terms``) and sum to one, so
     :math:`\langle y\rangle = \sum_i w_i\,y(x_i)` has no quadrature error for
     any integrand that is linear between the breakpoints passed in.
 
@@ -116,6 +116,30 @@ def gaussian_fold_nodes(
     the integrand a single straight line across the window and is refused.
 
     ``sigma <= 0`` yields the single point ``x0`` with weight 1.
+
+    Parameters
+    ----------
+    x0 : float
+        Centre of the Gaussian.
+    sigma : float
+        Its standard deviation.
+    grids : sequence of array_like
+        The breakpoints of the integrand, one grid each, every one ascending.
+        At least one grid is needed unless ``sigma <= 0``.
+    half_width_sigmas : float
+        Half-width of the window, in units of *sigma*. The default is 6; the
+        Gaussian mass beyond it goes to the outermost nodes.
+
+    Returns
+    -------
+    tuple of numpy.ndarray
+        ``(nodes, weights)``: the ascending nodes and one weight per node. The
+        weights sum to one.
+
+    Raises
+    ------
+    ValueError
+        If *grids* is empty and ``sigma > 0``.
     """
     x0 = float(x0)
     s = float(sigma)
@@ -229,7 +253,7 @@ def box_gaussian_fold_nodes(
     every point of every grid strictly inside.  The weights are
     :math:`\int \ell(t) K(t)\,dt / (hi - lo)` in closed form for the
     piecewise-linear interpolant :math:`\ell` on those nodes (see
-    :func:`_edge_terms`), so, as for :func:`gaussian_fold_nodes`, ``grids``
+    ``_edge_terms``), so, as for :func:`gaussian_fold_nodes`, ``grids``
     must hold the breakpoints of the integrand.  The mass outside the window
     goes to the outermost nodes and the weights sum to one.
 
@@ -237,6 +261,31 @@ def box_gaussian_fold_nodes(
     plain bin average (a box, nothing leaking past its edges), and ``hi <= lo``
     is :func:`gaussian_fold_nodes` at ``lo``.  Both degenerate is the single
     point ``lo``.
+
+    Parameters
+    ----------
+    lo, hi : float
+        The edges of the bin.
+    sigma : float
+        Standard deviation of the Gaussian.
+    grids : sequence of array_like
+        The breakpoints of the integrand, one grid each, every one ascending.
+        At least one grid is needed, except when ``hi <= lo`` and
+        ``sigma <= 0``.
+    half_width_sigmas : float
+        Distance of the window edges beyond the bin, in units of *sigma*. The
+        default is 6; it does nothing for ``sigma <= 0``.
+
+    Returns
+    -------
+    tuple of numpy.ndarray
+        ``(nodes, weights)``: the ascending nodes and one weight per node. The
+        weights sum to one.
+
+    Raises
+    ------
+    ValueError
+        If *grids* is empty (apart from the exception above).
     """
     lo, hi, s = float(lo), float(hi), float(sigma)
     if not (hi > lo):
@@ -294,7 +343,7 @@ def fold_tabulated(
     with ``y`` the lin-lin interpolant of ``(x, y)``, held at its end values
     outside the table (``numpy.interp`` semantics: a threshold reaction that
     starts at zero folds to zero below it).  The integral is the closed form of
-    :func:`_panel_terms` on the table's own points inside the window, so it
+    ``_panel_terms`` on the table's own points inside the window, so it
     does not depend on how finely the table is sampled, and a step written as
     a repeated abscissa is integrated as a step.
 

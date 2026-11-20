@@ -8,12 +8,12 @@ As OpenMC's ``ThermalScattering.from_njoy`` builds its official files
   energies with 16 equiprobable cosines (ACER ``iwt=2``), on THERMR's incident
   grid, at each temperature the evaluation tabulates;
 - the **elastic** part from the evaluation (``use_endf_data``): σ_b and W'(T)
-  of MF7/MT2 for an incoherent one (:class:`IncoherentElasticXS`), the Bragg
+  of MF7/MT2 for an incoherent one (``IncoherentElasticXS``), the Bragg
   edges and the cumulative structure factors at the temperature for a
   coherent one, both for a mixed one.
 
 The table's name (``c_H_in_H2O``) keys OpenMC's registry
-(:mod:`kika.hdf5.thermal_names`) for the ZAIDs and ``nmix``.
+(``kika.hdf5.thermal_names``) for the ZAIDs and ``nmix``.
 
 With ``ThermalInelasticOptions(iinc=1)`` the table is THERMR's **free gas** of
 a nuclide instead (:func:`kika.processing.thermal.freeGasTables`): the input is
@@ -67,18 +67,63 @@ def processThermal(thermal, neutron=None, *, name: str, temperatures=None,
                    useEndfData: bool = True, report=None, options=None, workers=None):
     """The processed thermal suite of the evaluation at ``thermal`` (path).
 
-    ``name`` is the OpenMC table name (``c_H_in_H2O``); ``temperatures`` in
-    kelvin, by default every temperature the evaluation tabulates. The
-    incoherent inelastic tables are kika's (:func:`kika.processing.thermal.inelasticTables`,
+    The incoherent inelastic tables are kika's (``kika.processing.thermal.inelasticTables``,
     THERMR + ACER); the elastic comes from the evaluation, as
     OpenMC's ``from_njoy`` takes it with ``use_endf_data``: incoherent from
     σ_b and the Debye-Waller integral, coherent from the Bragg edges and the
-    cumulative structure factors at the temperature. ``neutron`` is the
-    principal nuclide's neutron tape: its atomic weight ratio is the table's
-    header AWR, as ACER takes it (graphite 11.89365, where the scattering law's
-    B(3) is 11.898). Without it the header carries B(3). ``workers`` is the threads for
-    the incident energies, as :func:`kika.hdf5.processing.processSuite` takes it
-    (:mod:`kika.processing.workers`); the tables do not depend on it.
+    cumulative structure factors at the temperature. The suite is returned and
+    nothing is written to disk.
+
+    Parameters
+    ----------
+    thermal
+        Path of the thermal scattering evaluation (ENDF or GNDS). With
+        ``options.iinc == 1`` (free gas) it is instead the neutron tape of the
+        nuclide.
+    neutron
+        Path of the principal nuclide's neutron tape. Its atomic weight ratio is
+        the table's header AWR, as ACER takes it (graphite 11.89365, where the
+        scattering law's B(3) is 11.898). Without it the header carries B(3). Not
+        used for free gas.
+    name
+        The OpenMC table name (``c_H_in_H2O``). It must be in OpenMC's thermal
+        registry, except for free gas, where it is the caller's.
+    temperatures
+        Temperatures in K. By default every temperature the evaluation tabulates;
+        for free gas they are required. Each is named and valued as
+        :func:`kika.hdf5.processing.aceKT` gives (kT in eV).
+    useEndfData
+        Accepted and not read. Outside free gas the elastic part always comes
+        from the evaluation; for free gas there is none.
+    report
+        A ``ConversionReport`` to fill; ``None`` makes a new one. It is set as the
+        result's ``report``.
+    options
+        A ``ThermalInelasticOptions``; ``None`` is its default. ``iinc=1`` selects
+        the free-gas table (THERMR ``iinc=1`` and ACER) of the nuclide on the
+        neutron tape, with the cross section its elastic broadened by kika to each
+        temperature and no elastic part; its ``emax`` (default 10 eV) is the upper
+        energy of the table.
+    workers
+        Threads for the incident energies, replacing ``options.workers`` when
+        given; as for :func:`kika.hdf5.processing.processSuite`. The tables do not
+        depend on it.
+
+    Returns
+    -------
+    ReactionSuite
+        Interaction ``thermalNeutronScatteringLaw``, with an ``elastic`` (MT2) and
+        an ``inelastic`` (MT4) reaction and a ``heated_<T>`` style per temperature.
+        Only ``inelastic`` is present for free gas, and when the evaluation has
+        neither a coherent nor an incoherent elastic law.
+
+    Raises
+    ------
+    HDF5FormatError
+        If ``name`` is not in the registry (not free gas); the evaluation declares
+        MF7/MT2 but its elastic law was not decoded; it has no incoherent inelastic
+        law; a coherent elastic is not tabulated at a requested temperature; for
+        free gas, no temperatures are given; or a tape has no MF1/MT451.
     """
     m = _m()
     import dataclasses

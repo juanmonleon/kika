@@ -23,7 +23,35 @@ from ..resonances.prepare import UnsupportedResonanceError
 
 @dataclass(frozen=True)
 class DopplerInputAccuracy:
-    """Structured assertions, not a numerical certificate of source physics."""
+    """Structured assertions, not a numerical certificate of source physics.
+
+    What the caller declares about a source that kika did not make, so that
+    :func:`broaden_suite` can accept it.
+
+    Attributes
+    ----------
+    accuracy_scope : str
+        Only ``"input_table"`` is accepted: the tolerances apply to the heating of
+        the table given, not to the physics that produced it.
+    source_temperature : float or None
+        Temperature in K the source is at, if declared; it must agree with the
+        style's and with ``source_temperature`` of :func:`broaden_suite`.
+    infinite_dilution : bool or None
+        True declares that the source holds infinite-dilution cross sections;
+        False is refused as unsupported. Needed as True for a suite with an
+        unresolved region.
+    temperature_model : {"convolution", "free-gas-plus-threshold-convention"}
+        How the source was heated, if it was. Heating further is only supported
+        from ``"convolution"``.
+
+    Raises
+    ------
+    UnsupportedDopplerError
+        On construction, if ``accuracy_scope`` is not ``"input_table"``.
+    DopplerInputError
+        If the temperature is invalid, ``infinite_dilution`` is not a boolean or
+        None, or ``temperature_model`` is not one of the two above.
+    """
     accuracy_scope: str = 'input_table'
     source_temperature: float | None = None
     infinite_dilution: bool | None = None
@@ -134,6 +162,34 @@ def _sum(values, errors, graph, order):
 
 @dataclass(frozen=True)
 class SuiteDopplerResult:
+    """A model suite broadened to one temperature, held apart from the suite.
+
+    Returned by :func:`broaden_suite`. The suite is not changed:
+    :func:`attach_broadening` adds the forms to it.
+
+    Attributes
+    ----------
+    forms
+        Read-only mapping from ``ReactionKey(container, label)`` to the broadened
+        cross section of every reaction: an ``XYs1d`` or a ``Regions1d`` in eV and
+        barn, linear-linear, on a grid shared by all reactions, with each sum
+        built from its leaves.
+    report
+        Read-only mapping that describes the run (a JSON-compatible snapshot):
+        ``schema``, source and final temperature in K, ``temperature_model``,
+        ``units``, ``output_domain`` in eV, ``source_balance`` (how far each
+        source sum was from the sum of its leaves, as a ratio of the tolerance),
+        ``reactions``, ``graph``, ``options``, ``tabulation`` and
+        ``verification_ratios``. ``global_error_bound`` is False.
+    source_style : str
+        Label of the style that was heated.
+    label : str
+        Label of the new style and forms.
+    temperature : float
+        Final temperature in K.
+    options : DopplerOptions
+        The options the run used.
+    """
     forms: object
     report: object
     source_style: str
@@ -152,9 +208,31 @@ class SuiteDopplerResult:
 
     @property
     def forms_by_mt(self):
+        """The forms of the reactions that have an ENDF MT, keyed by that MT (read-only)."""
         return MappingProxyType({mt:self.forms[k] for mt,k in self._mt_keys.items()})
 
     def evaluate(self,energies):
+        """Evaluate the broadening directly at *energies* (eV), not the tables.
+
+        Every reaction is broadened at its own options and each sum is the sum of
+        its leaves.
+
+        Parameters
+        ----------
+        energies
+            Non-empty one-dimensional array of energies in eV, finite and positive.
+
+        Returns
+        -------
+        dict
+            For each key of ``forms``, the cross section in barn at *energies*, as
+            :func:`evaluate_broadened` would give it for that reaction.
+
+        Raises
+        ------
+        DopplerInputError, DopplerConvergenceError
+            As :func:`evaluate_broadened`.
+        """
         values,errors={},{}
         for key,p in self._prepared.items():
             r=evaluate_broadened(p,energies,temperature=self.temperature,options=self._per_options[key])
@@ -168,6 +246,33 @@ class SuiteDopplerResult:
         return _sum(values,errors,self._graph,self._order)
 
     def verify_table(self,forms=None,*,total_budget=False):
+        """Check the tables against the source evaluated afresh; return the worst ratios.
+
+        As :meth:`DopplerResult.verify_table` for every reaction, and the sums
+        must also close: each sum's table must equal the sum of its parts within
+        ``options.table_share`` of ``atol + rtol * |sum|``.
+
+        Parameters
+        ----------
+        forms
+            A mapping of the same keys as ``forms``, for example reloaded copies,
+            with the same regions and units. None checks the result's own.
+        total_budget
+            If True the allowed error is the whole tolerance; if False (default)
+            ``options.table_share`` of it.
+
+        Returns
+        -------
+        dict
+            For each key, the largest ratio found; at most 1 when it passes.
+
+        Raises
+        ------
+        DopplerConvergenceError
+            If a ratio exceeds 1 or a sum does not close.
+        DopplerInputError
+            If the reactions, regions, boundaries, units or labels differ.
+        """
         return self._verify_table(forms,total_budget=total_budget)
 
     def _verify_table(self,forms=None,*,total_budget=False,evaluator=None):
@@ -190,10 +295,69 @@ class SuiteDopplerResult:
         return result
 
     def verify_reference(self,energies,values,*,uncertainty=None):
+        """Check the tables against reference values supplied by the caller.
+
+        The whole tolerance is allowed here, not only the tables' share.
+
+        Parameters
+        ----------
+        energies
+            One-dimensional array of energies in eV, finite and positive, inside the
+            tables.
+        values
+            Mapping from every key of ``forms`` to the reference cross sections in
+            barn at *energies*.
+        uncertainty
+            Mapping of the same keys to their uncertainties in barn, not negative.
+            None is zero.
+
+        Returns
+        -------
+        dict
+            ``maximum_ratios`` (largest ratio per key), ``probes`` (the number of
+            energies), ``method`` (``"external-reference"``) and
+            ``global_error_bound`` (False).
+
+        Raises
+        ------
+        DopplerConvergenceError
+            If a ratio exceeds 1.
+        DopplerInputError
+            If the keys differ from those of ``forms``, or the arrays are invalid or
+            of the wrong shape.
+        """
         if uncertainty is None:uncertainty={k:np.zeros(len(energies)) for k in values}
         return _external_check(self.forms,energies,values,uncertainty,self.options)
 
     def verify_suite(self,suite,*,total_budget=False):
+        """Check a suite that carries the broadened style, for example after reloading it.
+
+        The source data must be as they were when this result was made, the
+        ``Heated`` style must keep its temperature, derivation and report, and every
+        reaction must hold a form under ``label``. The forms are then checked as in
+        :meth:`verify_table`.
+
+        Parameters
+        ----------
+        suite
+            The suite with the style ``label`` and a form of that label on every
+            reaction.
+        total_budget
+            As in :meth:`verify_table`.
+
+        Returns
+        -------
+        dict
+            As :meth:`verify_table`.
+
+        Raises
+        ------
+        DopplerInputError
+            If the source changed, the style changed (category ``"style-conflict"``
+            or ``"provenance-conflict"``) or the reactions differ.
+        DopplerConvergenceError
+            If a table or a sum exceeds its budget.
+        """
         from kika.nuclear_data.model import Heated,PhysicalQuantity,Styles
         shadow=copy(suite)
         shadow.styles=Styles([s for s in suite.styles if s.label!=self.label])
@@ -242,6 +406,77 @@ def broaden_suite(suite, context=None, *, source_style='recon', label='heated', 
 
     No mutation. URR requires explicit dilute-mean semantics; distributions and
     covariances keep their original styles and are not processed.
+
+    Only the leaf reactions (those that are not sums) are broadened; every sum is
+    rebuilt from its leaves on the shared grid. The source sums must agree with
+    their leaves within the tolerance.
+
+    Parameters
+    ----------
+    suite
+        A model ``ReactionSuite`` for an incident neutron in the laboratory frame
+        (nuclear interaction), with a single identified isotope, no productions,
+        orphan products or incomplete reactions, and a clean conversion report.
+    context : DopplerContext, optional
+        Target mass. None builds it from the suite's particle data (origin
+        ``"PoPs"``); if both exist and differ by more than a relative 1e-10 the
+        call is refused.
+    source_style
+        Label of the style to heat. It must derive from an evaluated style.
+    label
+        Label of the new style and forms; it must differ from *source_style* and
+        from every label in the suite.
+    temperature
+        Final temperature in K, not below the source's.
+    support
+        Mapping from the ``ReactionKey`` of every leaf reaction (and no other) to
+        its :class:`SupportPolicy`.
+    source_temperature
+        Temperature in K the source is at, as an assertion. It must agree with the
+        style's temperature and with ``input_accuracy``.
+    input_accuracy : DopplerInputAccuracy, optional
+        None means no declaration. A declaration is needed to heat a source that
+        is itself a ``Heated`` style from outside kika, or one with an unresolved
+        region.
+    urr_policy : {None, "dilute_mean"}
+        Required to be ``"dilute_mean"`` when the suite has an unresolved region
+        (with ``input_accuracy.infinite_dilution`` True): the mean cross sections
+        are broadened as they are.
+    options : DopplerOptions, optional
+        None gives ``DopplerOptions()``.
+    output_domain
+        ``(low, high)`` in eV inside the common source range. None uses the whole
+        range, which then must start above zero.
+    negative_policy : {"reject", "preserve_signed"}
+        As in :func:`prepare_curve`.
+    thresholds_by_reaction
+        Mapping from leaf ``ReactionKey`` to an energy in eV: that reaction is
+        set to zero below it (``threshold_policy="zero_below"``). None applies to
+        none.
+    progress
+        ``progress(fraction)`` is called after each output region.
+
+    Returns
+    -------
+    SuiteDopplerResult
+        The broadened forms of every reaction, with the report.
+
+    Raises
+    ------
+    DopplerInputError
+        If an argument is invalid or inconsistent: a label that exists, cooling,
+        a mass or temperature that disagrees with the suite, support or thresholds
+        that do not match the leaves, a source sum that does not close, or the
+        suite changed during processing.
+    UnsupportedDopplerError
+        If the suite is outside what is supported: not a neutron laboratory
+        suite, productions or incomplete reactions present, a target that is not
+        a single isotope or is bound, an aggregate without an additive graph,
+        leaves that do not share one source domain, a source of unknown or
+        threshold-truncated heating model, finite-dilution or unknown URR
+        semantics.
+    DopplerConvergenceError
+        If a numerical budget is exhausted (see :func:`broaden_curve`).
     """
     from dataclasses import replace
     from kika.nuclear_data.model import ReactionSuite, Evaluated, CrossSectionReconstructed
@@ -400,7 +635,36 @@ def broaden_suite(suite, context=None, *, source_style='recon', label='heated', 
 
 
 def attach_broadening(suite,result,*,date=None):
-    """Recheck mutable output, then publish prebuilt cross-section/style containers."""
+    """Recheck mutable output, then publish prebuilt cross-section/style containers.
+
+    Adds the forms to every reaction under the result's label and a ``Heated``
+    style of that label (temperature in K, derived from the source style, with
+    the report as its documentation). The verification runs on a copy first, so
+    a failure leaves *suite* as it was.
+
+    Parameters
+    ----------
+    suite
+        The suite *result* was made from. It is changed in place.
+    result : SuiteDopplerResult
+        The output of :func:`broaden_suite` for this suite.
+    date
+        ISO calendar date (``"YYYY-MM-DD"``) recorded in the style. None is today.
+
+    Returns
+    -------
+    ReactionSuite
+        *suite* itself.
+
+    Raises
+    ------
+    DopplerInputError
+        If *date* is not an ISO date string, *result* is not a
+        ``SuiteDopplerResult``, its report was edited, the suite changed since
+        processing, the reactions differ, or the label already exists.
+    DopplerConvergenceError
+        If the verification of the output fails.
+    """
     from kika.nuclear_data.model import Heated,PhysicalQuantity,Styles
     from kika.nuclear_data.model.documentation import Documentation,DocumentationText
     from datetime import date as calendar_date

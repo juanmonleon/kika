@@ -18,6 +18,13 @@ if TYPE_CHECKING:
 class NuclideInfo:
     """Format-agnostic nuclide identity and evaluation metadata.
 
+    **Deprecated:** this class will be removed in kika-nd 1.0. The canonical model is
+    ``kika.nuclear_data.model``, but it does not yet cover reconstruction, group
+    averaging or covariance collapsing, so there is no drop-in replacement for every
+    use. Accessing the name raises a ``DeprecationWarning`` once per process.
+
+    An instance comes from ``from_endf`` or ``from_ace``, or is built by hand.
+
     Attributes
     ----------
     nuclide_id : int
@@ -47,17 +54,13 @@ class NuclideInfo:
     def from_endf(cls, mt451: "MF1MT451") -> "NuclideInfo":
         """Create from an ENDF ``MT451`` object.
 
-        **This reads the file through the GNDS model.** The section is
-        decoded into ``PoPs`` + an ``evaluated`` style + ``EndfProvenance``, and
-        ``model.interop`` projects that back into the five fields this class has
-        always had. The fields, their order and their defaults are unchanged —
-        only the body is — which is what makes ``test_flat_class_surface.py``
-        the proof that nothing downstream can tell.
+        This reads the file through the GNDS model: the section is decoded into
+        ``PoPs``, an ``evaluated`` style and ``EndfProvenance``, which are projected
+        into the five fields of this class.
 
-        One thing does change, and it is a fix: ZA is **rounded** rather than
-        truncated. ENDF's fixed-format floats do not round-trip exactly, so
-        Th-232's ``9.023200+4`` reads back as ``90231.99999999999`` and the old
-        ``int()`` named Ac-231.
+        The ZA is **rounded**, not truncated. ENDF's fixed-format floats do not
+        round-trip exactly, so Th-232's ``9.023200+4`` reads back as
+        ``90231.99999999999``, and truncating it would name Ac-231.
 
         Parameters
         ----------
@@ -67,6 +70,9 @@ class NuclideInfo:
         Returns
         -------
         NuclideInfo
+            With the rounded ZA in ``nuclide_id``, the AWR, the temperature in K,
+            the descriptive header in ``evaluation_info`` and the ENDF header
+            fields, text and directory in ``metadata``.
         """
         from kika.endf.model_adapter import decodeMF1MT451
         from kika.nuclear_data.model.interop import flatNuclideInfo
@@ -77,23 +83,15 @@ class NuclideInfo:
     def to_endf(self, mat: Optional[int] = None) -> "MF1MT451":
         """Convert back to an ENDF ``MF1MT451`` object.
 
-        MF1/451 was read-only: half the canonical
-        layer could be parsed and not written, so the only way to change an
-        evaluation's header was to mutate the ``MF1MT451`` dataclass in place —
-        bypassing the format-agnostic layer for exactly the case it exists for.
+        **Built from the flat fields, not from the model**, so an edited
+        ``temperature`` reaches the file.
 
-        **Built from the flat fields, not from a stashed model**, for the same
-        reason :meth:`CrossSection.to_endf` is: these fields are the source of
-        truth for this API, so an edited ``temperature`` has to reach the file.
-
-        **On the directory.** MF1/451 declares NC, a *line count*, for every
-        section of the tape, so a directory is only true of the tape it was read
-        from. This writes back the one it read. That is right for a round trip
-        and wrong the moment a section changes length — at which point
-        :func:`kika.endf.writers.update_directory.update_mf1_directory` rebuilds
-        it by scanning the written file, which is the only place the true counts
-        exist. Recomputing here would mean guessing at lengths this object
-        cannot see.
+        **On the directory.** MF1/451 declares NC, a line count, for every section
+        of the tape, so a directory is only true of the tape it was read from. This
+        writes back the one it read (``metadata["directory"]``). That is right for a
+        round trip and wrong once a section changes length: rebuild it then with
+        ``kika.endf.writers.update_directory.update_mf1_directory``, which scans the
+        written file.
 
         Parameters
         ----------
@@ -103,15 +101,18 @@ class NuclideInfo:
         Returns
         -------
         MF1MT451
+            With ZA ``nuclide_id``, AWR ``atomic_weight_ratio``, the temperature in
+            K, the header fields, text and directory from ``metadata``, and the
+            seven descriptive strings from ``evaluation_info`` (empty when absent).
 
         Raises
         ------
         ValueError
-            If ``metadata`` carries no ENDF header — an ACE-sourced object, or
-            one built by hand. ACE records four header fields out of nineteen
-            and no descriptive text at all, so the section this would write
-            would be mostly invented. The same refusal, and the same reason, as
-            :meth:`CrossSection.to_endf` on a missing Q.
+            If ``metadata`` lacks any of the ENDF header fields (``lrp``, ``lfi``,
+            ``nlib``, ``nmod``, ``elis``, ``sta``, ``lis``, ``liso``, ``nfor``,
+            ``awi``, ``emax``, ``lrel``, ``nsub``, ``nver``, ``ldrv``): an
+            ACE-sourced object or one built by hand. ACE records a handful of header
+            fields and no descriptive text, so the section would be mostly invented.
         """
         from kika.endf.classes.mf1.mf1mt451 import MF1MT451
 

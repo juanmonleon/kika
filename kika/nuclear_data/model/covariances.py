@@ -9,7 +9,7 @@ into a ``reactionSuite``, an optional ``dimension``, and ``slices``/``slice``
 **An MF34 Legendre-order covariance is a slice whose ``domainValue`` is the
 Legendre order.** That is the single mapping most likely to be modelled wrongly,
 so it is stated here and has a constructor of its own:
-:meth:`DataLink.forLegendreOrder`.
+``DataLink.forLegendreOrder``.
 """
 from __future__ import annotations
 
@@ -503,7 +503,33 @@ class AverageParameterCovariance:
 
 @dataclass
 class CovarianceSuite:
-    """§25.1.1. A root node in its own right, linked to a ``reactionSuite``."""
+    """§25.1.1. A root node in its own right, linked to a ``reactionSuite``.
+
+    The covariances of an evaluation, as read from the ENDF covariance files or
+    from a GNDS covariance file. It is found on ``ReactionSuite.covarianceSuite`` (kika
+    keeps it beside the evaluation, though in GNDS it is a separate root).
+    ``len(suite)`` and iteration run over ``covarianceSections`` only.
+
+    Attributes
+    ----------
+    evaluation, projectile, target, interaction, version : str, optional
+        As on the ``ReactionSuite`` the covariances belong to (``interaction``
+        defaults to ``"nuclear"``); ``version`` is the evaluation version.
+    externalFiles : list
+        The external files the covariance file refers to.
+    styles
+        The styles of the covariance file, or None.
+    covarianceSections : list of CovarianceSection
+        The covariances whose rows are bins of a grid (the form is a
+        ``CovarianceMatrix``, a ``Mixed`` or a ``Sum``). ``byLabel`` looks one up
+        (``KeyError`` when the label is absent).
+    parameterCovariances : list
+        The covariances of resonance parameters (``ParameterCovariance``) and of
+        unresolved-region averages (``AverageParameterCovariance``).
+    report : ConversionReport, optional
+        What the decode lost, approximated or refused, for example a cross term of
+        parameters or a covariance read without its ``reactionSuite``.
+    """
 
     evaluation: Optional[str] = None
     projectile: Optional[str] = None

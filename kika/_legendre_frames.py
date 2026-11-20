@@ -95,7 +95,28 @@ QUADRATURE_POINTS = 64
 
 
 def cos_lab_from_cos_cm(mu_cm, alpha: float):
-    r""":math:`\mu_L = (\mu_C + \alpha)/\sqrt{1 + 2\alpha\mu_C + \alpha^2}`."""
+    r"""LAB cosine of a direction given by its CM cosine, for two-body scattering.
+
+    .. math::
+        \mu_L = (\mu_C + \alpha)/\sqrt{1 + 2\alpha\mu_C + \alpha^2}
+
+    Parameters
+    ----------
+    mu_cm : array_like
+        Cosines of the scattering angle in the CM frame.
+    alpha : float
+        The ratio of the speed of the CM to the neutron's speed in the CM frame
+        (:math:`\gamma` of the module note; :math:`m_n/m_\mathrm{target}`, about
+        :math:`1/A`, for elastic scattering). The function does not check it:
+        it is meant for :math:`0 \le \alpha < 1`. At :math:`\alpha = 1` the
+        map is one-to-one but its LAB range is not :math:`[-1, 1]`
+        (:math:`\mu_L = \sqrt{(1+\mu_C)/2}`); above 1 it is not one-to-one.
+
+    Returns
+    -------
+    numpy.ndarray
+        The LAB cosines, of the shape of ``mu_cm``.
+    """
     mu_cm = np.asarray(mu_cm, dtype=float)
     return (mu_cm + alpha) / np.sqrt(1.0 + 2.0 * alpha * mu_cm + alpha * alpha)
 
@@ -107,7 +128,21 @@ def cos_cm_from_cos_lab(mu_lab, alpha: float):
         \mu_C = -\alpha(1 - \mu_L^2) + \mu_L\sqrt{1 - \alpha^2(1 - \mu_L^2)}
 
     Single-valued only for :math:`\alpha < 1` (target heavier than the
-    neutron), which holds for every nuclide but hydrogen.
+    neutron), which holds for every nuclide but hydrogen. The function does not
+    refuse a larger ``alpha``: it returns the forward branch, with the root
+    clamped at 0.
+
+    Parameters
+    ----------
+    mu_lab : array_like
+        Cosines of the scattering angle in the LAB frame.
+    alpha : float
+        The mass ratio of :func:`cos_lab_from_cos_cm`.
+
+    Returns
+    -------
+    numpy.ndarray
+        The CM cosines, of the shape of ``mu_lab``.
     """
     mu_lab = np.asarray(mu_lab, dtype=float)
     s = 1.0 - mu_lab * mu_lab
@@ -119,6 +154,22 @@ def jacobian_cm_to_lab(mu_cm, alpha: float):
 
     .. math::
         J = \frac{(1 + \alpha^2 + 2\alpha\mu_C)^{3/2}}{|1 + \alpha\mu_C|}
+
+    A density per steradian in the CM frame times :math:`J` is the density per
+    steradian in the LAB frame at the matching LAB direction.
+
+    Parameters
+    ----------
+    mu_cm : array_like
+        Cosines of the scattering angle in the CM frame.
+    alpha : float
+        The mass ratio of :func:`cos_lab_from_cos_cm`; the function does not
+        check it.
+
+    Returns
+    -------
+    numpy.ndarray
+        :math:`J`, dimensionless, of the shape of ``mu_cm``.
     """
     mu_cm = np.asarray(mu_cm, dtype=float)
     return np.power(1.0 + alpha * alpha + 2.0 * alpha * mu_cm, 1.5) / np.abs(1.0 + alpha * mu_cm)

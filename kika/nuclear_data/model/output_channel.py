@@ -382,7 +382,7 @@ class FissionEnergyRelease:
 
     Nine terms, each a function of the incident energy in eV, with the names
     GNDS and FUDGE give them. In ENDF they are MF1/458's nine components, and
-    :attr:`TERMS` is that order -- ``IFC = TERMS.index(name) + 1``:
+    ``TERMS`` is that order -- ``IFC = TERMS.index(name) + 1``:
 
     ====================  =====  ==========================================
     term                  ENDF   what it is
@@ -398,7 +398,7 @@ class FissionEnergyRelease:
     totalEnergy           ET     the sum, the fission Q
     ====================  =====  ==========================================
 
-    A term is a :class:`~kika.nuclear_data.model.functions.Polynomial1d` (MF1/458
+    A term is a ``Polynomial1d`` (MF1/458
     LFC=0, its coefficients' uncertainties on ``.uncertainty``) or a tabulated
     function (an LFC=1 TAB1). **One deliberate departure from FUDGE:** there the
     term is a wrapper node whose ``.data`` holds the function, one hop that
@@ -410,6 +410,29 @@ class FissionEnergyRelease:
     that are not in the file and that involve nu-bar. The model carries what
     the file states, a constant, and so does FUDGE; applying the systematics is
     a processing choice and belongs to whoever processes, said once, here.
+
+    A user gets one from ``fissionFragmentData.fissionEnergyReleases`` of a fission
+    channel of a :class:`~kika.nuclear_data.model.suite.ReactionSuite` read from
+    MF1/458 or GNDS. It can also be built by hand, with the terms as keywords.
+    ``terms()`` yields the ``(name, function)`` pairs of the terms that are
+    present, in ENDF order.
+
+    Attributes
+    ----------
+    label : str
+        The style label the release belongs to (the evaluated one for an ENDF
+        read).
+    promptProductKE, promptNeutronKE, delayedNeutronKE : Function1d or None
+        The terms of the table above, each None when the evaluation does not state
+        it.
+    promptGammaEnergy, delayedGammaEnergy, delayedBetaEnergy : Function1d or None
+        The terms of the table above.
+    neutrinoEnergy, nonNeutrinoEnergy, totalEnergy : Function1d or None
+        The terms of the table above.
+    provenance
+        What MF1/458 states and no term can hold (LFC, NPLY, and for an LFC=1
+        section the thermal value a tabulated term replaced, its LDRV and the order
+        of the TAB1s). None when the node did not come from ENDF.
     """
 
     TERMS: ClassVar[tuple] = (

@@ -23,6 +23,13 @@ _native = _load_native(__package__ + '._doppler_native')
 
 
 class DopplerInputError(ValueError):
+    """An input of the Doppler processing is invalid or inconsistent.
+
+    A ``ValueError``. The refusal carries a short code in ``category`` (for
+    example ``"cooling"`` or ``"invalid-energy"``), the energy in eV at which it
+    arose in ``energy`` and the tolerance budget in ``budget``; the last two are
+    None when they do not apply.
+    """
     def __init__(self, category, message, *, energy=None, budget=None):
         super().__init__(message)
         self.category, self.energy, self.budget = category, energy, budget
@@ -38,10 +45,24 @@ def _rebuildDopplerError(cls, category, message, energy, budget):
 
 
 class UnsupportedDopplerError(DopplerInputError):
+    """The input is valid but is outside what the Doppler processing supports.
+
+    Examples are a source that is not lin-lin, regions with gaps, a suite that is
+    not a neutron laboratory suite, or ``backend="native"`` without the compiled
+    extension. A subclass of :class:`DopplerInputError`, with the same fields.
+    """
     pass
 
 
 class DopplerConvergenceError(DopplerInputError):
+    """A numerical budget was exhausted, or the scale cannot be resolved.
+
+    Raised when the analytic error estimate exceeds its share of the tolerance,
+    the thermal radius or a point, iteration or memory limit is reached, or an
+    output the sign policy rejects (a negative cross section) appears. Nothing
+    partial is returned. A subclass of :class:`DopplerInputError`, with the same
+    fields.
+    """
     pass
 
 
@@ -79,6 +100,22 @@ _NATIVE_TAIL_TERMS = _immutable([_tail_terms(r) for r in range(27)])
 
 @dataclass(frozen=True)
 class DopplerContext:
+    """The target mass the free-gas broadening needs.
+
+    Attributes
+    ----------
+    atomic_weight_ratio : float
+        Target mass divided by the neutron mass; finite and positive.
+    mass_origin : str
+        Non-empty label that says where the ratio came from; recorded in the
+        report. ``"explicit"`` by default, ``"PoPs"`` when a suite supplied it.
+
+    Raises
+    ------
+    DopplerInputError
+        On construction, if the ratio is not a finite positive real number or the
+        origin is empty.
+    """
     atomic_weight_ratio: float
     mass_origin: str = "explicit"
 
@@ -90,6 +127,21 @@ class DopplerContext:
 
 @dataclass(frozen=True)
 class SupportPolicy:
+    """What the source cross section is outside its tabulated energy range.
+
+    Attributes
+    ----------
+    lower : {"zero", "constant", "one_over_v"}
+        Below the first energy: zero, the first value, or the first value times
+        ``sqrt(E0 / E)`` (1/v) with ``E0`` the first energy.
+    upper : {"zero", "constant"}
+        Above the last energy: zero or the last value.
+
+    Raises
+    ------
+    UnsupportedDopplerError
+        On construction, if either value is not one of the above.
+    """
     lower: str
     upper: str
 
@@ -100,6 +152,69 @@ class SupportPolicy:
 
 @dataclass(frozen=True)
 class DopplerOptions:
+    """Tolerances, work limits and conventions of the Doppler processing.
+
+    The error budget at a value ``sigma`` is ``atol + rtol * |sigma|``. It is
+    shared between the stages that make a heated table; the four shares below
+    add up to at most 1.
+
+    Attributes
+    ----------
+    rtol : float
+        Relative tolerance, a fraction, positive and below 1. Default 1e-3.
+    atol : float
+        Absolute tolerance in barn, positive. Default 1e-8.
+    kernel_share : float
+        Share of the budget allowed to the analytic error estimate of the
+        broadening integral. Default 0.15.
+    tail_share : float
+        Share allowed to the Gaussian tail left out beyond the thermal radius.
+        Default 0.10.
+    table_share : float
+        Share allowed to the linear interpolation of the adaptive table. Default
+        0.45.
+    serialization_share : float
+        Share kept for rounding when the table is written. Default 0.20.
+    max_points : int
+        Most table nodes (nodes times reactions, counted over all regions), at
+        least 2. Default 200000.
+    max_iterations : int
+        Most refinement passes of the adaptive table. Default 40.
+    block_size : int
+        Energies evaluated per batch. Default 2048. It sets speed and memory, not
+        the values.
+    max_work_bytes : int
+        Allowance for temporary arrays, in bytes. Default 64 MiB. A request whose
+        estimated scratch exceeds it is refused.
+    max_panels : int
+        Most analytic sub-panels integrated at one energy. Default 200000.
+    max_series_terms : int
+        Taylor terms per sub-panel, at least 8. Default 80.
+    max_radius : int
+        Largest thermal radius in Doppler widths, at most 26. Default 26. The
+        integral starts at a radius of 6 and widens it only where the tail budget
+        fails.
+    threshold_policy : {"convolution", "zero_below"}
+        ``"convolution"`` broadens as it is. ``"zero_below"`` sets the result to
+        zero below ``threshold`` (a convention, noted in the report) and records
+        what was removed.
+    threshold : float or None
+        Energy in eV, not negative; required for ``"zero_below"``.
+    backend : {"auto", "python", "native"}
+        ``"auto"`` uses the compiled kernel when it is built and Python otherwise;
+        ``"python"`` is the reference implementation; ``"native"`` requires the
+        compiled kernel (using it without the build raises
+        :class:`UnsupportedDopplerError`).
+
+    Raises
+    ------
+    DopplerInputError
+        On construction, if a value is out of range, a share or tolerance is not
+        a positive real, the shares add up to more than 1, an integer field is not
+        a positive integer, or ``"zero_below"`` has no threshold.
+    UnsupportedDopplerError
+        If ``threshold_policy`` is not one of the two above.
+    """
     rtol: float = 1e-3
     atol: float = 1e-8
     kernel_share: float = .15
@@ -141,6 +256,36 @@ class DopplerOptions:
 
 @dataclass(frozen=True)
 class PreparedDopplerCurve:
+    """A validated, immutable source cross section ready for broadening.
+
+    Normally returned by :func:`prepare_curve`.
+
+    Attributes
+    ----------
+    regions : tuple
+        Pairs ``(energies, values)`` of read-only arrays: energies in eV, strictly
+        increasing and not negative; values in barn; each region starts where the
+        previous one ends. Linear-linear between nodes.
+    context : DopplerContext
+        The target mass.
+    support : SupportPolicy
+        The source outside the tabulated range.
+    source_temperature : float
+        Temperature in K the source is at (0 for a 0 K source).
+    negative_policy : {"reject", "preserve_signed"}
+        ``"reject"`` refuses negative input values and negative outputs;
+        ``"preserve_signed"`` keeps them.
+    source_temperature_origin : str
+        Non-empty label that says where the temperature came from.
+
+    Raises
+    ------
+    DopplerInputError
+        On construction, if the types, shapes, grids, values or labels are
+        invalid, or the regions are empty.
+    UnsupportedDopplerError
+        If the regions are not contiguous.
+    """
     regions: tuple
     context: DopplerContext
     support: SupportPolicy
@@ -214,6 +359,7 @@ class PreparedDopplerCurve:
 
     @cached_property
     def source_hash(self):
+        """SHA-256 hex digest of the region arrays and of every other field."""
         h = sha256(repr((self.context, self.support, self.source_temperature,
                          self.negative_policy, self.source_temperature_origin)).encode())
         for x, y in self.regions:
@@ -221,6 +367,25 @@ class PreparedDopplerCurve:
         return h.hexdigest()
 
     def evaluate_source(self, energy):
+        """The unbroadened source cross section at one energy.
+
+        Parameters
+        ----------
+        energy
+            Energy in eV.
+
+        Returns
+        -------
+        float
+            Cross section in barn: linear interpolation inside the regions (at a
+            boundary shared by two regions, the one on the right), and the support
+            policy outside them.
+
+        Raises
+        ------
+        DopplerInputError
+            If no region covers the energy (not reachable with contiguous regions).
+        """
         x, y = self.regions[0]
         if energy < x[0]:
             if self.support.lower == "zero": return 0.
@@ -242,6 +407,40 @@ def prepare_curve(form, *, context, source_temperature, support,
     Array input is explicitly canonical eV/b. Model forms require axes, converted
     independently of codecs. PoPs/style/URR and graph checks belong to the suite
     preparer, not this pointwise entry.
+
+    Parameters
+    ----------
+    form
+        Either a tuple of ``(energies, values)`` regions, energies in eV and values
+        in barn, or an ``XYs1d`` or ``Regions1d`` model form with
+        linear-linear interpolation and axes, whose energies and values are
+        converted to eV and barn.
+    context : DopplerContext
+        Target mass.
+    source_temperature
+        Temperature in K the source is at, not negative.
+    support : SupportPolicy
+        What the source is below its first and above its last energy.
+    negative_policy : {"reject", "preserve_signed"}
+        ``"reject"`` refuses negative values in the source.
+    source_temperature_origin
+        Non-empty label recorded in the report.
+
+    Returns
+    -------
+    PreparedDopplerCurve
+        The validated source.
+
+    Raises
+    ------
+    DopplerInputError
+        If the arrays are not finite, paired and one-dimensional with at least two
+        points, the energies are not strictly increasing and not negative, a value
+        is negative under ``"reject"``, there are no regions, a model form has no
+        axes or units that cannot be converted, or any other field is invalid.
+    UnsupportedDopplerError
+        If a model form is not lin-lin ``XYs1d`` or ``Regions1d``, or the regions
+        are not contiguous.
     """
     if isinstance(form, tuple):
         regions = form
@@ -268,6 +467,30 @@ def prepare_curve(form, *, context, source_temperature, support,
 
 @dataclass(frozen=True)
 class DopplerEvaluation:
+    """The values of a broadened cross section at requested energies.
+
+    Returned by :func:`evaluate_broadened`. ``numpy.asarray`` of it gives
+    ``values``.
+
+    Attributes
+    ----------
+    energies : numpy.ndarray
+        The requested energies in eV (read-only).
+    values : numpy.ndarray
+        The broadened cross section in barn.
+    kernel_error_estimates : numpy.ndarray
+        Analytic error estimate of the integral at each energy, in barn. A
+        conservative diagnostic, not a certificate.
+    tail_bounds : numpy.ndarray
+        Bound in barn on the Gaussian tail left out beyond the thermal radius.
+    threshold_removed : numpy.ndarray
+        Barn removed at each energy by ``threshold_policy="zero_below"`` (the value
+        before it was set to zero); zero elsewhere.
+    report : dict
+        What was done: engine and backend used, source and final temperature,
+        units (eV, b, K), options, the threshold convention if any, work
+        estimates and minima. ``global_error_bound`` is False.
+    """
     energies: np.ndarray
     values: np.ndarray
     kernel_error_estimates: np.ndarray
@@ -521,6 +744,41 @@ def evaluate_broadened(prepared, energies, *, temperature, options=None):
     or the Python reference. The report records the backend actually used.
     Native integration uses the same Taylor recurrence with a coefficient-tail
     stopping diagnostic charged to the kernel budget; no fast-math or thinning.
+
+    Parameters
+    ----------
+    prepared : PreparedDopplerCurve
+        The source, from :func:`prepare_curve`.
+    energies
+        Non-empty one-dimensional array of real numbers (not booleans): energies
+        in eV, finite and positive.
+    temperature
+        Final temperature in K, not below ``prepared.source_temperature``.
+        Cooling is refused. At the source temperature the result is the source
+        itself, with no broadening and zero error estimates (the ``"zero_below"``
+        threshold still applies).
+    options : DopplerOptions, optional
+        None gives ``DopplerOptions()``: ``rtol=1e-3``, ``atol=1e-8`` barn,
+        ``max_radius=26``, ``backend="auto"``.
+
+    Returns
+    -------
+    DopplerEvaluation
+        Values in barn at *energies*, with their error estimates.
+
+    Raises
+    ------
+    DopplerInputError
+        If *prepared* or *options* is of the wrong type, the energies are
+        invalid, or the temperature is below the source's (category
+        ``"cooling"``).
+    DopplerConvergenceError
+        If the analytic error estimate exceeds its share of the budget at some
+        energy, the tail needs a radius above ``max_radius``, a negative result
+        arises under ``"reject"``, the scale cannot be resolved, or the scratch
+        estimate exceeds ``max_work_bytes``.
+    UnsupportedDopplerError
+        If ``backend="native"`` and the compiled kernel is not built.
     """
     if not isinstance(prepared, PreparedDopplerCurve):
         raise DopplerInputError("invalid-prepared", "prepare_curve required")

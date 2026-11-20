@@ -1,6 +1,6 @@
 """ACE thermal tables (``.NNt``) from kika's processed thermal data, as ACER lays them out.
 
-The inverse of :mod:`kika.tsl.ace`: one :class:`~kika.tsl.processed.ProcessedTemperature`
+The inverse of ``kika.tsl.ace``: one ``kika.tsl.processed.ProcessedTemperature``
 becomes NXS, JXS and XSS, in NJOY 2016 ACER's order (``acesix``/``thermal``),
 and :func:`write_ace_thermal` writes the file with the neutron tables' writer
 (legacy header, I20 for the integer words, E20.11 for the reals).
@@ -113,7 +113,42 @@ def encode_ace_thermal(block: ProcessedTemperature, *, nieb: Optional[int] = Non
     """``(nxs, jxs, xss, is_int)`` of one temperature: NXS and JXS 1-based
     (``[0]`` unused), XSS with ``xss[0]`` the padding and ``is_int`` the mask of
     XSS(1..n). ``nieb`` is NXS(4) for a continuous table, which ACER fills
-    though nothing reads it (the discrete NIEB is the table's)."""
+    though nothing reads it (the discrete NIEB is the table's).
+
+    The table is NJOY ACER's layout (see the module docstring). Energies are
+    written in MeV (the block holds eV), the outgoing pdf in 1/MeV, σ in barns
+    and the coherent cumulative S in MeV·b. The number of equiprobable cosines
+    is the one the tables hold: nothing is resampled. NXS(2) is 3, NXS(5) is the
+    elastic mode (0 none, 3 incoherent, 4 coherent, 5 both), NXS(6) is -1 when
+    there is a coherent part and NCL for an incoherent-only elastic, NXS(8) is
+    NCLI of the incoherent half of a mixed elastic, and NXS(7) is IFENG (2
+    continuous, 0 discrete, 1 skewed).
+
+    Parameters
+    ----------
+    block
+        One temperature of processed thermal data. It needs the incoherent
+        inelastic σ(E) and its outgoing table; the elastic parts are optional.
+    nieb
+        NXS(4) of a continuous table. None writes 0. A discrete or skewed table
+        ignores it and writes its own number of outgoing energies.
+
+    Returns
+    -------
+    tuple
+        ``nxs`` (17 integers) and ``jxs`` (33 integers), both 1-based; ``xss``, a
+        float array with a padding word at index 0 and the table's N words after
+        it, NXS(1) = N; and ``is_int``, a boolean array of N values that is True
+        where the word is an integer to be written as one.
+
+    Raises
+    ------
+    ValueError
+        If the block has no inelastic energies or σ, or no outgoing table; if a
+        continuous table's incident energies have different numbers of cosines,
+        or a discrete one's different numbers of outgoing energies; or if an
+        incoherent elastic lacks σ(E) on a grid or its cosines.
+    """
     words = _Words()
     nxs, jxs = [0] * 17, [0] * 33
     if block.inelastic_energies is None or block.inelastic_xs is None:
@@ -152,13 +187,66 @@ def write_ace_thermal(data: Union[ProcessedTSL, ProcessedTemperature], path, *, 
                       izaw: Optional[Sequence[int]] = None, nieb: Optional[int] = None) -> Path:
     """Write one temperature of ``data`` as the ACE thermal table ``zaid`` (``"h-h2o.80t"``).
 
-    ``data`` is a :class:`ProcessedTSL` (``temperature`` picks the block when
-    it has several) or one :class:`ProcessedTemperature`. The header takes
-    ``awr``, ``izaw`` (the ZA of each scattering nuclide), ``title``, ``mat``
-    and ``date`` from the arguments, else from a ProcessedTSL read from ACE;
-    ``kt`` (MeV) defaults to the block's temperature times Boltzmann's
-    constant. The file is read back with :func:`kika.tsl.ace.read_ace_thermal`
-    before it replaces ``path``.
+    The table is laid out as in :func:`encode_ace_thermal`, with a header in the
+    legacy format. No xsdir line is written: the function writes this one file.
+    The file is first written beside *path* under a temporary name and read back
+    with ``kika.tsl.ace.read_ace_thermal``. If that succeeds it replaces *path*,
+    overwriting any file there. If it fails, the temporary file is removed, the
+    error is raised and *path* is untouched.
+
+    Parameters
+    ----------
+    data
+        A ``ProcessedTSL`` or one ``ProcessedTemperature``. Energies are in eV
+        and temperatures in K, as those classes hold them.
+    path
+        The file to write. Its folder is created if missing. Its name is not
+        read: the table's name is *zaid*.
+    temperature
+        In K. Picks the block of a ``ProcessedTSL`` with several, matched within
+        a relative 1e-6. None is accepted only when it has exactly one. Ignored
+        for a ``ProcessedTemperature``.
+    zaid
+        The table's name with its extension, as MCNP reads it (``"h-h2o.80t"``).
+        Split at the first dot: the part before it is the ZAID stem and the rest
+        (dot included) is the extension, which is left out of the header when
+        there is no dot.
+    awr
+        The atomic weight ratio of the principal scatterer. None takes the one of
+        a ``ProcessedTSL``; required when *data* is a ``ProcessedTemperature``.
+    kt
+        The temperature of the table as kT in MeV. None writes the block's
+        temperature times 8.617333262e-11 MeV/K.
+    title
+        The header comment, cut to 70 characters. None takes the title of a
+        ``ProcessedTSL``, else the comment is empty.
+    mat
+        The MAT in the header. None takes it from the ``mat`` entry of the details
+        of a ``ProcessedTSL`` (its digits), else the header has none.
+    date
+        The date text of the header. None takes the ``date`` entry of the details
+        of a ``ProcessedTSL``, else today's date as ``mm/dd/yy``.
+    izaw
+        The ZA of each scattering nuclide (``[1001]``). None takes the nuclides of
+        a ``ProcessedTSL``, named like ``"H1"`` and converted to ``1000 Z + A``;
+        required otherwise.
+    nieb
+        NXS(4) of a continuous table, as in :func:`encode_ace_thermal`. None takes
+        the ``nieb`` entry of the details of a ``ProcessedTSL``, else 0.
+
+    Returns
+    -------
+    pathlib.Path
+        *path*.
+
+    Raises
+    ------
+    ValueError
+        If *data* has several temperatures and *temperature* is None; if *awr* or
+        *izaw* cannot be found; if a nuclide name is not of the form ``"H1"``; or
+        for any of the conditions of :func:`encode_ace_thermal`.
+    KeyError
+        If *temperature* is not one of those of a ``ProcessedTSL``.
     """
     import datetime
     import os
@@ -336,6 +424,52 @@ def write_thermal_suite(suite, path, temperature=None, *, zaid: Optional[str] = 
     read from an OpenMC thermal file with the same forms). ``zaid`` names the
     table (``"hh2o.02t"``); by default the registry's short name with the
     temperature's suffix (``ace_temperature_suffix``), or ``extension``.
+
+    The inelastic σ and outgoing tables are the suite's. The coherent elastic
+    is its Bragg edges. A stated incoherent elastic (bound σ and W') is turned
+    into THERMR's σ(E) on the inelastic incident grid, divided by the
+    registry's number of mixed atoms (1 for a target not in it), with *bins*
+    equiprobable cosines. The file is written by :func:`write_ace_thermal`,
+    which overwrites an existing *path*; no xsdir line is written.
+
+    Parameters
+    ----------
+    suite
+        The thermal suite. Its ``heated`` styles give the temperatures, read as
+        kT in eV.
+    path
+        The file to write.
+    temperature
+        In K, matched to a heated style within a relative 1e-3. None is accepted
+        only when the suite has exactly one.
+    zaid
+        The table's name with its extension. None builds it from the registry's
+        name for the suite's target and the extension.
+    extension
+        The extension, with or without its dot, used when *zaid* is None; ignored
+        otherwise. None gives the suffix kika assigns to the temperature plus
+        ``t``.
+    bins
+        The number of equiprobable cosines of the incoherent elastic. It has no
+        effect when the suite has none, and the inelastic cosines are the suite's.
+
+    Returns
+    -------
+    pathlib.Path
+        *path*.
+
+    Raises
+    ------
+    ValueError
+        If *temperature* is None and the suite has not exactly one temperature;
+        if no heated style is at *temperature*; if an elastic part is neither
+        coherent nor incoherent; if *zaid* is None and the target is not in the
+        registry, or the temperature has no suffix within 1 K and *extension* is
+        None; if the suite's provenance gives no atomic weight ratio, or a
+        nuclide name is not like ``"H1"`` (nuclides are read only for a target
+        not in the registry); or for any condition of :func:`write_ace_thermal`.
+    StopIteration
+        If the suite has no MT4 reaction.
     """
     from kika.hdf5.names import K_BOLTZMANN
     from kika.hdf5.thermal_names import THERMAL_DATA

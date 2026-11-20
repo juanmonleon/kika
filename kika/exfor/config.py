@@ -36,18 +36,24 @@ def configure(
     """
     Configure default settings for the EXFOR module.
 
-    Settings persist for the duration of the Python session. Call this once
-    at the start of your script or notebook.
+    The settings are kept in a module-level dictionary, so they last until the
+    Python process ends and are shared by every caller in it. Nothing is written
+    to disk. A call changes only the arguments that are not None; the others keep
+    their value.
 
     Parameters
     ----------
     db_path : str, optional
-        Path to the X4Pro SQLite database. Once set, all functions that
-        accept db_path will use this as the default.
+        Path to the X4Pro SQLite database. Once set, every function that takes a
+        ``db_path`` uses it when called without one. An explicit ``db_path``
+        argument wins over it, and it wins over the ``KIKA_X4PRO_DB_PATH``
+        environment variable.
     tof_metadata_path : str, optional
-        Path to the TOF metadata JSON file. This file contains flight path
-        and time resolution parameters for experiments not in the database.
-        If not set, uses the default file in kika/exfor/exfor_tof_parameters.json.
+        Path to the JSON file with the flight path and time resolution of
+        time-of-flight experiments. If never set, the file
+        ``exfor_tof_parameters.json`` shipped with kika is read. The file is read
+        once per process, the first time a database dataset is converted, and kept.
+        Setting the path after that has no effect, and nothing resets the cache.
 
     Examples
     --------
@@ -66,12 +72,15 @@ def configure(
 
 def get_config() -> dict:
     """
-    Get current EXFOR module configuration.
+    Get the settings stored by :func:`~kika.exfor.configure`.
 
     Returns
     -------
     dict
-        Current configuration settings
+        A copy with the keys ``"db_path"`` and ``"tof_metadata_path"``. A value is
+        None until ``configure`` sets it. It does not include the
+        ``KIKA_X4PRO_DB_PATH`` environment variable. Changing the copy does not
+        change the stored settings.
     """
     return _config.copy()
 

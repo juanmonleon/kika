@@ -56,7 +56,17 @@ _FIRST_SUBSHELL_MT = 534
 
 @dataclass
 class PhotoatomicNotes:
-    """What the table builder did that a user should know."""
+    """What the table builder did that a user should know.
+
+    Attributes
+    ----------
+    compton : list of str
+        The messages of the Compton-shell matching: each BMM shell dropped and each
+        subshell joined to a sibling or left without a profile.
+    nonPositiveTransitions : int
+        The number of relaxation transitions whose energy, computed from the
+        binding energies, is not positive. They are written as they come out.
+    """
 
     compton: List[str] = field(default_factory=list)
     nonPositiveTransitions: int = 0
@@ -79,7 +89,20 @@ def _trimmed(x, y):
 def unionGrid(tables) -> np.ndarray:
     """The union of ``[(x, y), ...]``: a value as often as the table repeating it most,
     and the start (end) of a table that opens (closes) on a non-zero value inside the
-    union repeated, so the opening is a step."""
+    union repeated, so the opening is a step.
+
+    Parameters
+    ----------
+    tables : list of tuple
+        ``(x, y)`` pairs of numpy arrays: increasing abscissae (a value may be
+        repeated to make a step) and their ordinates.
+
+    Returns
+    -------
+    numpy.ndarray
+        The sorted union grid. A value appears at most twice, and twice only when
+        a table repeats it or a table opens or closes on it at a non-zero value.
+    """
     counts: Dict[float, int] = {}
     for x, _ in tables:
         values, n = np.unique(x, return_counts=True)
@@ -168,11 +191,34 @@ def _openings(grid, columns, rtol=LOGLOG_RTOL):
 
 
 def refinedGrid(tables, columnsOf, rounds: int = 60) -> np.ndarray:
-    """The union grid with nodes added until every column reads log-log within :data:`LOGLOG_RTOL`.
+    """The union grid with nodes added until every column reads log-log within ``LOGLOG_RTOL``.
 
     ``tables`` are the ``(x, y)`` the union is made of; ``columnsOf(grid)`` gives
     the columns the transport interpolates, on a grid. Every node of the union is
     kept; added nodes split an interval at its midpoint.
+
+    Parameters
+    ----------
+    tables : list of tuple
+        The ``(x, y)`` pairs of :func:`unionGrid`.
+    columnsOf : callable
+        ``columnsOf(grid)`` returns the list of columns (arrays on ``grid``).
+    rounds : int, optional
+        The most rounds of refinement. Default: 60.
+
+    Returns
+    -------
+    numpy.ndarray
+        The refined grid, sorted. Where a column opens from zero without a step,
+        a node is added at a fraction sqrt(``LOGLOG_RTOL``) of the interval, before
+        the rounds begin.
+
+    Raises
+    ------
+    ValueError
+        If a column still misses its lin-lin by more than ``LOGLOG_RTOL`` (relative)
+        after ``rounds - 1`` checked rounds: the midpoints added in the last
+        round are not tested.
     """
     grid = unionGrid(tables)
     opening = _openings(grid, columnsOf(grid))
@@ -467,7 +513,41 @@ def photoatomicTable(photoat, relaxation, *, extension: str = ".00p", awr: Optio
 
     The energy grid is the union of the evaluation's grids (eprdata25's) with
     nodes added where a table read log-log, as the transport reads it, would
-    miss the lin-lin data by more than :data:`LOGLOG_RTOL` (:func:`refinedGrid`).
+    miss the lin-lin data by more than ``LOGLOG_RTOL`` (:func:`refinedGrid`).
+
+    Parameters
+    ----------
+    photoat : ReactionSuite
+        The photo-atomic evaluation (projectile ``photon``, interaction ``atomic``),
+        with every cross section lin-lin and energies in eV.
+    relaxation : ~kika.nuclear_data.model.pops.PoPs
+        The element's atomic-relaxation data; one element with atomic data.
+    extension : str, optional
+        The ZAID suffix of the header. Default: ``".00p"``.
+    awr : float, optional
+        The atomic weight ratio. Default: the one the evaluation's provenance
+        states, or 0.0 when it states none.
+    comment : str, optional
+        The header comment, cut to 70 characters. Default: the target and
+        "photo-atomic, kika".
+    date : str, optional
+        The header date. Default: today, as ``dd/mm/yy``.
+
+    Returns
+    -------
+    tuple
+        ``(table, notes)``: the ``PhotoatomicAce``
+        (energies in eV; the header has ZAID 1000·Z, temperature 0 and a legacy
+        format) and the :class:`PhotoatomicNotes`.
+
+    Raises
+    ------
+    ValueError
+        If ``photoat`` is not a photo-atomic suite, a cross section is not
+        lin-lin, ``relaxation`` does not carry exactly one element with atomic
+        data or states no binding energy for a vacancy, the relaxation subshells
+        are not the photo-ionisation subshells of ``photoat``, or the grid cannot
+        be refined (see :func:`refinedGrid`).
     """
     from kika.ace.classes.header import Header
     from kika.nuclear_data.model import ATOMIC_INTERACTION

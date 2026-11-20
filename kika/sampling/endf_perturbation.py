@@ -767,130 +767,186 @@ def perturb_ENDF_files(
     precomputed: Optional[List[Optional[Dict[str, Any]]]] = None,
 ):
     """
-    Perturb ENDF nuclear data files using MF34 angular covariance matrices.
+    Perturb the MF4 Legendre coefficients of ENDF files with factors drawn from MF34.
 
-    This function generates perturbed ENDF files by sampling perturbation factors
-    from multivariate normal distributions derived from MF34 covariance matrices.
-    Optionally, it can also generate ACE files for each perturbed ENDF using NJOY.
-    
+    The relative MF34 covariance of the Legendre coefficients ``a_l`` (``l`` ≥ 1)
+    of the selected reactions is assembled as one joint block per ENDF file (MF34
+    sections stated as absolute covariances are left out). Each sample is one draw
+    of ``factors = 1 + X``, with ``X`` normal of that covariance, and the factor of
+    an energy bin multiplies the ``a_l`` of the MF4 nodes inside the bin. ``a_0``
+    is 1 by definition in MF4: a factor of order 0 is drawn with the block but
+    never scales a coefficient. The sections that MF34 states in the other frame
+    than MF4 (LAB or CM) are scaled in MF34's frame and converted back; the tape
+    keeps its own frame.
+
+    At the edge between two bins an energy node is stored twice, so that the
+    factor steps there. At the outer edge of the covariance's energy range the
+    change runs lin-lin from the last scaled node to the next unscaled one. A
+    section whose MF4 is tabulated (LTT=2) is not perturbed: the sample that
+    carries MF34 components for it fails, the error is logged and no tape is
+    written.
+
+    Every file of one call is drawn with the same *seed*, and the draw keeps
+    every direction of the matrix, null ones included. With ``"svd"`` a direction
+    stated with negative variance is drawn with the magnitude of its eigenvalue
+    (``negative_directions="fold"`` in :func:`kika.sampling.core.draw_samples`);
+    with ``"eigen"`` it gets zero variance. The factors are ``float32``.
+
+    Per-file problems (a covariance that cannot be read, no MF34 data for the
+    request, a failed draw, a failed sample) are logged and counted in the log,
+    and the function goes on with the next file or sample; the function returns
+    None.
+
     Parameters
     ----------
-    endf_files : Union[str, List[str]]
+    endf_files : str or list of str
         Path(s) to ENDF file(s) to be perturbed
-    mt_list : List[int] or List[List[int]]
+    mt_list : list of int or list of list of int
         MT reactions to perturb. Either a flat list (applied to every ENDF file)
-        or a list-of-lists with one entry per ENDF file. An empty inner list
-        means "perturb all available MTs" for that file.
-    legendre_coeffs : List[int]
-        List of Legendre coefficient indices to perturb (e.g., [0, 1, 2])
+        or a list-of-lists with one entry per ENDF file. An empty list (or inner
+        list) means every MT that the MF34 states. Negative entries exclude: only
+        negatives select all the MTs of MF34 except those, positives and
+        negatives select the positives except the negatives, and a negative that
+        names a composite MT also excludes its partials. An MT absent from MF34
+        is dropped with a warning in the log.
+    legendre_coeffs : list of int
+        Legendre orders to perturb (e.g. ``[1, 2, 3]``), with the same signed
+        convention as *mt_list* (without composite expansion); empty means every
+        order that MF34 states.
     num_samples : int
-        Number of perturbed ENDF files to generate
-    mf34_cov_files : Optional[Union[str, List[str]]], default None
-        Path(s) to MF34 covariance matrix file(s). If None, covariance data will be
-        read from the ENDF files themselves (MF34 section). If provided, can be a 
-        single file (used for all ENDF files) or one file per ENDF file.
-    space : str, default "linear"
-        Sampling space: "linear"/"lin" (factors = 1 + X) or "log"
-        (factors = exp(Y - diag(Σ_log)/2), Y ~ N(0, Σ_log), Σ_log = log1p(Σ): unit mean, Cov = Σ)
-    decomposition_method : str, default "svd"
-        Matrix decomposition method: "svd", "cholesky", "eigen", or "pca"
-    psd_method : str, default "none"
-        How to handle a non-PSD covariance during decomposition:
+        Number of perturbed ENDF files to generate per input file.
+    mf34_cov_files : str or list of str, optional
+        MF34 covariance file(s). None reads the covariance from the ENDF files
+        themselves. A single path is used for all ENDF files; otherwise one per
+        ENDF file.
+    space : {"linear", "lin"}
+        Factors are ``1 + X``. Any other value, ``"log"`` included, raises.
+    decomposition_method : {"svd", "eigen"}
+        Matrix decomposition, in any case. Any other value (``"cholesky"`` and
+        ``"pca"`` included) raises.
+    psd_method : {"none", "auto", "clip", "clip_rescale", "higham"}
+        How the covariance is repaired before the decomposition, as in
+        :func:`kika.sampling.core.draw_samples`:
 
-        - "none": do not modify the matrix (default); SVD silently folds
-          negative eigenvalues to their absolute value. A WARN line is logged
-          when ``|λ_min|/λ_max`` exceeds 1e-8.
-        - "auto": clip mild negatives, Higham for severe ones.
-        - "clip": zero out negative eigenvalues.
-        - "higham": nearest-PSD Higham projection.
+        - ``"none"`` leaves the matrix as stated. With ``"svd"`` a negative
+          eigenvalue then contributes its magnitude.
+        - ``"auto"`` clips mild negative eigenvalues and projects (Higham) for
+          severe ones.
+        - ``"clip"`` zeroes the negative eigenvalues.
+        - ``"higham"`` is the nearest-positive-semi-definite projection.
 
-        Use `higham_projection=True` as a shortcut for "higham".
-    higham_projection : bool, default False
-        Convenience flag — when True, force `psd_method="higham"`. Raises if
-        the user also passes a non-default `psd_method`.
-    enforce_positivity : bool, default True
-        After each MF4 sample is assembled (factor × baseline), check that
-        f(μ) = (1/2) Σ (2l+1) a_l P_l(μ) ≥ 0 on a fine μ-grid. If not,
-        project to the L²-nearest non-negative coefficient set via SLSQP.
-        Applies during the perturbed-ENDF write path. **Skipped in
-        dry_run** — dry_run only writes the factor parquet, it does not
-        apply factors or check positivity. To audit positivity, just do
-        a real run with a small `num_samples`.
-    positivity_check_points : int, default 101
-        Number of μ points used for the positivity check / projection.
-    sampling_method : str, default "sobol"
-        Sampling method: "sobol", "lhs", or "random"
-    extensions : Optional[List[str]], default None
-        ACE extensions to assign per temperature, e.g. ['06c'] for 600 K.
-        Must have the same length as `temperatures`. When None, NJOY's
-        internal K_TO_SUFFIX lookup is used (legacy behavior).
-    output_dir : str, default "."
-        Output directory for perturbed files
-    seed : Optional[int], default None
-        Random seed for reproducible sampling
-    nprocs : int, default 1
-        Number of parallel processes for sample processing
-    dry_run : bool, default False
-        If True, only generate perturbation factors without creating ENDF files
-    verbose : bool, default True
-        Enable verbose logging output
-    generate_ace : bool, default False
-        If True, generate ACE files for each perturbed ENDF using NJOY
-    njoy_exe : Optional[str], default None
-        Path to NJOY executable. Required if generate_ace is True
-    temperatures : Optional[Union[float, List[float]]], default None
-        Temperature(s) (in Kelvin) for ACE generation. Can be a single float or list of floats.
-        Required if generate_ace is True.
-    library_name : Optional[str], default None
-        Nuclear data library name (e.g., 'endfb81', 'jeff40'). Required if generate_ace is True
-    njoy_version : str, default "NJOY 2016.78"
-        NJOY version string for metadata and titles
-    xsdir_file : Optional[str], default None
-        Path to master XSDIR file to be modified for each generated ACE file.
-        Only used when generate_ace=True.
-    energy_ranges : Optional[List[Tuple[float, float]]], default None
-        List of (emin, emax) energy ranges in eV where perturbations are applied.
-        Bins outside these ranges are left unperturbed (factor = 1.0).
-        None means perturb all energies. Examples:
-        - [(0, 0.85e6), (4e6, 20e6)] : perturb up to 0.85 MeV and from 4 MeV onward
-        - [(1e6, 4e6)] : perturb only between 1-4 MeV
-    precomputed : list of dict or None, default None
-        One entry per ENDF file (``None`` for a file that should still draw its
-        own). An entry carries ``factors`` (num_samples x n_params),
-        ``param_mapping``, ``energy_grids`` and optionally ``diagnostics``, and
-        makes this function **skip loading the covariance and drawing** — it
-        applies what it was handed and does everything else exactly as before.
+        An invalid name makes the draw of that file fail (logged).
+    higham_projection : bool
+        When true, sets ``psd_method="higham"``. Raises if *psd_method* is not
+        left at ``"none"``.
+    enforce_positivity : bool
+        After a sample is applied, each MF4 node whose angular distribution
+        ``f(μ) = (1/2) Σ (2l+1) a_l P_l(μ)`` is negative on *positivity_check_points*
+        cosines is replaced by the nearest non-negative coefficient set (L²
+        distance, SLSQP), with the orders above the highest perturbed order held
+        at their values. **Not done in a dry run**, which applies no factor. The
+        events are summarised in the log.
+    positivity_check_points : int
+        Number of μ points used for the positivity check and the projection.
+    sampling_method : {"sobol", "lhs", "random"}
+        How the standard normals are drawn (see
+        :func:`kika.sampling.core.draw_samples`).
+    output_dir : str
+        Root of everything written (created if missing); see *Notes*.
+    seed : int, optional
+        Base seed; None draws a different ensemble at each call.
+    nprocs : int
+        Number of processes that write the samples of a file; 1 (or a single sample)
+        runs them in order. A failure of the pool falls back to a serial run.
+    dry_run : bool
+        When true, the factors are drawn and written (the summary file of each
+        sample and the parquet), but no ENDF tape, no ACE file and no positivity
+        check is made.
+    verbose : bool
+        Progress messages of the run and of the draw.
+    generate_ace : bool
+        Run NJOY on each perturbed tape, for each temperature. Needs *njoy_exe*,
+        *temperatures* and *library_name*.
+    njoy_exe : str, optional
+        Path of the NJOY executable.
+    temperatures : float or list of float, optional
+        Temperature(s) in K for the ACE files. Must not be an empty list.
+    extensions : list of str, optional
+        ACE extension of each temperature (``["06c"]`` for 600 K), as many as
+        *temperatures*; a list of another length is ignored with a warning. None
+        leaves NJOY's own naming, with the sample number as suffix.
+    library_name : str, optional
+        Library name handed to NJOY (``"endfb81"``).
+    njoy_version : str
+        NJOY version string for the metadata and titles.
+    xsdir_file : str, optional
+        Baseline xsdir. For each sample and ACE file written, a copy named
+        ``<stem>_<NNNN>`` in ``output_dir/xsdir`` has the entry of that table
+        replaced (or added). Only used with *generate_ace*.
+    energy_ranges : list of tuple of float, optional
+        ``(emin, emax)`` windows in eV. A bin that overlaps no window gets factor
+        1; a bin that overlaps one is perturbed whole, whatever part of it lies
+        inside. None perturbs every bin. For ``[(0, 0.85e6), (4e6, 20e6)]``, up
+        to 0.85 MeV and from 4 MeV onward.
+    only_xsdir : bool
+        When true, nothing is perturbed and NJOY is not run: the xsdir snippets
+        found under ``output_dir/ace/<temp>/<zaid>/<NNNN>/`` for the ZAIDs of
+        *endf_files* are re-wrapped and the master copies in ``output_dir/xsdir``
+        rebuilt from *xsdir_file*. This function writes its ACE files to
+        ``ace/<NNNN>/``, which that search does not visit, so on its own output
+        nothing is re-wrapped and no master is written. Cannot be combined with
+        *dry_run*.
+    log_file : str, optional
+        Log file, to which this run appends. None starts a new
+        ``endf_perturbation_<timestamp>.log`` in *output_dir*.
+    precomputed : list of dict, optional
+        One entry per ENDF file (``None`` for a file that still draws its own).
+        An entry carries ``factors`` (``num_samples`` × n_params), ``param_mapping``
+        (``(isotope, mt, l, energy_bin)`` per column), ``energy_grids`` (the bin
+        edges, in eV, of each ``(isotope, mt, l)``), and optionally ``diagnostics``
+        and ``frames`` (``{MT: "LAB" | "CM"}``; without it the factors are
+        applied in MF4's own frame). It makes the function skip loading the
+        covariance and drawing, and apply what it was handed. It exists for
+        the joint MF33-MF34 draw (``kika.sampling.joint_perturbation``).
+        An entry whose shapes do not match fails that file (logged).
 
-        It exists because the MF33↔MF34 joint cannot be drawn here. The Fe-56
-        deliverable states ``Cov(sigma, a_l)`` in MF34's a₀ blocks, so the two
-        families are one multivariate normal; drawing the a_l half in this
-        function and the sigma half in ``perturb_PENDF_files`` and pairing them
-        by replica index gives an ensemble whose cross-correlation is zero (and,
-        with two balanced Sobol sets, marginals 18-21 % too narrow). See
-        :mod:`kika.sampling.joint_mf33_mf34`.
-
-        ``None`` — the default — leaves every existing call unchanged, down to
-        the seed and the drawn bytes.
+    Raises
+    ------
+    NotImplementedError
+        If *space* is not ``"linear"``/``"lin"``, or *decomposition_method* is
+        not ``"svd"`` or ``"eigen"``.
+    ValueError
+        If *higham_projection* is true and *psd_method* is not ``"none"``;
+        *only_xsdir* and *dry_run* are both true; *generate_ace* is true and
+        *njoy_exe*, *temperatures* or *library_name* is missing, or *temperatures*
+        is empty or neither a number nor a list; the number of *mf34_cov_files*
+        is neither 1 nor that of *endf_files*; or *mt_list* is a list of lists
+        whose length is not that of *endf_files*.
+    TypeError
+        If *mt_list* is neither a flat list of int nor a list of lists of int.
+    FileNotFoundError
+        If *generate_ace* is true and *njoy_exe* does not exist.
 
     Notes
     -----
-    Default behavior samples directly from the MF34 covariance with no
-    repair (`psd_method="none"`). Mild negative eigenvalues from numerical
-    noise are silently folded to their magnitude by SVD; a WARN line is
-    logged when the negative spectrum is non-trivial
-    (``|λ_min|/λ_max > 1e-8``). To repair the matrix, set
-    `higham_projection=True` (Higham projection) or pass an explicit
-    `psd_method` ("auto", "clip", or "higham"). The two are mutually
-    exclusive.
-    
-    When generate_ace=True, the output directory structure will include:
+    Everything is written under *output_dir*, with the sample number ``NNNN``
+    counted from 1 on four digits, and ``base`` the name of the input file
+    without extension:
 
-    - output_dir/endf/zaid/sample_num/ : perturbed ENDF files
-    - output_dir/ace/temp/zaid/sample_num/ : ACE files organized by temperature (temp uses exact input format)
-    - output_dir/njoy_files/temp/zaid/ : NJOY auxiliary files
-    - output_dir/xsdir/ : modified xsdir files (if xsdir_file provided)
-    - ``output_dir/*.log`` and ``*.parquet`` : log and master perturbation files
-
+    - ``endf/<zaid>/<NNNN>/<base>_<NNNN><ext>``: the perturbed tape, and beside
+      it ``<base>_<NNNN>_summary.txt`` with one line per bin: MT, order, lower
+      and upper energy (eV) and factor. **A tape that already exists at that
+      path is reused, not rewritten**, so a second run with other factors in the
+      same directory keeps the first one's tapes (this is what lets a run add ACE
+      files at another temperature).
+    - ``endf_perturbation_factors_<timestamp>.parquet``: one row per sample, a
+      ``Sample_ID`` column from 1 and one ``float32`` column per bin,
+      ``<symbol>_MT<mt>_L<l>_<lower>_<upper>``.
+    - ``endf_perturbation_<timestamp>.log``: the log, unless *log_file* is given.
+    - With *generate_ace*: ``ace/<NNNN>/`` (the ACE files of every temperature
+      and isotope of the sample, with ``ace/<NNNN>/xsdir/`` for their xsdir
+      lines), ``njoy_files/<NNNN>/`` (NJOY input and output) and, with
+      *xsdir_file*, ``xsdir/<stem>_<NNNN>``.
     """
     global _logger
 

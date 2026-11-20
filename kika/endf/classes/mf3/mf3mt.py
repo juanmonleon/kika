@@ -23,6 +23,21 @@ class MF3MT(MT):
 
     Each MF3/MT section stores a single TAB1 record giving the
     cross section sigma(E) as a function of incident energy E.
+
+    A user gets one from ``endf[3][mt]`` on a tape read with
+    :func:`kika.endf.read_endf` or :func:`kika.endf.open_endf`. Its ``energies``
+    are in eV and its ``cross_sections`` in barns, as the tape writes them.
+    ``number`` has no default.
+
+    Attributes
+    ----------
+    number : int
+        The MT number.
+    data : dict
+        A free-form dictionary. The parser does not fill it.
+    num_lines : int
+        The number of lines of the section on the tape, as the parser counted
+        them; 0 for a section built by hand.
     """
 
     _za: float = None

@@ -98,7 +98,110 @@ def _lines_for(count: int) -> int:
 
 @dataclass
 class TSLTape:
-    """One TSL tape, as a library lists it."""
+    """One TSL tape, as a library lists it.
+
+    Returned by :func:`read_tsl_header` for an ENDF-6 tape and listed in
+    :attr:`TSLLibraryIndex.tapes` for every format. Fields a format does not hold
+    keep their default (None, empty, or 0 for ``mat``, ``za`` and ``awr``).
+    Cross sections are in barns. Temperatures are in K for ENDF-6 (by its
+    definition), ACE (from the header's kT) and OpenMC (from kT, rounded to
+    0.1 K). GNDS and G4NDL give the numbers as the file states them, with no unit
+    conversion.
+
+    Attributes
+    ----------
+    path
+        The file, as a string. For ACE, the file of the lowest temperature; for
+        G4NDL, the ``ThermalScattering`` folder.
+    file_name
+        The file's name. For ACE tables of one material in several files,
+        ``<stem>.*t``; for G4NDL, the material name.
+    size
+        Bytes on disk (the sum over the material's files for ACE and G4NDL).
+    mat
+        MAT. For ACE, the digits of the header's MAT; for GNDS, the number after
+        ``MATERIAL`` in its ENDF-compatible text. 0 for OpenMC and G4NDL.
+    za, awr
+        ZA and AWR of MF1/MT451. A TSL tape's ZA is a pseudo-ZA, not a nuclide's.
+        ACE and OpenMC give the AWR of their header and attributes and leave ZA at
+        0; GNDS and G4NDL leave both at 0.
+    nsub
+        NSUB of the tape. 12 for every non-ENDF format.
+    zsymam
+        The first 11 characters of the first description line of an ENDF-6 tape
+        (or of a GNDS file's ENDF-compatible text). None for the other formats.
+    name, principal, compound, variant, name_source
+        The labels of :class:`TSLNaming` for this tape, from the rule named by
+        ``name_source``. ENDF-6 and GNDS: ``"filename"``, ``"zsymam"`` or
+        ``"verbatim"``. ACE: ``"title"`` (``"verbatim"`` when the title matches
+        no pattern), and ``name`` is the ZAID stem. OpenMC: ``"openmc"`` (or
+        ``"verbatim"``). G4NDL: ``"g4ndl"``.
+    lab, author, evaluation_date
+        From the first description line of MF1/MT451 (columns 12-22, 34-66 and
+        23-32); None when blank. GNDS gives its author and the date of its
+        evaluated style, ACE the date of its header.
+    description
+        The description lines of MF1/MT451 after the first. GNDS gives all the lines
+        of its ENDF-compatible text, ACE the table's title.
+    directory
+        The MF1/MT451 index, one ``[mf, mt, nc]`` row per section. ENDF-6 only.
+    elastic
+        ``"coherent"``, ``"incoherent"``, ``"both"``, or None when there is no
+        elastic part.
+    elastic_temperatures
+        The temperatures of the elastic part.
+    bragg_edges
+        The number of Bragg edges. None without a coherent elastic part.
+    temperatures
+        The temperatures at which S(α,β) (a processed file: the inelastic data)
+        is tabulated. G4NDL gives the elastic ones when it has no inelastic part.
+    n_alpha, n_beta
+        The number of α and of β values of the S(α,β) table (counts of the first
+        β block for ENDF-6). None when the tape has no tabulated S(α,β).
+    lat
+        1 when α and β are scaled with 0.0253 eV instead of kT (the ENDF-6 flag; for
+        GNDS, ``calculatedAtThermal``).
+    lasym
+        1 when S(α,β) is asymmetric (negative β tabulated).
+    lln
+        1 when the table stores ln S. ENDF-6 only.
+    free_xs
+        B(1) of MF7/MT4: the free-atom σ of the principal scatterer, which
+        already includes the number of principal atoms. ENDF-6 only.
+    principal_awr
+        AWR of the principal scatterer.
+    principal_atoms
+        Number of principal atoms in the compound (B(6)).
+    secondaries
+        One dict per other scatterer, with ``law`` (ENDF-6: ``"sct"``,
+        ``"free-gas"`` or ``"diffusive"``; None for GNDS), ``free_xs``, ``awr``
+        and ``atoms``.
+    composition
+        The entries of MF7/MT451 when the tape has one, as dicts with ``zai``,
+        ``fraction``, ``awr`` and ``free_xs``.
+    companions
+        Paths of the files that came with the tape, by kind (see
+        :func:`companion_kind`). Filled by :func:`index_tsl`.
+    problems
+        One string per part of the header that could not be read, with the reason.
+    format
+        One of ``"endf"``, ``"gnds"``, ``"ace"``, ``"openmc"``, ``"g4ndl"``.
+    library
+        The library the file names (``ENDF/B-VIII.1``): GNDS ``evaluation``, the
+        ACE header's library, the G4NDL source tag. None for the other formats.
+    title
+        The format's own name for the material: GNDS ``target``, the ACE title,
+        the OpenMC group, the G4NDL material.
+    paths
+        ACE only: every file of the material, one per temperature, by increasing
+        temperature.
+    member
+        The material inside *path* when it holds several: the ACE ZAID stem, the
+        OpenMC group, the G4NDL material.
+    details
+        Format-specific fields: ACE ``zaids``, ``nuclides``, ``outgoing`` and
+        ``elastic_mode``; OpenMC ``nuclides``; G4NDL ``processes``.
+    """
 
     path: str
     file_name: str
@@ -156,6 +259,7 @@ class TSLTape:
 
     @property
     def has_phonon_spectrum(self) -> bool:
+        """True when the tape came with a LEAPR input or a FLASSH DOS file."""
         return bool(self.companions.get("leapr") or self.companions.get("flassh-dos"))
 
     @property
@@ -166,6 +270,10 @@ class TSLTape:
         return f"{self.format}:{self.member or self.file_name}"
 
     def to_dict(self) -> dict:
+        """The fields of the tape as a dict, with two more entries.
+
+        ``id`` is :attr:`key` and ``has_phonon_spectrum`` is the property of that name.
+        """
         out = asdict(self)
         out["id"] = self.key
         out["has_phonon_spectrum"] = self.has_phonon_spectrum
@@ -174,7 +282,23 @@ class TSLTape:
 
 @dataclass
 class TSLCompound:
-    """The tapes of one compound: H₂O's H, UO₂'s O and U in every enrichment."""
+    """The tapes of one compound: H₂O's H, UO₂'s O and U in every enrichment.
+
+    Returned by :meth:`TSLLibraryIndex.compounds`, which orders the tapes by
+    principal atom, variant and name.
+
+    Attributes
+    ----------
+    name
+        The compound, as :attr:`TSLNaming.compound` gives it.
+    tapes
+        Its tapes.
+    aliases
+        Spellings of the compound in the tapes' ZSYMAM that differ from its name
+        (``Lucite`` for C5O2H8, ``teflon`` for CF2).
+    companions
+        Compound-level files by kind (``tsl-H2O.readme``): paths as strings.
+    """
 
     name: str
     tapes: List[TSLTape]
@@ -186,6 +310,7 @@ class TSLCompound:
 
     @property
     def atoms(self) -> List[str]:
+        """The principal atoms of the tapes (``H``, ``O``), each once, in tape order."""
         seen: List[str] = []
         for tape in self.tapes:
             if tape.principal and tape.principal not in seen:
@@ -194,6 +319,7 @@ class TSLCompound:
 
     @property
     def variants(self) -> List[str]:
+        """The variants of the tapes (``5P``, ``HALEU``), each once, in tape order."""
         seen: List[str] = []
         for tape in self.tapes:
             if tape.variant and tape.variant not in seen:
@@ -203,6 +329,29 @@ class TSLCompound:
 
 @dataclass
 class TSLLibraryIndex:
+    """A TSL library listed by :func:`index_tsl`.
+
+    Attributes
+    ----------
+    root
+        The folder indexed (the thermal folder an OpenMC or G4NDL root was followed
+        to), or the file when one tape was given.
+    tapes
+        One entry per tape or material. Sorted by compound, principal atom,
+        variant and name, except when the root is one ACE, OpenMC or GNDS file.
+    other_endf
+        Paths of ENDF-6 tapes of another sublibrary (NSUB other than 12).
+    unreadable
+        Paths of the files that are neither a tape nor a companion of one, other
+        than an ``xsdir``, ``cross_sections.xml`` or ``readme``. Empty when the root
+        is a file.
+    compound_companions
+        ``{compound: {kind: [paths]}}`` for the files that belong to a compound and
+        not to one tape.
+    single_file
+        True when *root* was a file: the "library" is one material.
+    """
+
     root: str
     tapes: List[TSLTape]
     #: ENDF tapes of another sublibrary found in the folder (not TSL).
@@ -216,9 +365,11 @@ class TSLLibraryIndex:
 
     @property
     def name(self) -> str:
+        """The name of the indexed folder or file (the last part of ``root``)."""
         return Path(self.root).name
 
     def compounds(self) -> List[TSLCompound]:
+        """The tapes grouped by compound, sorted by compound name without regard to case."""
         groups: Dict[str, List[TSLTape]] = defaultdict(list)
         for tape in self.tapes:
             groups[tape.compound].append(tape)
@@ -458,6 +609,23 @@ def read_tsl_header(path: Union[str, os.PathLike]) -> TSLTape:
     Raises ``ValueError`` when *path* is not an ENDF tape at all. A tape of
     another sublibrary comes back with its ``nsub`` and no MF7 data; parts of
     a TSL tape that cannot be read are named in :attr:`TSLTape.problems`.
+
+    Parameters
+    ----------
+    path
+        An ENDF-6 tape. The labels of the result come from its file name, with
+        ZSYMAM as the fallback (see :func:`tsl_naming`).
+
+    Returns
+    -------
+    TSLTape
+        With ``format="endf"``. Its temperatures are in K. ``companions`` is empty:
+        :func:`index_tsl` fills it.
+
+    Raises
+    ------
+    ValueError
+        If the file has fewer than four MF1/MT451 lines.
     """
     path = Path(path)
     mf1, mt2, mt4 = _section_lines(path)
@@ -499,7 +667,23 @@ _COMPANION_SUFFIXES = (
 
 
 def companion_kind(file_name: str) -> str:
-    """``leapr``, ``flassh-dos``/``-control``/``-crystal``/``-header``, ``readme``, ``njoy``, ``script`` or ``other``."""
+    """The kind of a file that comes with a TSL tape, from its name.
+
+    Parameters
+    ----------
+    file_name
+        The name, with its extension.
+
+    Returns
+    -------
+    str
+        ``"flassh-dos"``, ``"flassh-control"``, ``"flassh-crystal"`` or
+        ``"flassh-header"`` for the FLASSH inputs (by their ``-DOS.txt``,
+        ``-Control.txt``, ``-Crystal.txt`` and ``-Header_Information.txt`` endings,
+        or the ``_flassh-`` spellings); else by extension (not case-sensitive)
+        ``"leapr"`` (``.leapr``), ``"readme"``, ``"njoy"`` or ``"script"``
+        (``.py``); ``"other"`` for the rest.
+    """
     for kind, suffixes in _COMPANION_SUFFIXES:
         if file_name.endswith(suffixes):
             return kind
@@ -577,6 +761,24 @@ def index_tsl(root: Union[str, os.PathLike], recursive: bool = False) -> TSLLibr
     root is followed to its thermal folder. Every other file is matched to an
     ENDF-6 tape by name -- the LEAPR input, the FLASSH inputs, the readme --
     or, failing that, to a compound (``tsl-H2O.readme``).
+
+    Parameters
+    ----------
+    root
+        A folder, or one file. For a folder, an OpenMC root (with
+        ``cross_sections.xml`` and a ``thermal/`` folder) and a G4NDL root are
+        followed to their thermal folder. For one ENDF-6 tape, the files beside
+        it that belong to it are gathered too; for one ACE table, its siblings of
+        other temperatures.
+    recursive
+        Descend into sub-folders. It has no effect on a G4NDL
+        ``ThermalScattering`` folder, which is read as a whole.
+
+    Returns
+    -------
+    TSLLibraryIndex
+        The tapes (headers only, no S(α,β) is read), the files that belong to
+        them, and what was not recognised.
     """
     from kika.library_index import _candidates
     from .ace import ACE_THERMAL_NAME

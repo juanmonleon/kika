@@ -99,16 +99,25 @@ KCODE_COLUMNS: Tuple[str, ...] = (
 class BinAxis:
     """One of the eight MCTAL bin axes of a tally.
 
-    :ivar key: MCTAL letter (``f d u s m c e t``; ``r`` replaces ``c`` for
+    Attributes
+    ----------
+    key : str
+        MCTAL letter (``f d u s m c e t``; ``r`` replaces ``c`` for
         radiography tallies).
-    :ivar n: Bin count as written in the file, **including** the total bin.
+    n : int
+        Bin count as written in the file, **including** the total bin.
         ``0`` means the axis is not binned; it then still holds one value.
-    :ivar values: Numbers listed under the bin line (cell/surface numbers for
-        ``f``, upper bin bounds for ``c``/``e``/``t``), or ``None`` when MCNP
-        lists none (e.g. point detectors, user bins).
-    :ivar has_total: The last bin is the total over the others (``t`` suffix).
-    :ivar cumulative: The bins are cumulative (``c`` suffix).
-    :ivar flags: Extra integers on the bin line after the count, verbatim.
+    values : numpy.ndarray or None
+        Numbers listed under the bin line (cell/surface numbers for
+        ``f``, upper bin bounds for ``c``/``e``/``t``), or None when MCNP
+        lists none (e.g. point detectors, user bins). MCNP writes energies in
+        MeV and times in shakes; kika does not convert them.
+    has_total : bool
+        The last bin is the total over the others (``t`` suffix).
+    cumulative : bool
+        The bins are cumulative (``c`` suffix).
+    flags : tuple of int
+        Extra integers on the bin line after the count, verbatim.
     """
 
     key: str
@@ -194,11 +203,23 @@ class BinAxis:
 class Tfc:
     """Tally fluctuation chart of one tally (or one perturbation of it).
 
-    :ivar bins: 0-based index, per axis key, of the bin MCNP tracks.
-    :ivar nps: Histories at each print.
-    :ivar result: Tally value at each print.
-    :ivar error: Relative error at each print.
-    :ivar fom: Figure of merit at each print (``0`` when MCNP omits it).
+    The chart is the history of one bin of the tally: its value, relative error and
+    figure of merit at each of the prints MCNP makes as the run goes on. The
+    arrays have one entry per print, in the order of the file.
+
+    Attributes
+    ----------
+    bins : dict of str to int
+        0-based index, per axis key, of the bin MCNP tracks, as an index into
+        :attr:`Tally.result` (total bins included).
+    nps : numpy.ndarray
+        Histories at each print (integers).
+    result : numpy.ndarray
+        Tally value at each print.
+    error : numpy.ndarray
+        Relative error at each print (a fraction of the value, as MCNP writes it).
+    fom : numpy.ndarray
+        Figure of merit at each print (``0`` when MCNP omits it).
     """
 
     bins: Dict[str, int]
@@ -208,6 +229,10 @@ class Tfc:
     fom: np.ndarray
 
     def to_dataframe(self) -> pd.DataFrame:
+        """The chart as a table with the columns ``nps``, ``result``, ``error``, ``fom``.
+
+        One row per print, with a default integer index.
+        """
         return pd.DataFrame(
             {"nps": self.nps, "result": self.result, "error": self.error, "fom": self.fom}
         )
@@ -215,7 +240,19 @@ class Tfc:
     def plot(self, figsize=(15, 5), show_error_bars: bool = True):
         """Plot result, relative error and figure of merit against NPS.
 
-        :returns: The matplotlib figure.
+        Parameters
+        ----------
+        figsize
+            Size of the figure in inches, ``(width, height)``. The figure has three
+            panels side by side.
+        show_error_bars
+            If True, the result panel has error bars of half-length
+            ``error * abs(result)``, the relative error made absolute.
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+            The figure; it is not shown or saved.
         """
         import matplotlib.pyplot as plt
 
@@ -240,12 +277,17 @@ class Tfc:
 class Perturbation:
     """Results of one PERT card for a tally; same shape as the unperturbed one.
 
-    :ivar number: PERT card number.
-    :ivar result: Values as MCNP writes them under ``vals pert`` (the
-        perturbed difference, or a Taylor coefficient with METHOD=2/3), with
-        the shape of :attr:`Tally.result`.
-    :ivar error: Relative errors, same shape.
-    :ivar tfc: Fluctuation chart of the perturbation, if written.
+    Attributes
+    ----------
+    number : int
+        PERT card number.
+    result : numpy.ndarray
+        The ``vals pert`` block as MCNP writes it, with the shape of
+        :attr:`Tally.result`.
+    error : numpy.ndarray
+        Relative errors (as MCNP writes them), same shape.
+    tfc : Tfc or None
+        Fluctuation chart of the perturbation, if written.
     """
 
     number: int
@@ -258,22 +300,43 @@ class Perturbation:
 class Tally:
     """One tally of a MCTAL file.
 
-    :ivar id: Tally number.
-    :ivar particles: Particle designators the tally scores (``["n"]``, ...).
-    :ivar detector_type: Detector type from the ``tally`` line: 0 none,
-        1 point, 2 ring, 3 pinhole / 4 rectangular / 5 cylindrical radiograph;
-        for a TMESH tally minus the mesh type (-1 rectangular, -2 cylindrical,
-        -3 spherical).
-    :ivar modifier: Tally modifier from the ``tally`` line: 0 none, 1 for an
-        ``*F`` tally, 2 for a ``+F`` tally.
-    :ivar header: All integers of the ``tally`` line after the number, verbatim.
-    :ivar comment: FC card text (lines joined with newlines), ``""`` if none.
-    :ivar axes: The eight bin axes, keyed by MCTAL letter in file order.
-    :ivar result: Values, shape ``tuple(a.size for a in axes.values())``,
-        totals included.
-    :ivar error: Relative errors, same shape.
-    :ivar tfc: Fluctuation chart, if written.
-    :ivar perturbations: PERT results keyed by PERT card number.
+    :func:`~kika.mcnp.parse_mctal.read_mctal` returns them in an :class:`Mctal`. ``result`` and
+    ``error`` keep the file's eight-dimensional array, with the total bins;
+    :meth:`to_xarray`, :meth:`total` and :meth:`to_dataframe` give labelled
+    views. MCNP writes a relative error with every value (a fraction of the
+    value) and kika stores it as written.
+
+    Attributes
+    ----------
+    id : int
+        Tally number.
+    particles : list of str
+        Particle designators the tally scores (``["n"]``, ...).
+    detector_type : int
+        Detector type from the ``tally`` line, copied as MCNP writes it. kika
+        takes 3 or more as a radiograph and a negative value as a TMESH tally
+        (-1 rectangular, -2 cylindrical, -3 spherical).
+    modifier : int
+        Tally modifier from the ``tally`` line, copied as MCNP writes it.
+    header : tuple of int
+        All integers of the ``tally`` line after the number, verbatim.
+    comment : str
+        FC card text (lines joined with newlines), ``""`` if none.
+    axes : dict of str to BinAxis
+        The eight bin axes, keyed by MCTAL letter in file order
+        (``f d u s m c e t``; the key ``r`` replaces ``c`` for radiography tallies).
+    result : numpy.ndarray
+        Values, shape ``tuple(a.size for a in axes.values())``, one axis per
+        MCTAL letter in the order of *axes*, with ``t`` varying fastest. An
+        unbinned axis has length 1 and a binned one its bin count, total bin
+        included as the last index.
+    error : numpy.ndarray
+        Relative errors, same shape.
+    tfc : Tfc or None
+        Fluctuation chart, if written.
+    perturbations : dict of int to Perturbation
+        PERT results keyed by PERT card number; each has arrays of the shape of
+        *result*.
     """
 
     id: int
@@ -346,10 +409,36 @@ class Tally:
 
     @property
     def shape(self) -> Tuple[int, ...]:
+        """Shape of :attr:`result`: the length of each axis, totals included.
+
+        One entry per axis of :attr:`axes`, in that order; an unbinned axis has
+        length 1.
+        """
         return tuple(a.size for a in self.axes.values())
 
     def dim_name(self, key: str) -> str:
-        """Dimension name of axis *key* in the labelled views."""
+        """Dimension name of axis *key* in the labelled views.
+
+        Parameters
+        ----------
+        key
+            MCTAL letter of the axis (``"f"``, ``"e"``...).
+
+        Returns
+        -------
+        str
+            ``"f"`` gives :attr:`region_name` (``"surface"``, ``"detector"`` or
+            ``"cell"``). For a radiograph, ``"s"`` is ``"image_s"`` and ``"c"`` or
+            ``"r"`` is ``"image_t"``; for a TMESH tally, ``"s"`` is ``"quantity"``.
+            Otherwise ``d`` is ``"flag"``, ``u`` ``"user"``, ``s`` ``"segment"``,
+            ``m`` ``"multiplier"``, ``c`` ``"cosine"``, ``e`` ``"energy"`` and
+            ``t`` ``"time"``.
+
+        Raises
+        ------
+        KeyError
+            For a letter that is not an MCTAL axis letter.
+        """
         if key == "f":
             return self.region_name
         if self.is_radiograph and key in ("s", "c", "r"):
@@ -365,12 +454,18 @@ class Tally:
 
     @property
     def energies(self) -> Optional[np.ndarray]:
-        """Upper energy bounds of the energy bins (MeV), or ``None``."""
+        """Upper energy bounds of the energy bins, or ``None``.
+
+        MCNP writes MeV; kika does not convert.
+        """
         return self.axes["e"].upper
 
     @property
     def times(self) -> Optional[np.ndarray]:
-        """Upper time bounds of the time bins (shakes), or ``None``."""
+        """Upper time bounds of the time bins, or ``None``.
+
+        MCNP writes shakes; kika does not convert.
+        """
         return self.axes["t"].upper
 
     def _labelled_keys(self) -> List[str]:
@@ -391,8 +486,31 @@ class Tally:
         and for the total of an F card ending in ``T``), the dimension is the
         1-based bin index and the numbers are in ``<name>_id``.
 
-        :param perturbation: PERT card number to return instead of the
-            unperturbed tally.
+        The dimensions are the binned axes that carry information, in the order
+        of :attr:`axes` (``f d u s m c e t``) and named by :meth:`dim_name`; a
+        flag axis of one bin is not a dimension. A tally with no such axis gives
+        zero-dimensional ``result`` and ``error``. For a TMESH tally the ``f``
+        axis becomes the dimensions ``cora``, ``corb`` and ``corc``, with the bin
+        midpoints as coordinates and ``_low`` and ``_high`` edges. MCNP writes
+        energies in MeV and times in shakes; kika does not convert them. ``error``
+        is relative.
+
+        Parameters
+        ----------
+        perturbation
+            PERT card number to return instead of the unperturbed tally. None
+            gives the unperturbed tally.
+
+        Returns
+        -------
+        xarray.Dataset
+            The variables ``result`` and ``error``, with the attributes ``tally``
+            (number), ``kind``, ``comment`` and, when set, ``perturbation``.
+
+        Raises
+        ------
+        KeyError
+            If the tally has no perturbation *perturbation*.
         """
         return self._view(perturbation, total_keys=())
 
@@ -402,9 +520,30 @@ class Tally:
         ``tally.total("energy")`` is the energy-integrated tally per cell (and
         per any other binned axis).
 
-        :param axes: Dimension names (``"energy"``) or MCTAL letters (``"e"``).
-        :param perturbation: PERT card number, as in :meth:`to_xarray`.
-        :raises ValueError: If an axis has no total bin.
+        Parameters
+        ----------
+        *axes
+            Dimension names (``"energy"``) or MCTAL letters (``"e"``). Each
+            named axis is replaced by its total bin and is no longer a
+            dimension; the other dimensions are those of :meth:`to_xarray`.
+        perturbation
+            PERT card number, as in :meth:`to_xarray`.
+
+        Returns
+        -------
+        xarray.Dataset
+            ``result`` and ``error`` (relative) over the remaining dimensions,
+            with the attributes of :meth:`to_xarray` and ``total_over``, the
+            dimension names of the totals. With no *axes* it equals
+            :meth:`to_xarray`.
+
+        Raises
+        ------
+        ValueError
+            If an axis has no total bin.
+        KeyError
+            If a name is not an axis of the tally, or the tally has no
+            perturbation *perturbation*.
         """
         keys = []
         for name in axes:
@@ -415,7 +554,22 @@ class Tally:
         return self._view(perturbation, total_keys=tuple(keys))
 
     def to_dataframe(self, perturbation: Optional[int] = None) -> pd.DataFrame:
-        """:meth:`to_xarray` flattened to one row per bin."""
+        """:meth:`to_xarray` flattened to one row per bin.
+
+        Parameters
+        ----------
+        perturbation
+            PERT card number, as in :meth:`to_xarray`.
+
+        Returns
+        -------
+        pandas.DataFrame
+            The xarray conversion of :meth:`to_xarray`, with a default integer
+            index: one column per dimension and per coordinate (``<name>_low``,
+            ``<name>_id``, and for a TMESH tally ``_high`` too), plus ``result`` and
+            ``error`` (relative). A tally with no dimensions gives one row with
+            ``result`` and ``error`` only.
+        """
         ds = self.to_xarray(perturbation)
         if not ds.result.dims:
             return pd.DataFrame({"result": [float(ds.result)], "error": [float(ds.error)]})
@@ -512,9 +666,22 @@ class Tally:
 class Kcode:
     """KCODE cycle records of a MCTAL file.
 
-    :ivar cycles: Number of cycles written.
-    :ivar settle: Inactive (settle) cycles.
-    :ivar data: Records, shape ``(cycles, n_columns)``; columns in
+    Each row of :attr:`data` is one cycle, in the file's order. The columns are the
+    ``keff`` of the cycle by the collision, absorption and track-length estimators,
+    the prompt removal lifetimes, the running averages of those estimators with their
+    standard deviations (names ending in ``_std``), the combined ``keff`` with and
+    without bias correction, the number of histories of the cycle and the figure of
+    merit of the combined ``keff``. Their names are in :attr:`columns`. kika stores
+    the numbers as MCNP writes them and does not convert them.
+
+    Attributes
+    ----------
+    cycles : int
+        Number of cycles written.
+    settle : int
+        Inactive (settle) cycles.
+    data : numpy.ndarray
+        Records, shape ``(cycles, n_columns)``; columns in
         :data:`KCODE_COLUMNS` order.
     """
 
@@ -524,11 +691,21 @@ class Kcode:
 
     @property
     def columns(self) -> List[str]:
+        """Column names of :attr:`data`, one per column.
+
+        The names of :data:`KCODE_COLUMNS` for as many columns as the records
+        have; further columns are named ``column_<i>``, from the first unnamed
+        index.
+        """
         n = self.data.shape[1]
         names = list(KCODE_COLUMNS[:n])
         return names + [f"column_{i}" for i in range(len(names), n)]
 
     def to_dataframe(self) -> pd.DataFrame:
+        """The records as a table with the columns of :attr:`columns`.
+
+        The index is the row number, from 1 to ``cycles``, named ``cycle``.
+        """
         df = pd.DataFrame(self.data, columns=self.columns)
         df.index = pd.RangeIndex(1, self.cycles + 1, name="cycle")
         return df
@@ -543,19 +720,35 @@ class Kcode:
 
 @dataclass
 class Mctal:
-    """Contents of an MCNP MCTAL file.
+    """Contents of an MCNP MCTAL file, as :func:`~kika.mcnp.parse_mctal.read_mctal` returns it.
 
-    :ivar code: Code name (``mcnp6``...).
-    :ivar version: Code version string.
-    :ivar probid: Problem identification (date and time of the run).
-    :ivar dump: Dump number.
-    :ivar nps: Histories run.
-    :ivar random_numbers: Pseudorandom numbers used.
-    :ivar title: Problem title (first line of the input).
-    :ivar npert: Number of PERT cards (0 if none).
-    :ivar tally_numbers: Tally numbers in the order of the ``ntal`` list.
-    :ivar tallies: Tallies keyed by number.
-    :ivar kcode: KCODE records, if the run was a criticality calculation.
+    Indexing with a tally number returns its :class:`Tally` (``KeyError`` if
+    absent); iterating yields the tallies and ``len`` counts them.
+
+    Attributes
+    ----------
+    code : str
+        Code name (``mcnp6``...).
+    version : str
+        Code version string.
+    probid : str
+        Problem identification (date and time of the run).
+    dump : int
+        Dump number.
+    nps : int
+        Histories run.
+    random_numbers : int
+        Pseudorandom numbers used.
+    title : str
+        Problem title (first line of the input).
+    npert : int
+        Number of PERT cards (0 if none).
+    tally_numbers : list of int
+        Tally numbers in the order of the ``ntal`` list.
+    tallies : dict of int to Tally
+        Tallies keyed by number.
+    kcode : Kcode or None
+        KCODE records, if the file has them (a criticality calculation).
     """
 
     code: str = ""
@@ -596,10 +789,22 @@ class Mctal:
 def particles_from_header(ptype: int, flags: Sequence[int]) -> List[str]:
     """Particle designators of a tally from its ``tally``-line particle type.
 
-    :param ptype: Particle type on the ``tally`` line. Negative: *flags* lists
+    Parameters
+    ----------
+    ptype
+        Particle type on the ``tally`` line. Negative: *flags* lists
         one 0/1 entry per MCNP6 particle. Positive: MCNP5 bit flags (1 n, 2 p,
         4 e).
-    :param flags: The particle flag list (used when *ptype* is negative).
+    flags
+        The particle flag list (used when *ptype* is negative); entry ``i``
+        switches on the ``i``-th designator of ``MCNP6_PARTICLES``.
+
+    Returns
+    -------
+    list of str
+        The designators of the particles switched on (``["n", "p"]``), in the
+        order of the flag list, or ``n``, ``p``, ``e`` for MCNP5 bits. A
+        *ptype* of 0 gives an empty list.
     """
     if ptype < 0:
         return [p for p, on in zip(MCNP6_PARTICLES, flags) if on]

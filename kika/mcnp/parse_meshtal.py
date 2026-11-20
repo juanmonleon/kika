@@ -15,9 +15,9 @@ MESHTAL text (MCNP 5, 6.1, 6.2, 6.3)
     bounds, so a layout the reader does not expect fails loudly instead of
     being misplaced.
 
-    The matrix formats (``ij``/``ik``/``jk``) are not read: they repeat the same
-    numbers with the relative error cut to five decimals. Cell-under-voxel and
-    nuclide-binned meshes (D1SUNED) are not read either.
+    The matrix formats (``ij``/``ik``/``jk``) and cell-under-voxel meshes are not
+    read: they raise ``NotImplementedError``. Nuclide-binned meshes (D1SUNED) are
+    not detected; they fail on the first header line the reader does not know.
 
     The header prints spatial bounds with two decimals and energy/time bounds
     with three significant digits, so bounds read from text carry that
@@ -67,14 +67,33 @@ _BIN_RTOL = 1e-2
 def read_meshtal(filename: Union[str, Path]) -> Meshtal:
     """Read MCNP FMESH results from a MESHTAL text file or an MCNP 6.3+ runtape.
 
-    :param filename: A MESHTAL file (``meshtal``, ``*.msht``), or the HDF5
-        runtape of a run whose FMESH cards used ``out=xdmf`` (``runtpe.h5``,
-        ``<name>r.h5``).
-    :returns: The mesh tallies of the file.
-    :raises ValueError: If the file is neither, or its contents are not
-        consistent with the header bounds.
-    :raises NotImplementedError: For the matrix (``ij``/``ik``/``jk``),
-        cell-under-voxel and nuclide-binned layouts.
+    The file is taken as an HDF5 runtape when it starts with the HDF5 signature
+    and as MESHTAL text otherwise. Results and errors are stored as the file has
+    them (MCNP writes a relative error, a fraction of the value); kika converts
+    neither. MCNP writes energies in MeV, times in shakes and lengths in cm;
+    kika does not convert them. The one conversion is the theta grid of an HDF5
+    runtape, taken from radians to revolutions when its maximum exceeds 1.
+
+    Parameters
+    ----------
+    filename
+        A MESHTAL file (``meshtal``, ``*.msht``), or the HDF5 runtape of a run
+        whose FMESH cards used ``out=xdmf`` (``runtpe.h5``, ``<name>r.h5``).
+
+    Returns
+    -------
+    ~kika.mcnp.meshtal.Meshtal
+        The mesh tallies of the file, keyed by tally number.
+
+    Raises
+    ------
+    ValueError
+        If the file is neither, or its contents are not consistent with the
+        header bounds, or an HDF5 file has no ``/results/mesh_tally`` group.
+    NotImplementedError
+        For the matrix (``ij``/``ik``/``jk``) and cell-under-voxel layouts, and
+        for a header line the reader does not know (as in a nuclide-binned
+        mesh, which is not detected as such).
     """
     path = Path(filename)
     if _is_hdf5(path):

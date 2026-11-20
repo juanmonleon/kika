@@ -9,7 +9,7 @@ printed. How each stage computes what it does is in
 
 ## Get the evaluation
 
-{py:func}`~kika.endf.remote.download_endf` downloads an evaluation from the IAEA Nuclear
+{py:func}`~kika.endf.download_endf` downloads an evaluation from the IAEA Nuclear
 Data Services and keeps a copy in kika's cache:
 
 ```python

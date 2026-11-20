@@ -16,7 +16,22 @@ CHUNK_LINES = 10_000
 
 
 def write_wwinp(wwinp: WWINP, filepath: str | Path, overwrite: bool = False) -> None:
-    """Write a :class:`WWINP` object to disk in FORTRAN-compatible format."""
+    """Write a :class:`WWINP` object to disk in FORTRAN-compatible format.
+
+    Parameters
+    ----------
+    wwinp
+        The object to write.
+    filepath
+        Output path.
+    overwrite
+        If False, an existing file is refused.
+
+    Raises
+    ------
+    FileExistsError
+        If *filepath* exists and *overwrite* is False.
+    """
     filepath = Path(filepath)
     if filepath.exists() and not overwrite:
         raise FileExistsError(

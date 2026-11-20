@@ -67,23 +67,44 @@ ENERGY_MATCH_ABS_TOL = 1e-6
 
 def extract_angular_distribution(ace_data, energy: float, mt: int = 2) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Extract angular distribution data from ACE file for a given energy.
-    
-    Parameters:
-    -----------
-    ace_data : ACE object
-        The loaded ACE data
+    Cosines and probability density of an ACE angular distribution at one energy.
+
+    Kept for existing scripts; new code uses the classes of ``kika.exfor``.
+
+    The distribution is ``ace_data.angular_distributions.elastic`` for MT 2 and
+    ``ace_data.angular_distributions.incident_neutron[mt]`` otherwise. Its table
+    at *energy* is taken as the ACE distribution gives it with
+    ``to_dataframe(energy, interpolate=False)``: no regular grid is imposed, but
+    the points depend on the table type. For a tabulated distribution at an energy
+    between two table energies, they are the union of the two cosine grids with
+    the tables mixed; an equiprobable table gives bin centres. The frame is the
+    ACE table's and is not checked: for MT 2 it is CM (ACE's convention), for
+    other MTs it is the reaction's own (TYR), which this function does not
+    consult. Nothing is converted.
+
+    Parameters
+    ----------
+    ace_data
+        Loaded ACE object (``kika.ace``) with angular distributions.
     energy : float
-        Energy in MeV
+        Incident energy in MeV.
     mt : int
-        MT number (2 for elastic scattering)
-        
-    Returns:
-    --------
-    cosines : np.array
-        Cosines of scattering angles
-    pdf : np.array
-        Probability density function f(μ,E)
+        ENDF MT number: 2 for elastic scattering, or a key of
+        ``angular_distributions.incident_neutron``.
+
+    Returns
+    -------
+    cosines : numpy.ndarray
+        Cosines of the scattering angle, in the frame of the table.
+    pdf : numpy.ndarray
+        The density ``f(mu, E)`` per unit cosine, as the table gives it. The
+        function ``calculate_differential_cross_section`` takes it as normalised
+        to 1 over the cosine.
+
+    Raises
+    ------
+    ValueError
+        If *mt* has no angular distribution, or the distribution gives no table.
     """
     
     # Get the appropriate angular distribution
@@ -114,25 +135,45 @@ def extract_angular_distribution(ace_data, energy: float, mt: int = 2) -> Tuple[
 
 def calculate_differential_cross_section(ace_data, energy: float, mt: int = 2) -> Tuple[np.ndarray, np.ndarray, float]:
     """
-    Calculate the differential cross section dσ/dΩ(μ,E) = σ(E)/(2π) × f(μ,E)
-    
-    Parameters:
-    -----------
-    ace_data : ACE object
-        The loaded ACE data
+    Differential cross-section dσ/dΩ = σ(E)/(2π) × f(μ,E) of an ACE reaction.
+
+    Kept for existing scripts; new code uses the classes of ``kika.exfor``.
+
+    ``f`` is the density per unit cosine from :func:`extract_angular_distribution`,
+    taken as integrating to 1 over the cosine, so dividing by 2π gives a density per
+    steradian. ``σ(E)`` is the cross-section of reaction *mt*, interpolated
+    linearly in energy (``numpy.interp``). Outside the tabulated energies it is
+    the end value, and a warning is printed. The frame is the ACE table's and is
+    not checked: for MT 2 it is CM (ACE's convention), for other MTs the
+    reaction's own (TYR), which is not consulted. Nothing is converted.
+
+    Parameters
+    ----------
+    ace_data
+        Loaded ACE object (``kika.ace``).
     energy : float
-        Energy in MeV
+        Incident energy in MeV.
     mt : int
-        MT number (2 for elastic scattering)
-        
-    Returns:
-    --------
-    cosines : np.array
-        Cosines of scattering angles
-    dsigma_domega : np.array
-        Differential cross section in barns/steradian
+        ENDF MT number: 2 for elastic scattering.
+
+    Returns
+    -------
+    cosines : numpy.ndarray
+        Cosines of the scattering angle.
+    dsigma_domega : numpy.ndarray
+        dσ/dΩ in b/sr at each cosine.
     sigma_total : float
-        Total cross section in barns
+        The cross-section ``σ(E)`` of reaction *mt* at *energy*, in b. It is the
+        total cross-section only if *mt* is 1.
+
+    Raises
+    ------
+    ValueError
+        If the cross-section of reaction *mt* is not available in *ace_data*
+        (raised by ``get_cross_section``), or from
+        :func:`extract_angular_distribution`.
+    TypeError
+        If *mt* is not an integer (raised by ``get_cross_section``).
     """
     
     # Get the total cross section at this energy
@@ -157,17 +198,21 @@ def calculate_differential_cross_section(ace_data, energy: float, mt: int = 2) -
 
 def cosine_to_angle_degrees(cosines: np.ndarray) -> np.ndarray:
     """
-    Convert cosines of scattering angles to scattering angles in degrees.
-    
-    Parameters:
-    -----------
-    cosines : np.array
-        Cosines of scattering angles (μ = cos(θ))
-        
-    Returns:
-    --------
-    angles : np.array
-        Scattering angles in degrees
+    Scattering angles in degrees from their cosines, θ = arccos(μ).
+
+    Kept for existing scripts; new code uses the classes of ``kika.exfor``. The
+    frame is whatever the cosines are in.
+
+    Parameters
+    ----------
+    cosines : array_like
+        Cosines μ of the scattering angle. Values outside [-1, 1] are clipped to
+        the nearest end.
+
+    Returns
+    -------
+    numpy.ndarray
+        Angles in degrees, in [0, 180], with the shape of *cosines*.
     """
     # θ = arccos(μ)
     angles_rad = np.arccos(np.clip(cosines, -1, 1))  # clip to handle numerical errors
@@ -177,17 +222,20 @@ def cosine_to_angle_degrees(cosines: np.ndarray) -> np.ndarray:
 
 def angle_degrees_to_cosine(angles_deg: np.ndarray) -> np.ndarray:
     """
-    Convert scattering angles in degrees to cosines.
-    
-    Parameters:
-    -----------
-    angles_deg : np.array
-        Scattering angles in degrees
-        
-    Returns:
-    --------
-    cosines : np.array
-        Cosines of scattering angles (μ = cos(θ))
+    Cosines of scattering angles given in degrees, μ = cos(θ).
+
+    Kept for existing scripts; new code uses the classes of ``kika.exfor``. The
+    frame is whatever the angles are in.
+
+    Parameters
+    ----------
+    angles_deg : array_like
+        Scattering angles in degrees.
+
+    Returns
+    -------
+    numpy.ndarray
+        Cosines of the angles, with the shape of *angles_deg*.
     """
     angles_rad = np.radians(angles_deg)
     cosines = np.cos(angles_rad)
@@ -273,23 +321,51 @@ def transform_lab_to_cm(mu_L_arr: np.ndarray, dsdo_L_arr: np.ndarray,
 
 def load_exfor_data(json_file: str) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """
-    Load EXFOR data from JSON file (new format).
+    Read an EXFOR angular-distribution JSON file into a table in MeV, degrees and b/sr.
 
     .. deprecated::
-        Use read_exfor() instead for the new class-based API.
-        Example: exfor = read_exfor('/path/to/file.json')
+        Kept for existing scripts: ``load_exfor_data() is deprecated. Use
+        read_exfor() instead``, as its warning says. New code uses
+        :func:`~kika.exfor.read_exfor` and the classes.
 
-    Parameters:
-    -----------
+    Only the older file layout is read: energy blocks under ``energies`` with the
+    energy in ``E``, and points with ``angle``, ``result`` and ``error_stat``. The
+    keys of the newer layout (``value``, ``cross_section``, ``uncertainty_stat``,
+    ``units["cross_section"]``) are not read, and a file that uses only them gives
+    zeros. Energies are converted to MeV when ``units["energy"]`` is ``keV`` or ``eV``
+    (and kept for ``MeV`` or ``M``). The cross-section and ``error_stat`` are
+    divided by 1000 for ``units["dsig"]`` equal to ``MB/SR`` and by 1e6 for
+    ``MUB/SR``; they are kept for ``B/SR`` or when ``dsig`` is absent, and kept
+    unchanged for any other value. Angles in ``COS`` become degrees, and ``ADEG``
+    is kept. An unknown energy or angle unit prints a warning and is taken as MeV
+    or degrees. Unit names are case-insensitive. The frame is not converted: it is
+    only recorded.
+
+    Parameters
+    ----------
     json_file : str
-        Path to the JSON file
+        Path to the JSON file.
 
-    Returns:
-    --------
-    df : pd.DataFrame
-        DataFrame with experimental data (columns: energy, angle, dsig, error_stat, frame)
+    Returns
+    -------
+    df : pandas.DataFrame
+        One row per data point, with the columns ``energy`` (MeV), ``angle``
+        (degrees), ``dsig`` (dσ/dΩ in b/sr), ``error_stat`` (absolute statistical
+        uncertainty in b/sr) and ``frame`` (the file's ``angle_frame``, ``"LAB"``
+        or ``"CM"``, or ``"Unknown"``). Systematic uncertainties are not read.
     meta : dict
-        Metadata dictionary
+        ``entry``, ``subentry``, ``citation``, ``reaction``, ``quantity``,
+        ``units`` and ``angle_frame`` as in the file, ``energy_resolution_inputs``
+        (``flight_path_m`` and ``time_resolution_ns`` from the file's
+        ``energy_resolution_inputs``, or None) and ``filename``. ``units`` keeps the
+        file's original units, not the converted ones.
+
+    Raises
+    ------
+    OSError
+        If the file cannot be opened.
+    ValueError
+        If the file is not valid JSON.
     """
     _deprecation_warning("load_exfor_data", "read_exfor()")
     with open(json_file, "r") as f:
@@ -387,23 +463,32 @@ def load_exfor_data(json_file: str) -> Tuple[pd.DataFrame, Dict[str, Any]]:
 
 def extract_experiment_info(meta: Dict[str, Any]) -> Tuple[str, str]:
     """
-    Extract experiment label with author and year from metadata (new format).
+    Legend label and year of an experiment, from the ``meta`` of an EXFOR file.
 
     .. deprecated::
-        Use ExforAngularDistribution.label property instead.
-        Example: exfor = read_exfor('/path/to/file.json'); print(exfor.label)
+        Kept for existing scripts: ``extract_experiment_info() is deprecated. Use
+        ExforAngularDistribution.label instead``, as its warning says. New code
+        uses the ``label`` property of the classes.
 
-    Parameters:
-    -----------
+    The label is the surname of the first author, followed by ``et al.`` when there
+    are several authors, and the year: ``"Kinney et al. (1976)"``. The surname is
+    what follows the last period of the name, else its last word. With no author
+    the label is built from ``meta["filename"]`` without ``.json`` and with
+    underscores as spaces, or is ``"Experiment (year)"``.
+
+    Parameters
+    ----------
     meta : dict
-        Metadata dictionary from EXFOR JSON
+        The metadata dict returned by :func:`load_exfor_data`. Only
+        ``meta["citation"]`` (with ``authors`` and ``year``) and ``meta["filename"]``
+        are read.
 
-    Returns:
-    --------
+    Returns
+    -------
     experiment_label : str
-        Formatted label with author and year
+        The label, with the year in brackets.
     year : str
-        Extracted year
+        The year as text, ``"Unknown"`` when the citation has none.
     """
     _deprecation_warning("extract_experiment_info", "ExforAngularDistribution.label")
     # Extract year from citation
@@ -441,23 +526,34 @@ def extract_experiment_info(meta: Dict[str, Any]) -> Tuple[str, str]:
 
 def load_all_exfor_data(directory: str) -> Tuple[Dict[float, List[Tuple[pd.DataFrame, Dict[str, Any]]]], List[float]]:
     """
-    Load all EXFOR JSON files from a directory and organize by energy.
+    Read every EXFOR JSON file of a directory with :func:`load_exfor_data`, by energy.
 
     .. deprecated::
-        Use read_all_exfor() instead for the new class-based API.
-        Example: energy_dict = read_all_exfor('/path/to/data/')
+        Kept for existing scripts: ``load_all_exfor_data() is deprecated. Use
+        read_all_exfor() instead``, as its warning says. New code uses
+        :func:`~kika.exfor.read_all_exfor`.
 
-    Parameters:
-    -----------
+    The files are those matching ``*.json`` in *directory*. If *directory* is not
+    a folder, the ``data`` folder next to it is used; if it holds no JSON file, its
+    own ``data`` subfolder is used. Each file is read as :func:`load_exfor_data`
+    reads it (older layout only), so energies are in MeV and cross-sections in
+    b/sr. A file that cannot be read is skipped with a printed warning. If no file
+    is found, the result is empty and nothing is raised.
+
+    Parameters
+    ----------
     directory : str
-        Path to directory containing EXFOR JSON files
+        Directory of the JSON files.
 
-    Returns:
-    --------
+    Returns
+    -------
     energy_data : dict
-        Dictionary mapping energy (MeV) to list of (dataframe, metadata) tuples
-    sorted_energies : list
-        Sorted list of unique energies found
+        From incident energy in MeV to a list of ``(df, meta)`` pairs, one per file
+        with points at that energy: ``df`` holds that file's rows at that energy
+        (columns as in :func:`load_exfor_data`) and ``meta`` is its metadata dict.
+        Energies within 1e-6 MeV of each other share the key of the first one met.
+    sorted_energies : list of float
+        The keys of *energy_data* in increasing order.
     """
     _deprecation_warning("load_all_exfor_data", "read_all_exfor()")
     import os
@@ -530,30 +626,44 @@ def plot_all_energies_comparison(ace_data, exfor_directory: str,
                                 mt: int = 2, max_plots_per_figure: int = 6,
                                 figsize: Tuple[int, int] = (15, 10)):
     """
-    Create comprehensive plots comparing ACE data with all available experimental data,
-    organized by energy.
-    
-    Parameters:
-    -----------
-    ace_data : ACE object
-        The loaded ACE data
+    One panel per EXFOR energy of a directory, comparing the ACE curve with the data.
+
+    Kept for existing scripts; new code uses the classes of ``kika.exfor``, with
+    :func:`~kika.exfor.plot_multiple_energies`.
+
+    The files are read with :func:`load_all_exfor_data`, so every energy found in
+    them gets a panel, at most 3 panels per row and *max_plots_per_figure* per
+    figure. A panel shows dσ/dΩ in b/sr against the CM scattering angle in degrees.
+    The ACE curve is the one of :func:`calculate_differential_cross_section` at that
+    energy, drawn as stored (the table's frame, not checked: CM for MT 2 by ACE's
+    convention, the reaction's own for other MTs). Data in the LAB frame are
+    converted to CM with ``m_proj_u`` and ``m_targ_u`` (cross-section and
+    statistical error divided by the Jacobian dΩ_CM/dΩ_LAB); data in the CM frame
+    or in an unrecorded frame are drawn as they are. The error bars are the
+    statistical errors only. A panel whose ACE curve or data cannot be drawn shows
+    the error text instead.
+
+    Parameters
+    ----------
+    ace_data
+        Loaded ACE object (``kika.ace``).
     exfor_directory : str
-        Directory containing EXFOR JSON files
-    m_proj_u : float
-        Projectile mass in atomic mass units (default: neutron)
-    m_targ_u : float
-        Target mass in atomic mass units (default: Fe-56)
+        Directory of the EXFOR JSON files, searched as in :func:`load_all_exfor_data`.
+    m_proj_u, m_targ_u : float
+        Projectile and target masses in atomic mass units, for the LAB to CM
+        conversion. Defaults: neutron (1.008665 u) and Fe-56 (55.93494 u).
     mt : int
-        MT number (2 for elastic scattering)
+        ENDF MT number of the ACE reaction: 2 for elastic scattering.
     max_plots_per_figure : int
-        Maximum number of energy plots per figure
-    figsize : tuple
-        Figure size for each multi-panel plot
-        
-    Returns:
-    --------
-    figures : list
-        List of matplotlib figure objects
+        Number of energy panels in one figure.
+    figsize : tuple of int
+        Width and height of each figure, in inches.
+
+    Returns
+    -------
+    list of matplotlib.figure.Figure
+        One figure per *max_plots_per_figure* energies, in increasing energy. Empty
+        when no data are found.
     """
     # Load all experimental data
     energy_data, sorted_energies = load_all_exfor_data(exfor_directory)
@@ -662,28 +772,39 @@ def plot_angular_distribution(ace_data, energy: float, mt: int = 2, title: Optio
                             figsize: Tuple[int, int] = (10, 6), log_scale: bool = False, 
                             show_total_xs: bool = True):
     """
-    Plot the differential cross section dσ/dΩ vs scattering angle.
-    
-    Parameters:
-    -----------
-    ace_data : ACE object
-        The loaded ACE data
+    Plot the ACE differential cross-section dσ/dΩ in b/sr against the cosine.
+
+    Kept for existing scripts; new code uses the classes of ``kika.exfor``.
+
+    The curve is the one of :func:`calculate_differential_cross_section`, drawn as
+    stored in the ACE table (its frame is not checked: CM for MT 2 by ACE's
+    convention, the reaction's own for other MTs). The x-axis is the
+    cosine of the scattering angle, from -1 to 1.
+
+    Parameters
+    ----------
+    ace_data
+        Loaded ACE object (``kika.ace``).
     energy : float
-        Energy in MeV
+        Incident energy in MeV.
     mt : int
-        MT number (2 for elastic scattering)
+        ENDF MT number: 2 for elastic scattering.
     title : str, optional
-        Custom title for the plot
-    figsize : tuple
-        Figure size (width, height)
+        Title of the plot. None builds one with the energy, *mt* and, if
+        *show_total_xs* is True, the cross-section ``σ(E)`` of reaction *mt* in b.
+    figsize : tuple of int
+        Width and height of the figure, in inches.
     log_scale : bool
-        Whether to use log scale for y-axis
+        If True, the y-axis is logarithmic.
     show_total_xs : bool
-        Whether to show total cross section in the title
-        
-    Returns:
-    --------
-    fig, ax : matplotlib figure and axes objects
+        Whether the default title includes ``σ(E)``. Ignored when *title* is given.
+
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+        The figure.
+    ax : matplotlib.axes.Axes
+        The axes.
     """
     
     # Calculate differential cross section
@@ -730,34 +851,54 @@ def plot_combined_angular_distribution(ace_data, energy: float, exfor_files: Lis
                                      figsize: Tuple[int, int] = (12, 8), log_scale: bool = False,
                                      frame: str = 'CM'):
     """
-    Plot differential cross section with multiple experimental datasets.
+    Plot the ACE dσ/dΩ in b/sr against the CM angle in degrees, with EXFOR files.
 
-    Parameters:
-    -----------
-    ace_data : ACE object
-        The loaded ACE data
+    Kept for existing scripts; new code uses the classes of ``kika.exfor``, with
+    :func:`~kika.exfor.plot_exfor_ace_comparison`.
+
+    The ACE curve is the one of :func:`calculate_differential_cross_section`,
+    drawn as stored (the table's frame, not checked: CM for MT 2 by ACE's
+    convention, the reaction's own for other MTs). Each file is read with
+    :func:`load_exfor_data` (older layout only) and its points within 0.1 MeV of
+    *energy* are drawn, all together if the file has several energies in that
+    window. Points in the LAB frame are converted to CM with *m_proj_u* and
+    *m_targ_u* (cross-section and statistical error divided by the Jacobian
+    dΩ_CM/dΩ_LAB); points in the CM frame are drawn as they are, and so are those
+    of an unrecorded frame (a message is printed). The error bars are the
+    statistical errors only. A file that cannot be read is skipped with a printed
+    warning, and a file with no point in the window is left out.
+
+    Parameters
+    ----------
+    ace_data
+        Loaded ACE object (``kika.ace``).
     energy : float
-        Energy in MeV
+        Incident energy in MeV, for the ACE curve and the 0.1 MeV window.
     exfor_files : list of str, optional
-        List of paths to EXFOR JSON files
-    m_proj_u : float
-        Projectile mass in atomic mass units (default: neutron)
-    m_targ_u : float
-        Target mass in atomic mass units (default: Fe-56)
+        Paths of the EXFOR JSON files. None draws the ACE curve alone.
+    m_proj_u, m_targ_u : float
+        Projectile and target masses in atomic mass units, for the LAB to CM
+        conversion. Defaults: neutron (1.008665 u) and Fe-56 (55.93494 u).
     mt : int
-        MT number (2 for elastic scattering)
+        ENDF MT number of the ACE reaction: 2 for elastic scattering.
     title : str, optional
-        Custom title for the plot
-    figsize : tuple
-        Figure size
+        Title of the plot. None builds one with the energy, *mt*, the frame label
+        and ``σ(E)``.
+    figsize : tuple of int
+        Width and height of the figure, in inches.
     log_scale : bool
-        Whether to use log scale for y-axis
-    frame : str
-        'LAB' or 'CM' - which frame to plot in
+        If True, the y-axis is logarithmic.
+    frame : {'CM', 'LAB'}
+        Only the label of the x-axis and of the default title. It converts
+        nothing: LAB points are converted to CM whatever *frame* says, and with
+        ``'LAB'`` the CM points are kept as CM and a warning is printed.
 
-    Returns:
-    --------
-    fig, ax : matplotlib figure and axes objects
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+        The figure.
+    ax : matplotlib.axes.Axes
+        The axes.
     """
     
     # Calculate ACE differential cross section
@@ -867,27 +1008,40 @@ def plot_combined_angular_distribution(ace_data, energy: float, exfor_files: Lis
 def plot_individual_energy_comparisons(ace_data, exfor_directory: str, m_proj_u: float, m_targ_u: float,
                                      mt: int = 2, figsize: Tuple[int, int] = (12, 8)) -> List[plt.Figure]:
     """
-    Create individual comparison plots for each available energy (no subplots).
-    
-    Parameters:
-    -----------
-    ace_data : ACE object
-        The loaded ACE nuclear data
+    One figure per EXFOR energy of a directory: the ACE curve and the data at it.
+
+    Kept for existing scripts; new code uses the classes of ``kika.exfor``, with
+    :func:`~kika.exfor.plot_multiple_energies`.
+
+    The files are read with :func:`load_all_exfor_data`, and every energy found in
+    them gets a figure. A figure shows dσ/dΩ in b/sr against the CM angle in
+    degrees. The ACE curve is the one of :func:`calculate_differential_cross_section`
+    at that energy, drawn as stored (the table's frame, not checked: CM for MT 2
+    by ACE's convention, the reaction's own for other MTs), and omitted with a
+    printed warning if it cannot be computed. Data whose file records the LAB frame
+    are converted to CM with *m_proj_u* and *m_targ_u* (cross-section and
+    statistical error divided by the Jacobian dΩ_CM/dΩ_LAB); data in the CM frame
+    or in an unrecorded frame are drawn as they are. The error bars are the
+    statistical errors only.
+
+    Parameters
+    ----------
+    ace_data
+        Loaded ACE object (``kika.ace``).
     exfor_directory : str
-        Directory containing EXFOR JSON files
-    m_proj_u : float
-        Projectile mass in atomic mass units
-    m_targ_u : float
-        Target mass in atomic mass units
+        Directory of the EXFOR JSON files, searched as in :func:`load_all_exfor_data`.
+    m_proj_u, m_targ_u : float
+        Projectile and target masses in atomic mass units, for the LAB to CM
+        conversion. They have no default here.
     mt : int
-        Reaction type (default: 2 for elastic scattering)
-    figsize : tuple
-        Figure size (width, height) in inches
-        
-    Returns:
-    --------
-    figures : List[plt.Figure]
-        List of matplotlib figures, one for each energy
+        ENDF MT number of the ACE reaction: 2 for elastic scattering.
+    figsize : tuple of int
+        Width and height of each figure, in inches.
+
+    Returns
+    -------
+    list of matplotlib.figure.Figure
+        One figure per energy, in increasing energy. Empty when no data are found.
     """
     # Load all experimental data
     energy_data, sorted_energies = load_all_exfor_data(exfor_directory)
@@ -989,34 +1143,55 @@ def plot_combined_angular_distribution_multi_ace(ace_dict: Dict[str, Any], energ
                                                 figsize: Tuple[int, int] = (12, 8), log_scale: bool = False,
                                                 frame: str = 'CM'):
     """
-    Plot differential cross section with multiple ACE datasets and experimental data.
+    Plot several ACE dσ/dΩ curves in b/sr against the cosine, with EXFOR files.
 
-    Parameters:
-    -----------
+    Kept for existing scripts; new code uses the classes of ``kika.exfor``, with
+    :func:`~kika.exfor.plot_exfor_ace_comparison`.
+
+    Each ACE curve is the one of :func:`calculate_differential_cross_section`,
+    drawn as stored (the table's frame, not checked: CM for MT 2 by ACE's
+    convention, the reaction's own for other MTs) and never converted; one that
+    cannot be computed is skipped with a printed warning. Each file is read with
+    :func:`load_exfor_data` (older layout only), and its points within 0.05 MeV of
+    *energy* (strictly) are drawn at the cosine of their angle. Only when *frame*
+    is ``'CM'`` and the file records the LAB frame are the points converted to CM,
+    with *m_proj_u* and *m_targ_u* (cross-section and statistical error divided by
+    the Jacobian dΩ_CM/dΩ_LAB). In every other case they are drawn as they are.
+    The error bars are the statistical errors only.
+
+    Parameters
+    ----------
     ace_dict : dict
-        Dictionary with ACE data objects, format: {'label': {'data': ace_obj, 'color': 'blue', 'linestyle': '-'}}
+        ACE objects to draw, as ``{label: {"data": ace_object, "color": c,
+        "linestyle": s}}``. ``color`` (default ``"blue"``) and ``linestyle``
+        (default ``"-"``) are optional.
     energy : float
-        Energy in MeV
+        Incident energy in MeV, for the ACE curves and the 0.05 MeV window.
     exfor_files : list of str, optional
-        List of paths to EXFOR JSON files
-    m_proj_u : float
-        Projectile mass in atomic mass units (default: neutron)
-    m_targ_u : float
-        Target mass in atomic mass units (default: Fe-56)
+        Paths of the EXFOR JSON files. None draws the ACE curves alone.
+    m_proj_u, m_targ_u : float
+        Projectile and target masses in atomic mass units, for the LAB to CM
+        conversion. Defaults: neutron (1.008665 u) and Fe-56 (55.93494 u).
     mt : int
-        MT number (2 for elastic scattering)
+        ENDF MT number of the ACE reactions: 2 for elastic scattering.
     title : str, optional
-        Custom title for the plot
-    figsize : tuple
-        Figure size
+        Title of the plot. None gives ``"Differential Cross Section at E = ... MeV"``.
+    figsize : tuple of int
+        Width and height of the figure, in inches.
     log_scale : bool
-        Whether to use log scale for y-axis
-    frame : str
-        Reference frame ('CM' or 'LAB')
+        If True, the y-axis is logarithmic.
+    frame : {'CM', 'LAB'}
+        With ``'CM'``, LAB points are converted to CM. With ``'LAB'`` nothing is
+        converted and the points of the files are drawn in the frame the files
+        record, next to ACE curves that are not converted either. The value is
+        also written on the x-axis label.
 
-    Returns:
-    --------
-    fig, ax : matplotlib figure and axes objects
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+        The figure.
+    ax : matplotlib.axes.Axes
+        The axes.
     """
     
     fig, ax = plt.subplots(figsize=figsize)

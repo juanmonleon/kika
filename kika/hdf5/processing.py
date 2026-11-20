@@ -1,7 +1,7 @@
 """An evaluation → the processed suite the OpenMC encoder writes.
 
 :func:`processSuite` takes a suite decoded from ENDF or GNDS (``eval`` forms)
-and builds a **new** suite in the shape :mod:`kika.hdf5.neutron_encode`
+and builds a **new** suite in the shape ``kika.hdf5.neutron_encode``
 serialises, without editing the one it was given:
 
 1. **0 K** (``recon``): the suite's ``recon`` forms, or kika's resonance
@@ -14,14 +14,15 @@ serialises, without editing the one it was given:
    is then on one grid per temperature, the union of the broadened grid
    below ``thnmax`` and the 0 K one above, each from its threshold index.
 3. **Reactions**: every exclusive
-   partial; the redundant sums 4, 16, 103-107 -- rebuilt from their levels when
+   partial; the redundant sums 16, 103-107 -- rebuilt from their levels when
    the evaluation does not give them, as ``from_ace`` does for depletion -- and
    18 when the fission chances are given; gas production 203-207 as
    Σ multiplicity × σ over the reactions that emit p, d, t, ³He, α (what
    GASPR computes); KERMA 301/901 and damage 444 by kika's HEATR
    (:mod:`kika.processing.heating`) and the URR probability tables by
    kika's PURR (:mod:`kika.processing.resonances.probability_tables`). No
-   NJOY: every piece of a neutron file is kika's.
+   NJOY: every piece of a neutron file is kika's. MT4 is written only when the
+   URR tables name it (summed from the levels) or for photons stated on it.
 4. **Distributions and yields** tabulated with their CDF
    (:mod:`kika.processing.tabulation`); neutrons and photons only, the
    products OpenMC's files carry.
@@ -83,6 +84,20 @@ def njoyThnmax(suite, firstThreshold: Optional[float] = None) -> float:
     top of the resolved resonance region; with only an unresolved region, its
     start; with no resonance parameters, the lesser of 6.5 MeV and the first
     threshold. Never above 6.5 MeV. Above it the 0 K cross sections are used.
+
+    Parameters
+    ----------
+    suite
+        The evaluation; only its resolved and unresolved resonance regions are read.
+    firstThreshold
+        Energy in eV of the lowest threshold among the reactions with a negative
+        QI. Used only when the suite has no resonance parameters; ``None`` or 0
+        counts as no threshold.
+
+    Returns
+    -------
+    float
+        The energy in eV.
     """
     resonances = suite.resonances
     resolved = list(getattr(resonances, "resolved", None) or []) if resonances is not None else []
@@ -97,7 +112,22 @@ def njoyThnmax(suite, firstThreshold: Optional[float] = None) -> float:
 
 
 def aceKT(temperature: float) -> float:
-    """kT in eV as an ACE header states it: MeV, five significant figures."""
+    """kT in eV as an ACE header states it: MeV, five significant figures.
+
+    ``temperature * k_B`` with ``k_B = 8.617333262e-05 eV/K`` is written in MeV to
+    five significant figures and converted back to eV, so the value is the one the
+    official libraries' ``kTs`` hold (not the exact product).
+
+    Parameters
+    ----------
+    temperature
+        Temperature in K.
+
+    Returns
+    -------
+    float
+        kT in eV.
+    """
     return float(f"{temperature * K_BOLTZMANN * 1e-6:.5E}") * 1.0e6
 
 
@@ -667,47 +697,116 @@ def _processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMA
                  urrTables: Optional[Dict[float, object]] = None,
                  broadened: Optional[Dict[float, tuple]] = None,
                  particles: Sequence[str] = ("n", "photon")):
-    """The processed suite of ``suite`` at ``temperatures`` (kelvin; default 293.6 K).
+    """The processed suite of an evaluation, ready for the OpenMC encoder.
 
-    ``endf`` is the ENDF tape the suite was read from, for the target's mass
-    ratio and spin as MF1/MF2 state them (the reconstruction's context).
-    KERMA, damage and the URR probability tables are kika's; ``omit``
-    leaves any of ``"urr"``, ``"kerma"``, ``"damage"`` out. ``ed`` is the
-    displacement threshold of the damage (default: HEATR's table by Z).
-    ``heatingPartials`` requests additional HEATR response identifiers, stored
-    as redundant production reactions at every processed temperature. ``qa``
-    and ``qbar`` are forwarded to :func:`kika.processing.heating.heatingOf`.
+    The input is not modified and nothing is written to disk; the stages are those
+    of the module docstring, except that MT4 is written only when the URR tables
+    name it or for photons stated on it. Cross sections are in barn and energies in eV.
+    Each temperature is named and valued as an ACE header states it (:func:`aceKT`).
+    The 0 K elastic is thinned within what the reconstruction leaves of the
+    tolerance below. KERMA, damage and the URR probability tables are kika's.
     Fission partials use the processed MF1/458 release, including Sher-Beck.
-    MT443 uses HEATR's diagnostic convention; unresolved explicit MF6
-    recoil paths raise rather than silently omitting a contribution.
-    ``awr`` overrides the
-    atomic weight ratio (default MF1/451's, as ACER takes it).
-    ``thinning`` is the relative tolerance each temperature's cross sections are
-    stated to, five times tighter below 0.4999 eV as in NJOY. 1e-3 is what the
-    official libraries are processed to (BROADR's ``errthn``). It is shared so the
-    stages do not add up beyond it (:func:`heatedTolerances`): half is the 0 K
-    source's, a twentieth the Doppler table's, the rest the thinning's, which drops
-    points while every reaction, read lin-lin, reproduces every dropped point to
-    it. ``None`` keeps the full union grid (the broadening then takes what the
-    source leaves). The 0 K elastic is thinned within what the reconstruction leaves
-    of the same tolerance. ``workers`` broadens that
-    many temperatures at once, one process each (default: one per temperature,
-    at most four -- the broadening is single-threaded), and computes that many
-    URR energies at once (default: up to eight). Processes are spawned on
-    Windows, so a script that calls this needs the usual
-    ``if __name__ == "__main__":`` guard; ``workers=1`` stays in-process. ``label`` processes
-    the forms of that style -- a perturbation run's ``realization`` -- in
-    place of the evaluated ones wherever it has them (the
-    sample is multiplied at 0 K and broadened, never the reverse).
-    ``urrTables`` passes URR probability tables already computed
-    (:func:`urrTablesOf`, ``{kelvin: ProbabilityTables}``), as a perturbation
-    run shares the unperturbed evaluation's between its samples.
-    ``broadened`` passes the broadening already done on this suite's 0 K forms
-    (``_broadenAll``'s ``{kelvin: (heated forms, ceiling)}``, as
-    ``kika.endf.process_endf`` keeps it); each temperature's ceiling is its own.
-    ``particles`` are the products tabulated for Monte Carlo: neutrons and
-    photons, as OpenMC's file holds them; an ACE table also carries the light
-    charged particles (:data:`ACE_PARTICLES`).
+    MT443 uses HEATR's diagnostic convention.
+
+    Parameters
+    ----------
+    suite
+        An evaluation decoded from ENDF or GNDS, with its target in ``PoPs``.
+    temperatures
+        Temperatures in K; ``None`` is ``[293.6]`` (group name ``294K``).
+    report
+        A ``ConversionReport`` to fill; ``None`` makes a new one. It is set as the
+        result's ``report``.
+    thnmax
+        Upper energy of the Doppler broadening in eV: a number, or ``"njoy"`` (the
+        default), which is :func:`njoyThnmax` with the lowest first energy of the
+        reactions that have a negative QI as the first threshold. Above it the 0 K
+        cross sections are used, as BROADR leaves them.
+    endf
+        Path of the ENDF tape the suite was read from. When ``context`` is ``None``
+        and the suite has no ``recon`` style, it supplies the target's mass ratio
+        and spin as MF1/MF2 state them for the reconstruction. Otherwise unused.
+    omit
+        Pieces to leave out: any of ``"urr"``, ``"kerma"``, ``"damage"``. Each is
+        recorded in the report as lost.
+    awr
+        Atomic weight ratio of the table; default the provenance's (MF1/451, as
+        ACER takes it), else the target's mass over the neutron's.
+    context
+        The ``NeutronContext`` (mass ratio and spin) for the reconstruction and
+        the URR tables; ``None`` builds it from ``endf`` or from the model.
+    doppler
+        The ``DopplerOptions`` of the broadening; default from ``thinning``
+        (``heatedTolerances``).
+    tabulation
+        The ``TabulationOptions`` of the distributions and yields; default
+        ``TabulationOptions()``.
+    ed
+        Displacement threshold of the damage energy (MT444); default HEATR's table
+        by Z.
+    heatingPartials
+        Distinct integer response identifiers of HEATR to add, stored as redundant
+        production reactions at every temperature.
+    qa, qbar
+        Passed to :func:`kika.processing.heating.heatingOf`.
+    thinning
+        Relative tolerance every temperature's cross sections are stated to, five
+        times tighter below 0.4999 eV as in NJOY. The default is 1e-3. It is shared so
+        the stages do not add up beyond it: half is the 0 K source's, a twentieth
+        the Doppler table's and the rest the thinning's, which drops points while
+        every reaction, read lin-lin, reproduces every dropped point to it. ``None``
+        keeps the full union grid and the broadening takes what the source leaves
+        of 1e-3.
+    workers
+        Number of workers. For the broadening (at most one process per job of
+        temperature and energy chunk), the URR energies and the prefetch pool the
+        default is the ``KIKA_WORKERS`` environment variable, else the number of
+        cores, at most eight. The resonance reconstruction also receives it, as
+        threads; there the default is ``KIKA_WORKERS``, else half the cores, at
+        most four. ``1`` stays in-process. Processes are spawned on Windows, so the calling script
+        needs the usual ``if __name__ == "__main__":`` guard. The result does not
+        depend on it.
+    label
+        Process the forms of that style (a perturbation run's ``realization``)
+        wherever the suite has them, and the evaluated forms elsewhere: the sample
+        is multiplied at 0 K and broadened, never the reverse.
+    urrTables
+        ``{kelvin: ProbabilityTables}`` already computed (``urrTablesOf``), as a
+        perturbation run shares the unperturbed evaluation's between its samples.
+        Must have every temperature requested.
+    broadened
+        The broadening already done on this suite's 0 K forms, ``{kelvin: (heated
+        forms, ceiling)}`` as ``kika.endf.process_endf`` keeps it; each
+        temperature's ceiling is its own. Must have every temperature requested.
+    particles
+        Products tabulated for Monte Carlo; default neutrons and photons, as an
+        OpenMC file holds them. ``ACE_PARTICLES`` lists the seven an ACE table
+        carries (adding the light charged particles).
+
+    Returns
+    -------
+    ReactionSuite
+        A new suite with ``heated_<T>`` styles on one grid per temperature,
+        the reactions, sums, gas production, fission, URR tables and heating, and
+        the ``report``.
+
+    Raises
+    ------
+    HDF5FormatError
+        If the target is not in ``PoPs`` or its Z is ``None``, or the URR tables
+        name a reaction of which the evaluation has none of the levels.
+    TypeError
+        If the target's A is ``None``.
+    ValueError
+        If ``omit`` names anything other than the three pieces; ``heatingPartials``
+        is not distinct integers, or is given with both ``"kerma"`` and
+        ``"damage"`` omitted; or ``broadened`` or ``urrTables`` lacks a requested
+        temperature.
+
+    Notes
+    -----
+    An unresolved explicit MF6 recoil path in the heating is an error from the
+    heating code, never a silent omission.
     """
     m = _m()
     from kika.processing.tabulation import TabulationContext, TabulationOptions, tabulateDistribution
@@ -1863,7 +1962,28 @@ def gasMultiplicities(reaction, targetZA: Optional[int] = None) -> Dict[int, obj
     (MF3 alone -- every MT600-849 of ENDF/B-VIII.1 N-14) emits what its MT says,
     as GASPR counts it: with only the stated products, N-14's MT203, 204 and 207
     were zero everywhere and MT205 was missing. With ``targetZA`` the residual
-    of such a reaction counts too when it is light (:func:`_impliedGas`).
+    of such a reaction counts too when it is light (``_impliedGas``).
+
+    Parameters
+    ----------
+    reaction
+        A reaction of the model, with its output channel.
+    targetZA
+        ``1000 Z + A`` of the target. It matters in two cases: a reaction that
+        states no gas-particle product, and an MT 600-849 whose stated count of a
+        particle is below the implied one. There the residual nucleus (target plus
+        neutron less the emitted particles) is counted when it is H-1, H-2, H-3,
+        He-3 or He-4, and Be-8 as two alphas. For any other reaction that states
+        gas products (MT5, say) it changes nothing. ``None`` leaves the residual out.
+
+    Returns
+    -------
+    dict
+        ``{203..207: multiplicity}``, the key being the gas MT (``GAS_MTS``). Each
+        value is a model function of incident energy in eV (a constant for the
+        implied particles), dimensionless: the number of that particle emitted per
+        reaction. A particle listed in more than one product gives a tuple of
+        functions, to be added.
     """
     out = {}
     if not any(p.pid in GAS_MTS.values() for p in reaction.outputChannel.products):

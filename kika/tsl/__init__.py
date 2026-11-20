@@ -10,7 +10,7 @@
   :func:`tsl_naming` is how a tape is placed in its compound.
 
 The same files open through :func:`kika.read`, and the phonon spectra an
-evaluation was made from through :mod:`kika.njoy.phonon_spectra`.
+evaluation was made from through ``kika.njoy.phonon_spectra``.
 """
 from .library import (TSLCompound, TSLLibraryIndex, TSLTape, companion_kind, index_tsl,
                       read_tsl_header)

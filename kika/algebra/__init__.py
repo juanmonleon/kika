@@ -17,8 +17,8 @@ was learned -- a tape that broke a sum, a processor that disagreed -- but
 nothing here depends on it. Something that needs a physical model (the ENDF
 fission-spectrum laws, a resonance formalism, a flux shape with physical
 parameters) belongs in the calculation layer that builds on this one: the
-spectra moved to :mod:`kika.nuclear_data.spectrum_laws` in October 2026 for
-that reason. ``tests/test_algebra.py`` freezes the list of submodules so that a
+ENDF fission-spectrum laws live in :mod:`kika.nuclear_data.spectrum_laws`
+because they need a physical model. ``tests/test_algebra.py`` freezes the list of submodules so that a
 new one is added on purpose.
 
 The rules every function in the package keeps:
@@ -30,7 +30,7 @@ The rules every function in the package keeps:
   caller states (:func:`to_linlin`). A log law on a non-positive value is an
   error, never a silent lin-lin. A log-y panel with an end at exactly 0 (and
   none below) is read as the limit of its own law, not refused: 0 inside the
-  panel, with the jump at the non-zero end (:func:`~kika.algebra.laws.vanishing_panels`).
+  panel, with the jump at the non-zero end (``kika.algebra.laws.vanishing_panels``).
   It is what NJOY's ``terp1`` gives, and JEFF-4.0 writes it (MT102 from 0 to 0
   under the resolved range, and from 3.7e-4 b to 0 between 30 and 200 MeV).
 * **A discontinuity is a repeated abscissa.** ``(x, y_left), (x, y_right)`` is
@@ -39,14 +39,14 @@ The rules every function in the package keeps:
 * **Speed from numpy, pass by pass.** Recursive refinement is a sequence of
   vectorised passes over every panel still being refined.
 
-Submodules: :mod:`.laws` (law codes and their ENDF ``(NBT, INT)`` spelling),
-:mod:`.evaluate` (values and one-sided limits), :mod:`.grid` (unions of grids,
-discontinuities, regions), :mod:`.integrate` (closed-form integrals, group
-integrals, 1/x weight), :mod:`.refine` (the adaptive refinement engine and
-:func:`to_linlin`), :mod:`.arithmetic` (sums, and tables read on one common
-grid to compare them), :mod:`.fold` (Gaussian folds), :mod:`.compare`
+Submodules: ``laws`` (law codes and their ENDF ``(NBT, INT)`` spelling),
+``evaluate`` (values and one-sided limits), ``grid`` (unions of grids,
+discontinuities, regions), ``integrate`` (closed-form integrals, group
+integrals, 1/x weight), ``refine`` (the adaptive refinement engine and
+:func:`to_linlin`), ``arithmetic`` (sums, and tables read on one common
+grid to compare them), ``fold`` (Gaussian folds), ``compare``
 (differences of two tables, and of a table against its own window or group
-averages), :mod:`.thin` (dropping points of tables on one grid to a stated
+averages), ``thin`` (dropping points of tables on one grid to a stated
 error).
 """
 from .laws import (HISTOGRAM, LINLIN, LINLOG, LOGLIN, LOGLOG, LAWS, METHODS,

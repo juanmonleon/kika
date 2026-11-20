@@ -44,15 +44,26 @@ def ace_reaction_frame(ace: "Ace", mt: int) -> str:
 class AngularDistribution:
     """Format-agnostic angular distribution for one reaction.
 
+    **Deprecated:** this class will be removed in kika-nd 1.0. The canonical model is
+    ``kika.nuclear_data.model``, but it does not yet cover reconstruction, group
+    averaging or covariance collapsing, so there is no drop-in replacement for every
+    use. Accessing the name raises a ``DeprecationWarning`` once per process.
+
+    An instance comes from ``from_endf``, ``from_ace`` (or ``all_from_ace``), or is
+    built by hand from the fields below. The distribution is a probability density in
+    the cosine, ``f(mu) = sum_l (2l+1)/2 a_l P_l(mu)`` when given by Legendre
+    coefficients ``a_l``, in the frame stated by ``frame``.
+
     Attributes
     ----------
     energies : np.ndarray
         Incident-neutron energies in eV, sorted ascending.
     coefficients : Dict[int, np.ndarray]
         Legendre coefficients ``{order: values[n_energies]}``.
-        Order 0 is always 1.0 (ENDF normalised PDF convention).
-        Present for ``"legendre"`` and ``"isotropic"`` representations;
-        may also be populated for ``"tabulated"`` via projection.
+        Order 0 is 1.0 in what the readers produce (ENDF normalised PDF
+        convention). Present for ``"legendre"`` and ``"isotropic"`` representations;
+        may also be populated for ``"tabulated"`` via ``project_to_legendre``. For
+        ``"mixed"`` the arrays cover the Legendre energies only.
     reaction : int
         MT number.
     nuclide_id : int
@@ -62,9 +73,12 @@ class AngularDistribution:
     representation : str
         ``"legendre"``, ``"tabulated"``, ``"isotropic"``, or ``"mixed"``.
     tabulated_data : dict or None
-        For tabulated representation:
-        ``{"cosines": List[List[float]], "probabilities": List[List[float]],
-          "angular_interpolation": List[List[Tuple[int,int]]]}``.
+        For the tabulated and mixed representations, a dict with the keys
+        ``"cosines"`` (one list of cosines per energy), ``"probabilities"`` (one list
+        per energy of the density per unit cosine at those cosines) and
+        ``"angular_interpolation"`` (one ENDF ``(NBT, INT)`` list per energy; empty
+        for data read from ACE). A mixed distribution also has
+        ``"legendre_energies"`` and ``"tabulated_energies"``, in eV.
     metadata : dict
         Format-specific extras for lossless round-trips.
         ENDF keys: ``"mat"``, ``"awr"``, ``"ltt"``, ``"li"``, ``"lct"``,
@@ -101,24 +115,20 @@ class AngularDistribution:
     def from_endf(cls, mf4mt: "MF4MT") -> "AngularDistribution":
         """Create from an ENDF ``MF4MT`` (any subclass).
 
-        **This reads the file through the GNDS model.** The section is
-        decoded into an ``angularTwoBody`` (or ``isotropic2d``) and projected
-        back into the same eleven fields. The fields, their order and their
-        defaults are unchanged; ``test_flat_class_surface.py`` is the proof.
+        This reads the file through the GNDS model: the section is decoded into an
+        ``angularTwoBody`` (or ``isotropic2d``) and projected into the fields of
+        this class.
 
-        Two ``metadata`` keys are **new**, and they are what makes
-        :meth:`to_endf` able to write an LTT=3 section back:
+        Besides the ENDF keys listed under ``metadata``, two keys let :meth:`to_endf`
+        write an LTT=3 section back:
 
         ``nm``
-            The evaluation's declared highest Legendre order. LTT=3 writes it in
-            the second CONT record and this class had nowhere to keep it, so
-            ``to_endf`` used to leave the field blank.
+            The evaluation's declared highest Legendre order, which LTT=3 writes in
+            the second CONT record.
         ``legendre_orders``
-            Each energy's own NL. ``coefficients`` is a dense
-            ``{order: array}`` padded to the section's maximum, so a trailing
-            zero the evaluator *wrote* was indistinguishable from padding and
-            ``to_endf`` trimmed it — changing NL on 70 of the committed slice's
-            3960 energies.
+            Each energy's own NL. ``coefficients`` is a dense ``{order: array}``
+            padded to the section's maximum, so a trailing zero the evaluator wrote
+            cannot be told from padding without it.
 
         Parameters
         ----------
@@ -128,6 +138,10 @@ class AngularDistribution:
         Returns
         -------
         AngularDistribution
+            With ``frame`` and ``representation`` as the section states them and
+            energies in eV. A section whose LTT the decoder refuses (outside 0 to 3)
+            gives an object with only the energies, ``representation`` ``"mixed"``
+            and no coefficients.
         """
         from kika.endf.model_adapter import decodeMF4MT
         from kika.nuclear_data.model.interop import flatAngularDistribution
@@ -518,15 +532,15 @@ class AngularDistribution:
     def project_to_legendre(self, max_order: int = 6) -> None:
         """Fit Legendre coefficients from tabulated PDF data.
 
-        Computes the Legendre moments exactly on the lin-lin table
-        (:func:`kika.algebra.legendre_coefficients`):
-            a_l = integral f(mu) P_l(mu) dmu
+        Computes ``a_l = integral f P_l dmu / integral f dmu`` exactly on each
+        table, read lin-lin in the cosine and held at its ends
+        (:func:`kika.algebra.legendre_coefficients`), so that ``a_0`` is 1.0. This
+        is the ENDF MF4 convention, ``f(mu) = sum_l (2l+1)/2 a_l P_l(mu)``, so the
+        result compares directly with the coefficients of an ENDF tape.
 
-        normalised so a_0 = 1.0. This is the ENDF MF4 convention,
-        f(mu) = sum_l (2l+1)/2 a_l P_l(mu), so the result compares directly
-        with the coefficients of an ENDF tape.
-        The original tabulated data is preserved; only ``coefficients``
-        is populated.
+        The tabulated data is kept. ``coefficients`` is replaced (previous
+        coefficients are dropped) by orders 0 to *max_order*, each an array with one
+        value per entry of ``tabulated_data["cosines"]``.
 
         Parameters
         ----------
@@ -589,6 +603,20 @@ class AngularDistribution:
         Returns
         -------
         (cosines, pdf_values) : tuple of np.ndarray
+            The cosines as a float array, and the probability density per unit
+            cosine at each, in the distribution's frame. Isotropic gives 0.5.
+            Legendre coefficients are interpolated lin-lin in energy and summed with
+            the ``(2l+1)/2`` convention. A table is interpolated lin-lin in the
+            cosine at each bracketing energy, and the two are mixed linearly in
+            energy. Energies outside the grid take the end values. A mixed
+            distribution uses its Legendre half up to the last Legendre energy and
+            its tabulated half above.
+
+        Raises
+        ------
+        ValueError
+            If the representation has nothing to evaluate (no coefficients for
+            ``"legendre"``, no tabulated data for ``"tabulated"``, and so on).
         """
         if cosines is None:
             cosines = np.linspace(-1, 1, num_points)
@@ -849,18 +877,15 @@ class AngularDistribution:
     def to_endf(self, mat: Optional[int] = None) -> "MF4MT":
         """Convert back to an ENDF ``MF4MT`` subclass.
 
-        **Written from the flat fields, not from the model.** ``from_endf``
-        reads through the model; this does not, and the asymmetry is deliberate:
-        the flat fields are the source of truth for the flat API, so an object
-        whose ``coefficients`` a caller has edited must write out the edit. A
-        stashed model would silently ignore it, which would be a worse defect
-        than the one the model fixes here.
+        **Written from the flat fields, not from the model.** ``from_endf`` reads
+        through the model; this does not, so an object whose ``coefficients`` a
+        caller has edited writes out the edit.
 
-        What it does take from ``from_endf`` is the two ``metadata`` keys the
-        fields cannot hold — ``nm`` and ``legendre_orders``. With them, an LTT=3
-        section round-trips byte for byte; without them (a hand-built object)
-        the old, lossy behaviour is unchanged, because the information is not
-        there to use.
+        The two ``metadata`` keys ``nm`` and ``legendre_orders`` (set by
+        ``from_endf``) make an LTT=3 section round-trip byte for byte. Without them
+        (a hand-built object, or one filled by ``project_to_legendre``) trailing
+        zero Legendre coefficients are trimmed, so the NL written can be lower than
+        the evaluation's.
 
         Parameters
         ----------
@@ -870,6 +895,18 @@ class AngularDistribution:
         Returns
         -------
         MF4MT subclass
+            By representation: ``MF4MTIsotropic``, ``MF4MTLegendre``,
+            ``MF4MTTabulated`` or ``MF4MTMixed``. ZA is ``nuclide_id``; AWR, LI and
+            LCT come from ``metadata`` (0.0, 0 and 2 when absent; LI is 1 for an
+            isotropic one). The energy interpolation is that of
+            ``metadata["energy_interpolation"]``, or one lin-lin region (none, for a
+            mixed one). Legendre coefficients are written as ``a_1`` to ``a_NL``.
+
+        Raises
+        ------
+        ValueError
+            If the representation cannot be written: an unknown one, or a tabulated
+            or mixed one without ``tabulated_data``.
         """
         mat = mat if mat is not None else self.metadata.get("mat")
         awr = self.metadata.get("awr", 0.0)
@@ -983,13 +1020,16 @@ class AngularDistribution:
         order : int
             Legendre polynomial order to extract.
         label : str, optional
-            Plot label.
+            Plot label. The default is ``"L=<order>"``, prefixed with the nuclide
+            symbol when ``nuclide_id`` is not 0.
         **styling_kwargs
             Passed to ``LegendreCoeffPlotData`` (color, linestyle, ...).
 
         Returns
         -------
-        LegendreCoeffPlotData
+        :class:`~kika.plotting.LegendreCoeffPlotData`
+            With the energies in eV on x (for a mixed distribution only the Legendre
+            ones) and the coefficient ``a_order`` on y.
 
         Raises
         ------
@@ -1052,11 +1092,15 @@ class AngularDistribution:
         """Populate uncertainty fields from a ``LegendreCovariance``.
 
         Extracts diagonal standard deviations for each available Legendre
-        order from the covariance object.
+        order from the covariance object, looked up by ``nuclide_id``, ``reaction``
+        and order. Orders the covariance does not carry are left out. Nothing
+        changes when ``coefficients`` is empty or no order is found. The energy bins
+        and the relative or absolute kind of the first order found apply to all
+        orders.
 
         Parameters
         ----------
-        covariance : LegendreCovariance
+        covariance : ~kika.cov.LegendreCovariance
             Parsed MF34 covariance data.
         """
         orders = list(self.coefficients.keys())
@@ -1095,13 +1139,19 @@ class AngularDistribution:
         sigma : float
             Number of standard deviations (default 1.0).
         label : str, optional
-            Plot label.
+            Plot label. The default is ``"L=<order> unc. (<sigma>σ)"``, prefixed with
+            the nuclide symbol when ``nuclide_id`` is not 0.
         **styling_kwargs
             Passed to ``LegendreUncertaintyPlotData``.
 
         Returns
         -------
-        LegendreUncertaintyPlotData
+        :class:`~kika.plotting.LegendreUncertaintyPlotData`
+            With the covariance's energy bin edges on x, in the unit of its energy
+            grid (not converted). On y, *sigma* times the standard
+            deviation, in per cent when ``uncertainty_type`` is ``"relative"`` and
+            in the units of the coefficient when it is ``"absolute"``, with the last
+            value repeated so that there is one value per edge (a step plot).
 
         Raises
         ------

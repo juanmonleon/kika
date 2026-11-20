@@ -79,6 +79,11 @@ class Correction:
     """
     One correction the entry declares for a set of numbers.
 
+    A correction records a step between two ``valueConvention`` labels, either
+    already taken (:attr:`applied`) or not. It acts on the values only, through
+    :meth:`apply` and :meth:`~kika.sinbad.DataObject.corrected`; the uncertainty
+    budget is never changed by it. Read from the object's ``corrections``.
+
     Attributes
     ----------
     kind : str
@@ -145,8 +150,20 @@ class Correction:
         The multiplicative factor that applies this correction.
 
         ``subtract`` of 2 % gives 0.98, ``add`` gives 1.02, ``multiply`` gives
-        the magnitude itself. Only defined for a relative magnitude -- an
-        absolute one is not a factor, and :meth:`apply` handles it.
+        the magnitude itself (:attr:`relative`, so a ``%`` magnitude is divided
+        by 100). Only defined for a relative magnitude -- an absolute one is not
+        a factor, and :meth:`apply` handles it.
+
+        Returns
+        -------
+        float
+
+        Raises
+        ------
+        SinbadError
+            If the correction has no magnitude, or the direction is not
+            ``multiply`` and the magnitude is absolute (its unit is neither
+            ``%`` nor empty).
         """
         if self.direction == "multiply":
             return self.relative
@@ -158,7 +175,33 @@ class Correction:
         return 1.0 - self.relative if self.direction == "subtract" else 1.0 + self.relative
 
     def apply(self, values: np.ndarray) -> np.ndarray:
-        """Return ``values`` with this correction applied."""
+        """
+        Return ``values`` with this correction applied, whatever :attr:`applied` says.
+
+        A relative magnitude (unit ``%`` or empty) multiplies by :meth:`factor`;
+        an absolute one (any other unit) is subtracted or added, in the unit of
+        the values, which kika does not check. ``multiply`` multiplies by
+        :attr:`relative`. The input is not modified, and no uncertainty is
+        rescaled.
+
+        Parameters
+        ----------
+        values : numpy.ndarray
+            The values to correct.
+
+        Returns
+        -------
+        numpy.ndarray
+            A new array of the same shape.
+
+        Raises
+        ------
+        SinbadError
+            If the correction has no magnitude, or its magnitude is NaN and the
+            correction is relative (or ``multiply``). A NaN magnitude with an
+            absolute unit does not raise: the result is NaN-filled
+            (:meth:`~kika.sinbad.DataObject.corrected` refuses it first).
+        """
         if self.direction == "multiply":
             return values * self.relative
         if self.magnitude is not None and self.magnitude.unit not in ("%", ""):
@@ -217,16 +260,28 @@ class UncertaintyComponent:
     * not at all: the entry names it and does not quantify it
       (:attr:`status`, v0.4).
 
+    A component is always read as a relative standard deviation at 1 s.d.
+    (:meth:`relative`). For a single value or a value given at some positions,
+    a ``%`` unit of the component is divided by 100, any other unit is taken as
+    a fraction already, and the coverage factor of :attr:`confidence_level`
+    brings it to 1 s.d. For a per-point component the table column decides
+    both: its unit (``%`` is divided by 100) and its confidence level, with the
+    component's own :attr:`confidence_level` as the fallback; the component's
+    own ``unit`` is not read. kika does not check that a unit is a relative one.
+
     Attributes
     ----------
     name : str
     correlation_scope : str
         ``none``, ``within-detector``, ``within-entry``, ``within-campaign`` or
-        ``within-configuration``.
+        ``within-configuration``. ``none`` correlates a point with itself only;
+        ``within-detector`` correlates the points that share a detector (see
+        :attr:`ref` and :meth:`scope_key`); the other three correlate every
+        point of the entry, campaign or configuration (kika treats them alike).
     column : str or None
         The column holding it, when it is per point.
     value, unit : float, str
-        The single value, when it is one for all points.
+        The single value, when it is one for all points. NaN when absent.
     at : dict of str to float
         Position label to value, in :attr:`unit` at :attr:`confidence_level`,
         when it is given only at some positions.
@@ -234,10 +289,14 @@ class UncertaintyComponent:
         Why there is no number, when there is none -- ``"not quantified"``.
     confidence_level : str or None
         As published, e.g. ``"2 s.d."``.
+    confidence_level_provenance : str or None
+        How the entry says it knows the level, as the file states it. Kept
+        untouched and not used in any calculation.
     ref : str or None
         What the component belongs to -- the detector, the source strength.
         This is what ``within-detector`` compares.
     source : str
+        Where in the entry the component was transcribed from.
     """
 
     name: str
@@ -294,6 +353,18 @@ class UncertaintyComponent:
 
         Empty for a per-point or single-value component; every point for an
         unquantified one.
+
+        Parameters
+        ----------
+        table : Table
+            The object's table. Only the points whose value cell is filled are
+            considered (every row when the table has several value columns).
+
+        Returns
+        -------
+        list of str
+            Position labels, or row numbers when the table has no position
+            column.
         """
         if self.is_per_point or (self.is_quantified and not self.is_partial):
             return []
@@ -312,10 +383,17 @@ class UncertaintyComponent:
         Returns
         -------
         numpy.ndarray
-            One value per row of the table, or a single-element array. A
-            component given only at some positions is NaN at the others, and
-            an unquantified one is ``[nan]``: a number the entry does not have
-            is not replaced by one it did not publish.
+            One value per row of the table, or a single-element array for a
+            component with one value for all points. A component given only at
+            some positions is NaN at the others, and an unquantified one is
+            ``[nan]``: a number the entry does not have is not replaced by one
+            it did not publish.
+
+        Raises
+        ------
+        ContentTypeError
+            If the component is per point or given at some positions and no
+            *table* was passed.
         """
         if self.is_per_point or self.is_partial:
             if table is None:
@@ -345,6 +423,21 @@ class UncertaintyComponent:
         ``None`` means "never off the diagonal". A frozenset means "these
         labels must intersect" -- a set because a component may name more than
         one object, as the pilot's sulphur does with its two pellets.
+
+        Parameters
+        ----------
+        default_ref : str
+            The label to use when the component has no :attr:`ref`. Space
+            separated labels are split into one each.
+
+        Returns
+        -------
+        frozenset of str or None
+            ``None`` for scope ``none``. ``frozenset({"*"})`` for the three
+            scopes that reach every point (``within-entry``, ``within-campaign``,
+            ``within-configuration``). Otherwise the labels of :attr:`ref` (or
+            *default_ref*), which is also what a scope outside the vocabulary
+            gives.
         """
         if CORRELATION_SCOPE_IS_GLOBAL.get(self.correlation_scope, False):
             return frozenset({"*"})
@@ -421,6 +514,13 @@ class UncertaintyBudget:
     """
     The components of a set of numbers, and how they combine.
 
+    The budget is relative: every component is a fraction of the value at 1 s.d.
+    :meth:`total` combines the components point by point with
+    :attr:`combination_rule` (a sum in quadrature unless it is ``linear``),
+    whereas :func:`covariance` always adds the components as covariances (a sum
+    of squares, with the correlation of each scope) and reads neither
+    :attr:`combination_rule`, :attr:`basis` nor :attr:`covariance`.
+
     Attributes
     ----------
     components : list of UncertaintyComponent
@@ -428,7 +528,12 @@ class UncertaintyBudget:
         ``components`` (the default), ``observed-dispersion`` or
         ``quoted-without-basis``.
     combination_rule : str
-        ``quadratic``, ``linear`` or ``not stated``.
+        ``quadratic``, ``linear`` or ``not stated``. Only ``linear`` changes
+        :meth:`total`; any other value, ``not stated`` included, gives the sum in
+        quadrature.
+    combination_rule_provenance : str or None
+        How the entry says it knows the rule, as the file states it. Kept
+        untouched.
     covariance : str
         ``from components``, ``reported`` or ``not applicable``.
     published_total : PublishedTotal or None
@@ -479,6 +584,7 @@ class UncertaintyBudget:
 
     @property
     def names(self) -> List[str]:
+        """The names of the components, in the order of the file."""
         return [c.name for c in self.components]
 
     @property
@@ -498,6 +604,17 @@ class UncertaintyBudget:
         Empty when every quantified component reaches every point, which is
         what :func:`covariance` needs. Unquantified components are not listed
         here -- see :attr:`unquantified`.
+
+        Parameters
+        ----------
+        table : Table
+            The table of the object the budget belongs to.
+
+        Returns
+        -------
+        dict of str to list of str
+            Component name to the positions of *table* (row numbers when it has
+            no position column) it gives no number for.
         """
         return {
             c.name: gaps for c in self.components
@@ -505,13 +622,36 @@ class UncertaintyBudget:
         }
 
     def complete_at(self, table: Table) -> List[str]:
-        """The points of ``table`` where every quantified component is given."""
+        """
+        The points of ``table`` where every quantified component is given.
+
+        Parameters
+        ----------
+        table : Table
+            The table of the object the budget belongs to.
+
+        Returns
+        -------
+        list of str
+            Position labels (row numbers when there is no position column), in
+            table order, of the rows whose value cell is filled.
+        """
         gaps = {p for positions in self.missing(table).values() for p in positions}
         return [p for p in _valued_positions(table) if p not in gaps]
 
     def total(self, table: Optional[Table] = None) -> np.ndarray:
         """
         Combine the quantified components, by the rule the entry declares.
+
+        The components are summed linearly when :attr:`combination_rule` is
+        ``linear`` and in quadrature otherwise. Correlation scopes play no part
+        here: they matter only to :func:`covariance`.
+
+        Parameters
+        ----------
+        table : Table, optional
+            The object's table, needed when a component is per point or given
+            at some positions.
 
         Returns
         -------
@@ -520,7 +660,14 @@ class UncertaintyBudget:
             component is per point or given at some positions. NaN at a point
             where a component is missing: the total is not known there. A
             component the entry names but does not quantify is left out, as
-            the entry's own totals leave it out.
+            the entry's own totals leave it out. An empty array when no
+            component is quantified.
+
+        Raises
+        ------
+        ContentTypeError
+            If a component is per point or given at some positions and no
+            *table* was passed.
         """
         parts = [c.relative(table) for c in self.components if c.is_quantified]
         if not parts:
@@ -540,10 +687,19 @@ class UncertaintyBudget:
         fraction, the recombined ``total`` and the ``published_total`` the
         entry prints there, when it prints one.
 
+        Parameters
+        ----------
+        table : Table
+            The table of the object the budget belongs to.
+
         Returns
         -------
         pandas.DataFrame
-            Indexed by position. Empty when no component is partial.
+            Indexed by ``position`` (row numbers when the table has no position
+            column). Empty when no component is partial. ``total`` is
+            :meth:`total`; ``published_total`` is
+            the published total as a fraction at 1 s.d. (NaN where the entry
+            gives none).
         """
         import pandas as pd  # noqa: PLC0415
 
@@ -568,6 +724,19 @@ class UncertaintyBudget:
         ``relative_1sd`` is the mean over the points where the component is
         given; ``as_published`` says how the entry gives it -- a column, one
         value, some positions, or why there is no number.
+
+        Parameters
+        ----------
+        table : Table, optional
+            The object's table. Without it, a per-point or partial component
+            has NaN in ``relative_1sd``.
+
+        Returns
+        -------
+        pandas.DataFrame
+            Columns ``component``, ``per_point``, ``relative_1sd`` (a fraction,
+            NaN when no number is available), ``as_published``,
+            ``confidence_level``, ``correlation_scope``, ``ref`` and ``source``.
         """
         import pandas as pd  # noqa: PLC0415
 
@@ -707,12 +876,29 @@ def covariance(objects: Sequence, relative: bool = False) -> Tuple[np.ndarray, L
     components with a correlation scope, and the covariance between two points
     is the sum of the components they share.
 
+    Each component enters at 1 s.d. as a fraction of the value
+    (:meth:`UncertaintyComponent.relative`), so the relative covariance of two
+    points ``i`` and ``j`` is the sum, over the components that reach both, of
+    ``r_c(i) * r_c(j)``. A component reaches two points when its
+    :meth:`~UncertaintyComponent.scope_key` labels intersect (the labels of
+    its ``ref``, or the detectors of the object, or the label of the object when
+    it names none); ``within-entry``, ``within-campaign`` and
+    ``within-configuration`` reach every point of every object given, and ``none``
+    only a point with itself. Components are matched by name, across objects,
+    and two differently named components are never correlated. The diagonal is
+    the sum of the squares of the components, whatever ``combination_rule``
+    says.
+
     Parameters
     ----------
     objects : sequence of DataObject
         Each must hold a table and declare an uncertainty budget.
     relative : bool, default False
-        Return the relative covariance instead of the absolute one.
+        Return the relative covariance (dimensionless, the formula above)
+        instead of the absolute one. The absolute covariance multiplies entry
+        ``(i, j)`` by the stored values ``v_i * v_j`` of the table, as the file
+        gives them: corrections of the object are not applied and the unit is
+        the one of the value column, squared.
 
     Returns
     -------
@@ -720,9 +906,15 @@ def covariance(objects: Sequence, relative: bool = False) -> Tuple[np.ndarray, L
         Square, one row per point, points in the order the objects were given.
     index : list of tuple
         ``(object label, position)`` for each row -- what the matrix is of.
+        The position is the row number as text when the table has no position
+        column.
 
     Raises
     ------
+    SinbadError
+        If an object declares no uncertainty budget.
+    ContentTypeError
+        If an object holds no table.
     IncompleteBudgetError
         If a budget gives some component only at some positions (v0.4,
         ``component/at``), so the table's other points have no value for it.
@@ -799,7 +991,31 @@ def correlation(objects: Sequence) -> Tuple[np.ndarray, List[Tuple[str, str]]]:
     """
     The correlation matrix of a set of data objects.
 
-    Same as :func:`covariance`, normalised by the diagonal.
+    The relative covariance of :func:`covariance`, divided by the product of
+    the standard deviations on its diagonal. Same warnings and errors.
+
+    Parameters
+    ----------
+    objects : sequence of DataObject
+        Each must hold a table and declare an uncertainty budget.
+
+    Returns
+    -------
+    matrix : numpy.ndarray
+        Square, one row per point, with 1 on the diagonal. A point with zero
+        variance (no quantified component) gets 0 in its row and column, the
+        diagonal included.
+    index : list of tuple
+        ``(object label, position)`` for each row.
+
+    Raises
+    ------
+    SinbadError
+        If an object declares no uncertainty budget.
+    ContentTypeError
+        If an object holds no table.
+    IncompleteBudgetError
+        If a budget gives a component only at some positions.
     """
     matrix, index = covariance(objects, relative=True)
     sigma = np.sqrt(np.diag(matrix))

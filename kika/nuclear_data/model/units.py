@@ -41,7 +41,13 @@ __all__ = [
 
 
 class UnitError(ValueError):
-    """A unit string is not spellable in the GNDS §3.5 grammar."""
+    """A unit string is not spellable in the GNDS §3.5 grammar, or does not fit its use.
+
+    ``parse_unit`` raises it for an unknown symbol, a missing symbol or exponent,
+    or a dangling operator. ``conversion_factor`` raises it when the two units are
+    not the same physical quantity, and ``check_mass_unit`` when a mass is spelled
+    as an energy. It is a ``ValueError``.
+    """
 
 
 #: Table 3.4. One prefix may be appended to the beginning of any base unit, and

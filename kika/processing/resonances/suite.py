@@ -486,6 +486,38 @@ class _SuiteSegment:
 
 @dataclass(frozen=True)
 class SuiteReconstructionResult:
+    """The reconstruction of a whole model suite, held apart from the suite.
+
+    Returned by :func:`reconstruct_suite`; it is not built by hand. The source
+    suite is not changed: :func:`attach_reconstruction` adds the forms to it after
+    verification.
+
+    Attributes
+    ----------
+    forms
+        Read-only mapping from ``ReactionKey(container, label)`` to the
+        tabulated cross section of every modeled reaction: an ``XYs1d`` for one
+        energy segment, a ``Regions1d`` otherwise. Energies in eV, cross sections
+        in barn, linear-linear interpolation, labelled with *label*.
+    report
+        Read-only mapping that describes the run. Among its entries: ``domain``
+        (lowest and highest energy, eV), ``points`` and ``stored_points``,
+        ``minima`` (smallest value of each reaction in barn; negative values are
+        kept), ``source_sum_error_ratios`` and ``source_sum_discrepancies`` (how
+        far the source's own sums were from the sum of their parts),
+        ``raised_thresholds`` and ``clipped_zero_tails`` (per reaction label, the
+        ``(old, new)`` first energy or end energy changed in the source),
+        ``source_sha256`` and ``normalized_sha256`` (fingerprints),
+        ``source_conversion_report``, ``preparation_notes``, ``options`` and
+        ``context``. ``empirical_verification`` is True and ``global_error_bound``
+        is False: the checks are finite probes, not a proof for all energies.
+    source_style : str
+        Label of the evaluated style the reconstruction started from.
+    label : str
+        Label of the new style and of the forms.
+    options : ReconstructionOptions
+        The options the reconstruction ran with.
+    """
     forms: object
     report: object
     source_style: str
@@ -911,6 +943,27 @@ class SuiteReconstructionResult:
         return True
 
     def evaluate(self,energies):
+        """Evaluate the reference the tables approximate: the physics, not the tables.
+
+        Parameters
+        ----------
+        energies
+            A scalar or a one-dimensional array of energies in eV, finite and
+            positive, inside the reconstructed domain.
+
+        Returns
+        -------
+        dict
+            For each key of ``forms``, the cross section in barn in the shape and
+            order of *energies*, with the backgrounds added and the sums rebuilt
+            from their parts.
+
+        Raises
+        ------
+        ValueError
+            If *energies* has more than one dimension, holds a value that is not
+            finite and positive, or lies outside the reconstructed domain.
+        """
         e=np.asarray(energies,dtype=float)
         if e.ndim>1 or np.any(~np.isfinite(e)) or np.any(e<=0):raise ValueError('finite positive scalar or 1D energies required')
         flat=e.reshape(-1);owner=np.full(len(flat),-1)
@@ -925,10 +978,25 @@ class SuiteReconstructionResult:
 
     @property
     def forms_by_mt(self):
+        """The forms of the reactions that have an ENDF MT, keyed by that MT."""
         return {mt:self.forms[key] for mt,key in self._mt_keys.items()}
 
     def verify_source(self, suite):
-        """Reject stale evaluated data, including edits made after attachment."""
+        """Reject stale evaluated data, including edits made after attachment.
+
+        Parameters
+        ----------
+        suite
+            The suite the result is checked against: the evaluated data of
+            *source_style* must be the data it was reconstructed from.
+
+        Raises
+        ------
+        ValueError
+            If the styles the reconstruction recorded are no longer in *suite*, or
+            the evaluated source differs from the one fingerprinted at
+            reconstruction. Returns None otherwise.
+        """
         candidate = deepcopy(suite)
         try:
             candidate.styles.styles = [candidate.styles[label]
@@ -941,11 +1009,47 @@ class SuiteReconstructionResult:
     def verify_suite(self,suite,*,label=None,progress=None,workers=None):
         """Verify a complete model reloaded from GNDS or a processed ENDF tape.
 
-        ``progress(fraction)`` is called after each batch with the share of
-        checked energies, a plain float in (0, 1]. ``workers`` threads share
-        the exact physics of large materials (default
-        ``parallel.default_workers()``, at most four, low priority); 1 keeps
-        everything on this thread. The numbers are bit-identical either way.
+        The reloaded tables are compared with the reference physics at every node
+        and at four interior probes per panel. The total tolerance counts, not the
+        half the tabulation aims at.
+
+        Parameters
+        ----------
+        suite
+            The reloaded suite (same projectile, target and frame as the
+            reconstruction), holding the form to check on every reaction.
+        label
+            Label of the form to check on each reaction. None is the label of this
+            result.
+        progress
+            ``progress(fraction)`` is called after each batch with the share of
+            checked energies, a plain float in (0, 1].
+        workers
+            The workers that share the exact physics of large materials. Used only
+            when the work (energies times levels) reaches 1e9 and more than one is
+            asked for; they are processes where the solver or the size of the work
+            favours them and this process may start them, and threads otherwise,
+            at below-normal priority. None is ``KIKA_WORKERS`` when set, else half
+            the cores, at most four, at least one. 1 keeps everything on this
+            thread. The numbers are bit-identical either way.
+
+        Returns
+        -------
+        dict
+            For each key of ``forms``, the largest mixed-error ratio found (with
+            the thermal tightening below 0.4999 eV); one is the total tolerance.
+            The result of an identical call is reused.
+
+        Raises
+        ------
+        ValueError
+            If a reaction of the result is missing from *suite* or lacks the
+            selected form.
+        ReconstructionConvergenceError
+            If the material's identity, reaction coverage or region structure
+            changed, a boundary moved, the units or the interpolation law changed,
+            a table is invalid or non-finite, a serialised sum does not close within
+            the total tolerance, or any ratio exceeds one.
         """
         from kika.nuclear_data.model import Regions1d
         from kika.nuclear_data.model.functions.regions1d import curvesOnDomains
@@ -1197,6 +1301,72 @@ def reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',opt
     ``parallel.default_workers()``, at most four, low priority, as
     verification); 1 keeps everything on this thread. The numbers are
     bit-identical either way. The rest is documented on the worker below.
+
+    Local references and native summand links are resolved. Every sum must have
+    a graph; the output sums are rebuilt from their exclusive leaves and must
+    close after publication. Existing partials are kept outside the supported
+    resonance domains. There is no partial success and no automatic fallback.
+    The result is not attached to *suite*: see :func:`attach_reconstruction`.
+
+    Parameters
+    ----------
+    suite
+        A model ``ReactionSuite`` for an incident neutron in the laboratory frame,
+        whose resonance ranges are supported and whose reactions form complete
+        additive sums. It is copied, never modified.
+    context : NeutronContext, optional
+        Target mass ratio and spin. None builds it from the suite's particle
+        data, which is only possible when the suite has resonances and its target
+        and neutron masses and the target spin are present.
+    source_style
+        Label of the evaluated style to start from. It must derive from an
+        evaluated style and must not already include a resonance reconstruction.
+    label
+        Label of the new style and of the forms; it must differ from
+        *source_style* and from every label already in the suite.
+    options : ReconstructionOptions, optional
+        None gives ``ReconstructionOptions()``: ``rtol=1e-3``, ``atol=1e-8`` barn,
+        ``max_points=200000``, ``max_iterations=40``.
+    progress
+        ``progress(fraction)``, called after each energy segment with the
+        completed fraction of the material domain in lethargy. Segments differ in
+        cost, so it is an indication, not an estimate of the time left.
+    workers
+        Threads that share the level sums of large batches. None is
+        ``KIKA_WORKERS`` when set, else half the cores, at most four, at least
+        one. 1 (or less) keeps everything on this thread. The result does not
+        depend on it.
+
+    Returns
+    -------
+    SuiteReconstructionResult
+        The tabulated cross sections of every modeled reaction over the whole
+        evaluated energy domain (eV, barn, linear-linear), with their report.
+
+    Raises
+    ------
+    TypeError
+        If *suite* is not a ``ReactionSuite``, *options* is not a
+        ``ReconstructionOptions`` or *context* is not a ``NeutronContext``.
+    ValueError
+        If *label* is empty, equals *source_style* or already exists; *source_style*
+        already includes a reconstruction or does not derive from an evaluated
+        style; the suite has no model cross sections; the context cannot be built
+        from the particle data; or a resonance region lies outside the modelled
+        domain.
+    UnsupportedResonanceError
+        If the suite is not an incident-neutron laboratory suite; its source tape
+        already holds resonance contributions (``LRP=2``) or declares parameters
+        that are absent; its conversion report lists losses affecting cross
+        sections; it has incomplete reactions; a total has no additive graph;
+        the cross sections do not cover the declared energy domain; or the
+        resonance data are outside what the evaluator supports.
+    ReconstructionConvergenceError
+        If a point or iteration budget of *options* is exhausted, or a panel
+        cannot be brought within the tolerance.
+    RuntimeError
+        If the call is made while a worker process is importing the caller's main
+        script (start the run under ``if __name__ == "__main__":``).
     """
     import multiprocessing
     if getattr(multiprocessing.current_process(),'_inheriting',False):
@@ -1787,6 +1957,36 @@ def attach_reconstruction(suite,result,*,progress=None,workers=None):
     """Validate and attach a complete result atomically, preserving evaluated forms.
 
     ``progress(fraction)`` follows the verification, as in ``verify_suite``.
+
+    The reconstructed forms are added to every reaction under the result's
+    label, a style of that label is added, and the verification of a copy runs
+    first: if it fails, *suite* is left as it was. Radionuclide productions
+    follow their reactions (linearised to ``result.options.rtol``).
+
+    Parameters
+    ----------
+    suite
+        The suite *result* was made from. It is changed in place.
+    result : SuiteReconstructionResult
+        The output of :func:`reconstruct_suite` for this suite.
+    progress, workers
+        As in :meth:`SuiteReconstructionResult.verify_suite`.
+
+    Returns
+    -------
+    ReactionSuite
+        *suite* itself.
+
+    Raises
+    ------
+    TypeError
+        If *result* is not a ``SuiteReconstructionResult``.
+    ValueError
+        If the suite changed since the reconstruction, its reactions are not the
+        ones reconstructed, or the result's label already exists in it.
+    ReconstructionConvergenceError
+        If the verification fails (see
+        :meth:`SuiteReconstructionResult.verify_suite`).
     """
     from kika.nuclear_data.model import CrossSectionReconstructed
     if not isinstance(result,SuiteReconstructionResult):raise TypeError('expected SuiteReconstructionResult')

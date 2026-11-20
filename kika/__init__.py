@@ -1,3 +1,11 @@
+"""Nuclear data in Python: read, check, process and write evaluated data.
+
+``read``, ``write``, ``check``, ``process`` and ``identify`` are single entry
+points that work out the format from the content of the file. The package also
+exports readers for MCNP files, ACE, ENDF, SDF sensitivity profiles, weight windows
+and covariance libraries.
+"""
+
 from .mcnp.parse_mctal import read_mctal
 from .mcnp.parse_meshtal import read_meshtal
 from .mcnp.parse_input import read_mcnp

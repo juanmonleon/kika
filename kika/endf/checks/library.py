@@ -70,7 +70,39 @@ OnResult = Callable[[int, int, "TapeCheck"], None]
 
 @dataclass(frozen=True)
 class TapeCheck:
-    """What happened to one tape: its report, or why there is none."""
+    """What happened to one tape of a library walk: its report, or why there is none.
+
+    The tapes of a :class:`LibraryReport` are of this class; a user does not
+    build one.
+
+    Attributes
+    ----------
+    path : pathlib.Path
+        The tape.
+    report : CheckReport or None
+        The findings; ``None`` when the tape failed (see *error*) or holds
+        nothing the checks look at.
+    error : str or None
+        ``"read: ..."`` or ``"check: ..."`` with the exception, when the tape
+        could not be read or its check failed; the walk goes on.
+    has_covariances : bool
+        ``False`` when the tape holds none of the files the checks asked for
+        (for the covariance checks: no covariance file). The name is the
+        covariance family's.
+    read_seconds, check_seconds : float
+        Time in s to read the tape and to check it.
+    mf : tuple of int
+        The files asked for on this tape.
+    label : str or None
+        Set only when two tapes of a walk share a file name: the path that tells
+        them apart, relative to the directory walked or as given.
+    za : int or None
+        ZA from the head of the tape, read even when the tape fails.
+    liso : int
+        Isomeric state from the head of MF1/MT451; 0 when unknown.
+    kind : str
+        The family of checks: ``"covariance"``, ``"data"`` or ``"evaluation"``.
+    """
 
     path: Path
     report: Optional[CheckReport] = None
@@ -110,6 +142,7 @@ class TapeCheck:
 
     @property
     def mat(self) -> Optional[int]:
+        """The MAT of the tape's report; ``None`` when there is no report."""
         return self.report.mat if self.report is not None else None
 
     @property
@@ -118,6 +151,17 @@ class TapeCheck:
         return self.error is None
 
     def count(self, level: str) -> int:
+        """The number of findings of exactly *level*; 0 with no report.
+
+        Parameters
+        ----------
+        level : {"note", "warn", "defect"}
+            The level to count.
+
+        Returns
+        -------
+        int
+        """
         return 0 if self.report is None else sum(1 for f in self.report if f.level == level)
 
 
@@ -127,8 +171,25 @@ class LibraryReport:
 
     Iterating gives ``(tape, finding)`` pairs. :meth:`summary` is the census
     table -- findings and tapes per (MF, level, check) -- and :meth:`write`
-    puts the three tables on disk as TSV. ``kind`` is the family of checks run
-    (:mod:`.suites`).
+    puts the three tables on disk as TSV. ``len()`` is the number of tapes,
+    whether or not they were checked. It is returned by :func:`check_library`.
+
+    Attributes
+    ----------
+    tapes : tuple of TapeCheck
+        One per tape, in library order whatever the number of workers.
+    directory : pathlib.Path or None
+        The directory walked, ``None`` when the tapes were given one by one.
+    library : str or None
+        The tag the caller gave.
+    stopped : bool
+        ``True`` when ``should_stop`` ended the walk early: ``tapes`` holds the
+        ones done, out of ``planned``.
+    planned : int
+        The number of tapes the walk was to check.
+    kind : str
+        The family of checks run: ``"data"``, ``"covariance"`` or
+        ``"evaluation"``.
     """
 
     tapes: Tuple[TapeCheck, ...] = ()
@@ -160,22 +221,86 @@ class LibraryReport:
         return tuple(t for t in self.tapes if not t.ok)
 
     def at_least(self, level: str) -> Tuple[Tuple[TapeCheck, CovarianceFinding], ...]:
+        """The ``(tape, finding)`` pairs at *level* or worse, in library order.
+
+        Parameters
+        ----------
+        level : {"note", "warn", "defect"}
+            The lowest level to keep, in that order of severity.
+
+        Returns
+        -------
+        tuple
+            Pairs of a :class:`TapeCheck` and a ``Finding``.
+
+        Raises
+        ------
+        KeyError
+            If *level* is not one of the three.
+        """
         floor = _RANK[level]
         return tuple((t, f) for t, f in self if _RANK[f.level] >= floor)
 
     def by_check(self, check: str, level: Optional[str] = None):
+        """The ``(tape, finding)`` pairs of one check, in library order.
+
+        Parameters
+        ----------
+        check
+            A check name, as in ``Finding.check``.
+        level
+            Only the findings of exactly this level; ``None`` takes any.
+
+        Returns
+        -------
+        tuple
+            Pairs of a :class:`TapeCheck` and a ``Finding``.
+        """
         return tuple((t, f) for t, f in self
                      if f.check == check and (level is None or f.level == level))
 
     def tapes_with(self, check: str, level: Optional[str] = None,
                    mf: Optional[int] = None) -> Tuple[TapeCheck, ...]:
-        """The tapes with at least one such finding, in library order."""
+        """The tapes with at least one such finding, in library order.
+
+        Parameters
+        ----------
+        check
+            A check name, as in ``Finding.check``.
+        level
+            Only findings of exactly this level; ``None`` takes any.
+        mf
+            Only findings located in this file; ``None`` takes any.
+
+        Returns
+        -------
+        tuple of TapeCheck
+        """
         hit = {id(t) for t, f in self.by_check(check, level)
                if mf is None or f.location.mf == mf}
         return tuple(t for t in self.tapes if id(t) in hit)
 
     def report(self, name: str) -> CheckReport:
-        """The report of one tape, by file name."""
+        """The report of one tape, by file name.
+
+        Parameters
+        ----------
+        name
+            The tape's ``TapeCheck.name``: its file name, or its label where two
+            tapes of the walk share a file name.
+
+        Returns
+        -------
+        CheckReport
+
+        Raises
+        ------
+        KeyError
+            If no tape has that name.
+        ValueError
+            If the tape has no report (it failed, or holds nothing the checks
+            look at); the message gives the reason.
+        """
         for tape in self.tapes:
             if tape.name == name:
                 if tape.report is None:
@@ -218,7 +343,20 @@ class LibraryReport:
                             ).astype({"mat": "Int64"})
 
     def to_dataframe(self, level: str = NOTE):
-        """One row per finding at *level* or worse, with its file and location."""
+        """One row per finding at *level* or worse, with its file and location.
+
+        Parameters
+        ----------
+        level : {"note", "warn", "defect"}
+            The lowest level kept; the default keeps every finding.
+
+        Returns
+        -------
+        pandas.DataFrame
+            Columns ``file`` (the tape's name), ``level``, ``check``, one column
+            per location index of the report's kind (nullable integers),
+            ``summary`` and ``evidence`` (a dict).
+        """
         import pandas as pd
 
         loc_names = list(location_fields(self.kind))
@@ -246,6 +384,17 @@ class LibraryReport:
         ``findings`` at *level* or worse, each with the ``tape`` it is in.
         Over a whole library the notes are tens of thousands of rows; pass
         ``level="warn"`` to leave them out.
+
+        Parameters
+        ----------
+        level : {"note", "warn", "defect"}
+            The lowest level of the findings listed; the default lists every
+            finding. The summary covers all of them either way.
+
+        Returns
+        -------
+        dict
+            The data described above.
         """
         from .export import library_dict
 
@@ -256,13 +405,42 @@ class LibraryReport:
 
         The summary, one row per tape, the findings at *level* or worse by
         tape (notes only counted by default), and the method and thresholds.
+
+        Parameters
+        ----------
+        path
+            Where to write the text, in UTF-8; an existing file is replaced.
+            ``None`` writes nothing.
+        level : {"note", "warn", "defect"}
+            The lowest level of the findings listed.
+
+        Returns
+        -------
+        str
+            The Markdown text.
         """
         from .export import library_markdown, write_text
 
         return write_text(library_markdown(self, level), path)
 
     def to_html(self, path=None, *, level: str = WARN) -> str:
-        """The same report as :meth:`to_markdown`, as one HTML page with no external resources."""
+        """The same report as :meth:`to_markdown`, as one HTML page.
+
+        The page has no external resources.
+
+        Parameters
+        ----------
+        path
+            Where to write the page, in UTF-8; an existing file is replaced.
+            ``None`` writes nothing.
+        level : {"note", "warn", "defect"}
+            The lowest level of the findings listed.
+
+        Returns
+        -------
+        str
+            The HTML page.
+        """
         from .export import library_html, write_text
 
         return write_text(library_html(self, level), path)
@@ -270,10 +448,24 @@ class LibraryReport:
     def write(self, out_dir, *, level: str = WARN) -> Dict[str, Path]:
         """Write ``summary``, ``files`` and ``findings`` as TSV into *out_dir*.
 
-        *level* is the floor for the findings table. The default leaves the
-        notes out: they are most of the rows (inert rows, rounding, coverage),
-        the summary counts them anyway, and a re-run brings them back in minutes.
-        Evidence goes as JSON. Returns the paths by table name.
+        The default leaves the notes out of the findings table: they are most of
+        the rows (inert rows, rounding, coverage), the summary counts them
+        anyway, and a re-run brings them back in minutes. Evidence goes as JSON.
+        The files are named ``<kind>_<table>.tsv``, or ``<kind>_<table>_<library>.tsv``
+        when the report has a library tag, and replace files of the same name.
+
+        Parameters
+        ----------
+        out_dir
+            The folder, created if missing.
+        level : {"note", "warn", "defect"}
+            The lowest level of the findings table.
+
+        Returns
+        -------
+        dict
+            The path of each file, by table name (``"summary"``, ``"files"``,
+            ``"findings"``).
         """
         out = Path(out_dir)
         out.mkdir(parents=True, exist_ok=True)
@@ -416,7 +608,13 @@ def check_covariance_library(
     on_result: Optional[OnResult] = None,
     workers: Optional[int] = None,
 ) -> CovarianceLibraryReport:
-    """Run :func:`check_covariances` on every tape of a library.
+    """Run :func:`~kika.endf.check_covariances` on every tape of a library.
+
+    Each tape is read, checked and released before the next. A tape that cannot
+    be read, or whose check fails, is recorded on its row (``error``) and the
+    walk goes on. No PENDF is attached, so a block mixing absolute and relative
+    components is checked on its relative part, and says so
+    (``mixed_needs_cross_sections``).
 
     Parameters
     ----------
@@ -426,17 +624,19 @@ def check_covariance_library(
         *mf*). Tapes are walked in the order given.
     mf : sequence of int
         The covariance files to check (any of 31, 32, 33, 34, 35, 40; all by
-        default), for every tape a mapping *source* does not set. Only these
-        that are present and the files that give them central values
-        (``_SUPPORT_MF``) are parsed. A single index scan detects tapes without
-        requested covariances without parsing any MF.
+        default), for every tape a mapping *source* does not set. Numbers
+        outside those six are ignored. Only the requested files that are present,
+        and the files that give them central values (MF1 for MF31, MF2 for MF32,
+        MF2 and MF3 for MF33, MF4 and MF33 for MF34, MF5 for MF35), are parsed. A
+        single index scan detects tapes without requested covariances without
+        parsing any MF.
     patterns : sequence of str
         Globs that pick the tapes in a directory. The default covers how
         ENDF/B, JEFF and JENDL name theirs.
     recursive : bool
         Look in subdirectories too.
     library : str, optional
-        A tag for the report and the names of the files :meth:`~CovarianceLibraryReport.write`
+        A tag for the report and the names of the files its ``write`` method
         writes (e.g. ``"jeff40"``).
     progress : bool or callable
         ``True`` (default) keeps one line on stderr with the tape being checked
@@ -445,29 +645,44 @@ def check_covariance_library(
     on_tape : callable, optional
         ``on_tape(done, total, name, ok)``, structured progress next to (not
         instead of) *progress*: called when each tape is done, ``done`` going
-        from 1 to ``total``; ``name`` is :attr:`TapeCheck.name` and ``ok`` is
+        from 1 to ``total``; ``name`` is ``TapeCheck.name`` and ``ok`` is
         False for a tape that could not be read or checked. An exception in it
         is not caught.
     on_result : callable, optional
         ``on_result(done, total, tape)``, at the same moments as *on_tape*,
-        with the :class:`TapeCheck` itself: its counts by level, MAT and
-        nuclide, for a caller that keeps a running tally.
+        with the :class:`~kika.endf.checks.TapeCheck` itself: its counts by
+        level, MAT and nuclide, for a caller that keeps a running tally.
     should_stop : callable, optional
         Asked before each tape; when it returns true the walk stops there and
         the report of the tapes done so far comes back with ``stopped=True``.
         Nothing stops inside a tape, so the wait is at most one tape (one per
         worker).
     workers : int, optional
-        Processes checking tapes at once; see the module notes for the
-        default. Run it under ``if __name__ == "__main__":`` in a script on
-        Windows or macOS, where worker processes import the script again.
+        Processes checking tapes at once. ``None`` takes ``KIKA_WORKERS`` if
+        set, else the machine's cores up to eight and, when ``psutil`` is
+        installed, no more than one per GB of free memory; never more than the
+        tapes. ``1`` walks in series in this process, and so does a process that
+        may not start children. No result depends on the count. Run it under
+        ``if __name__ == "__main__":`` in a script on Windows or macOS, where
+        worker processes import the script again.
 
     Returns
     -------
-    CovarianceLibraryReport
+    ~kika.endf.checks.CovarianceLibraryReport
+        One :class:`~kika.endf.checks.TapeCheck` per tape, in library order
+        whatever the number of workers. A tape with none of the requested files
+        has ``has_covariances`` false and no report; a file with no ENDF section
+        is a failed tape.
 
-    No PENDF is attached, so a block mixing absolute and relative components is
-    checked on its relative part, and says so (``mixed_needs_cross_sections``).
+    Raises
+    ------
+    ValueError
+        If *mf*, or the files given for a tape in a mapping *source*, name none
+        of 31, 32, 33, 34, 35 and 40. It is raised before any tape is read.
+    FileNotFoundError
+        If *source* is a single path that is not a directory.
+    RuntimeError
+        If called while a worker process is importing the caller's main script.
     """
     default = _checked_mf(mf, "")
     per_tape: Dict[Path, Tuple[int, ...]] = {}
@@ -665,14 +880,83 @@ def check_library(
 ) -> LibraryReport:
     """Check every tape of a library: data, covariances or both.
 
-    *what* and *mf* are those of :func:`~kika.endf.checks.evaluation.check_evaluation`:
-    ``("data",)`` for the data checks only, ``("covariances",)`` for the
-    covariance checks only, both by default; *mf* narrows either to some files
-    (``mf=[3]`` checks MF3 and only what MF3 is checked against). *source* may
-    also be ``{tape: mf}``, each tape checked for its own files (a ``None``
-    value takes *mf*), as :func:`check_covariance_library` takes it. The other
-    parameters are those of :func:`check_covariance_library`. The report's
-    ``kind`` is ``"data"``, ``"covariance"`` or ``"evaluation"`` after *what*.
+    Each tape is read, checked and released before the next. A tape that cannot
+    be read, or whose check fails, is recorded on its row (``error``) and the
+    walk goes on. A file that does not look like an ENDF-6 tape (no record of 75
+    to 80 columns with MAT, MF and MT in its first lines) is left out of a
+    directory or a list of paths, and is not counted as a failure; a mapping
+    *source* is not filtered this way.
+
+    Parameters
+    ----------
+    source : path, iterable of paths, or mapping
+        A directory of ENDF tapes, the tapes themselves, or ``{tape: mf}`` to
+        check each tape for its own files (a ``None`` value takes *mf*). Tapes
+        are walked in the order given, or sorted by path in a directory.
+    what : str or sequence of str
+        ``("data",)`` for the data checks only, ``("covariances",)`` for the
+        covariance checks only, both by default (``"all"`` too). ``"cov"`` and
+        ``"covariance"`` are accepted for the covariances.
+    mf : sequence of int, optional
+        Narrow either family to these files; ``mf=[3]`` checks MF3 and only what
+        MF3 is checked against. ``None`` checks every file the tape holds that a
+        check in *what* looks at.
+    deep : bool
+        Also the data checks that need the cross sections reconstructed. It does
+        nothing without ``"data"`` in *what*, or for a tape whose files checked
+        do not include MF3.
+    patterns : sequence of str
+        Globs that pick the tapes in a directory (``TAPE_PATTERNS`` by default,
+        which covers how ENDF/B, JEFF and JENDL name theirs).
+    recursive : bool
+        Look in subdirectories too.
+    library : str, optional
+        A tag for the report and the names of the files its ``write`` method
+        writes (e.g. ``"jeff40"``).
+    progress : bool or callable
+        ``True`` (default) keeps one line on stderr with the tape being checked
+        and the running tally; a callable receives each of those lines instead
+        (``print`` gives one line per tape); ``False`` is silent.
+    on_tape : callable, optional
+        ``on_tape(done, total, name, ok)``, called when each tape is done,
+        ``done`` going from 1 to ``total``; ``name`` is ``TapeCheck.name`` and
+        ``ok`` is False for a tape that could not be read or checked. An
+        exception in it is not caught.
+    on_result : callable, optional
+        ``on_result(done, total, tape)``, at the same moments as *on_tape*, with
+        the :class:`~kika.endf.checks.TapeCheck` itself.
+    should_stop : callable, optional
+        Asked before each tape; when it returns true the walk stops there and
+        the report of the tapes done so far comes back with ``stopped=True``.
+        Nothing stops inside a tape, so the wait is at most one tape (one per
+        worker).
+    workers : int, optional
+        Processes checking tapes at once. ``None`` takes ``KIKA_WORKERS`` if
+        set, else the machine's cores up to eight and, when ``psutil`` is
+        installed, no more than one per GB of free memory; never more than the
+        tapes. ``1`` walks in series in this process, and so does a process that
+        may not start children. No result depends on the count. Run it under
+        ``if __name__ == "__main__":`` in a script on Windows or macOS, where
+        worker processes import the script again.
+
+    Returns
+    -------
+    ~kika.endf.checks.LibraryReport
+        One :class:`~kika.endf.checks.TapeCheck` per tape, in library order
+        whatever the number of workers. Its ``kind`` is ``"data"``,
+        ``"covariance"`` or ``"evaluation"`` after *what*. A tape with nothing
+        the checks look at has ``has_covariances`` false and no report; a file
+        with no ENDF section is a failed tape.
+
+    Raises
+    ------
+    ValueError
+        If *what* is empty or holds a name other than ``data``,
+        ``covariances`` or ``all`` (or their aliases above).
+    FileNotFoundError
+        If *source* is a single path that is not a directory.
+    RuntimeError
+        If called while a worker process is importing the caller's main script.
     """
     from .evaluation import kind_of, normalise_what
 
@@ -716,6 +1000,17 @@ def _looks_like_endf(path: Path) -> bool:
 
 @dataclass(frozen=True)
 class CovarianceLibraryReport(LibraryReport):
-    """Every tape of a library and what :func:`check_covariances` found in each."""
+    """Every tape of a library and what ``check_covariances`` found in each.
+
+    A :class:`LibraryReport` whose ``kind`` defaults to ``"covariance"``;
+    :func:`check_covariance_library` returns it.
+
+    Attributes
+    ----------
+    tapes, directory, library, stopped, planned
+        As in :class:`LibraryReport`.
+    kind : str
+        ``"covariance"``.
+    """
 
     kind: str = "covariance"

@@ -31,6 +31,39 @@ class TabulationOptions:
     0.1 % is the tolerance the official libraries are processed to (RECONR,
     BROADR, ACER). ``maxPoints`` caps one table; reaching it is an error, not a
     silent truncation.
+
+    Attributes
+    ----------
+    rtol : float
+        Relative tolerance of the interpolation, a fraction. Default 1e-3.
+    atol : float
+        Absolute tolerance as a fraction of the table's largest value. Default
+        1e-3.
+    maxPoints : int
+        Most points of one refined table. Default 2000. Reaching it raises
+        ``ValueError``.
+    negative : {"clip", "raise"}
+        What to do with a density that goes negative: ``"clip"`` (default) sets
+        it to zero and renormalises, ``"raise"`` refuses.
+    angularSeeds : int
+        Initial points of an angular table refined from a Legendre series. Default
+        3 (a high order starts from more).
+    energySeeds : int
+        Initial points of an outgoing-energy table refined from a law. Default 64.
+    angularMomentAtol : float
+        Absolute error allowed in the first and second moments of a Legendre
+        angular law, not negative. Default 1e-4.
+    mixedCdfAtol : float
+        Absolute cumulative error of the histogram that replaces a mixed
+        discrete and continuous energy law, positive and finite. Default 1e-6; it
+        is not capped by ``maxPoints``.
+
+    Raises
+    ------
+    ValueError
+        On construction, if ``mixedCdfAtol`` is not positive and finite,
+        ``angularMomentAtol`` is negative or not finite, or ``negative`` is not
+        one of the two above.
     """
 
     rtol: float = 1.0e-3
@@ -76,6 +109,27 @@ def refine(function: Callable[[np.ndarray], np.ndarray], grid: Sequence[float],
     sides of it (Fe-56's elastic at 1.438 MeV: [-1, 0] passed as one segment,
     and the mean cosine came out +0.10 off). Raises when ``maxPoints`` would be
     exceeded.
+
+    Parameters
+    ----------
+    function
+        Vectorised: takes an array of abscissae and returns an array of values.
+    grid
+        Starting abscissae (sorted and made unique here).
+    options : TabulationOptions
+        ``rtol``, ``atol`` and ``maxPoints`` are used. The error allowed at a probe
+        is ``rtol * |f| + atol * max|f|``, the maximum over the values seen so far.
+
+    Returns
+    -------
+    tuple of numpy.ndarray
+        ``(x, y)``: the abscissae, increasing, and the function's values there.
+        An interval too narrow to split in floating point is left as it is.
+
+    Raises
+    ------
+    ValueError
+        If the table would need more than ``options.maxPoints`` points.
     """
     x = np.unique(np.asarray(grid, dtype=float))
     y = np.asarray(function(x), dtype=float)
@@ -126,6 +180,33 @@ def normalisedTable(x, p, *, histogram: bool = False, options: Optional[Tabulati
     continuum; the cumulative runs through the lines and then the continuum,
     as ACE law 4 and OpenMC's ``Mixture`` lay them out. ``clipped`` says whether
     negative densities were set to zero.
+
+    Parameters
+    ----------
+    x, p
+        Abscissae and density (weights for the first *discrete* points), of one
+        length. The continuum is integrated lin-lin, or as a histogram.
+    histogram
+        If True the density is constant from each point to the next.
+    options : TabulationOptions, optional
+        Only ``negative`` is used. None is ``TabulationOptions()``.
+    discrete
+        Number of leading points that are lines.
+    what
+        Name of the table, used in error messages.
+
+    Returns
+    -------
+    tuple
+        ``(x, pdf, cdf, clipped)``: *x* as given, the density divided by the total
+        (lines plus continuum), the cumulative at each point (ending at exactly 1;
+        a line's own weight is included at its point) and a bool.
+
+    Raises
+    ------
+    ValueError
+        If a density is negative and ``options.negative`` is ``"raise"``, or the
+        density integrates to zero.
     """
     options = options or TabulationOptions()
     x = np.asarray(x, dtype=float)
@@ -151,7 +232,28 @@ def normalisedTable(x, p, *, histogram: bool = False, options: Optional[Tabulati
 
 
 def pdfTable(xs, pdf, *, histogram=False, options=None, discrete=0, outer=None, what="table"):
-    """An :class:`Xs_pdf_cdf1d` from a density, normalised, with its cumulative."""
+    """An ``Xs_pdf_cdf1d`` from a density, normalised, with its cumulative.
+
+    Parameters
+    ----------
+    xs, pdf, histogram, options, discrete, what
+        As in :func:`normalisedTable`.
+    outer
+        The outer coordinate of the table (the incident energy in eV, say), or
+        None.
+
+    Returns
+    -------
+    tuple
+        ``(table, clipped)``: the model table, linear-linear or flat (histogram)
+        and with ``numberOfDiscrete`` set to *discrete*; and whether negative
+        densities were set to zero.
+
+    Raises
+    ------
+    ValueError
+        As :func:`normalisedTable`.
+    """
     from kika.nuclear_data.model import Interpolation, Xs_pdf_cdf1d
 
     x, p, c, clipped = normalisedTable(xs, pdf, histogram=histogram, options=options,

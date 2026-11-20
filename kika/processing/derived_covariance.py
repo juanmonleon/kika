@@ -10,18 +10,14 @@ as MT1 minus every partial) needs three ingredients:
    background) so that the relative↔absolute covariance conversion sees
    the actual resonance-broadened σ.
 3. The bilinear sum-rule contraction, which
-   :meth:`kika.endf.classes.mf33.mf33.MF33MT.resolve_nc_lty0` implements.
+   ``MF33MT.resolve_nc_lty0`` implements.
 
 This module wires them together. Resonance reconstruction needs a path to
 the NJOY binary: pass ``njoy_executable=`` and ``njoy_reconstruct`` runs
 RECONR. Without it, the raw MF3 background is used and a warning says so —
 for a resolved-resonance MT that is a different cross section, and the
-caller should know which one the sum rule was resolved against.
-
-This used to fall back to an in-Python reconstructor, ``endf.reconstruct_xs()``,
-whose own docstring said it produced incorrect cross sections on real
-evaluations. It has been removed, and so has the reconstructor under it
-(2026-10-08); nothing reconstructs behind a caller's back.
+caller should know which one the sum rule was resolved against. Nothing
+reconstructs behind a caller's back.
 
 Callers that already have a preferred σ source (a pre-computed PENDF, an
 ACE file) can bypass this module and pass the map straight to
@@ -120,17 +116,24 @@ def resolve_derived_covariance(
     mt : int
         MT number of the derived reaction (e.g. 2 for elastic).
     njoy_executable : str, Path, optional
-        Path to the NJOY binary. If provided, NJOY RECONR is used for
-        resonance reconstruction; otherwise kika's in-Python reconstructor
-        is used.
+        Path to the NJOY binary. If given and the tape has MF2, NJOY RECONR
+        reconstructs the cross sections the sum rule is resolved against; it needs
+        the tape's path, so *endf_or_path* must then be a path. If None, the
+        sum rule uses the cross sections already in the parsed tape's ``pendf``
+        attribute when that is set and not empty, and otherwise the raw MF3
+        background with a logged warning (for a resolved-resonance MT that is a
+        different cross section). Nothing is reconstructed in Python. Ignored
+        when the tape has no MF2.
     tolerance : float
-        Linearization tolerance for resonance reconstruction (0.1% default).
+        Relative tolerance (a fraction) of the RECONR run. It does nothing
+        without *njoy_executable*.
     energy_unit : str
-        Energy unit of the output grid ('eV' or 'MeV').
+        Energy unit of the output grid, ``'eV'`` or ``'MeV'``; passed unchanged to
+        ``to_xs_covmat``, which decides what it accepts.
 
     Returns
     -------
-    CrossSectionCovariance
+    ~kika.cov.CrossSectionCovariance
         Self-covariance of the derived MT on the union of its
         contributors' coarse MF33 grids. Full matrix — includes
         off-diagonal correlations from the bilinear sum-rule contraction.
@@ -140,7 +143,8 @@ def resolve_derived_covariance(
     KeyError
         If the ENDF has no MF33 or no section for the requested MT.
     ValueError
-        If the requested MT has no NC LTY=0 record (i.e. is not derived).
+        If the requested MT has no NC LTY=0 record (i.e. is not derived), or
+        *njoy_executable* is given with an already-parsed tape that has MF2.
     """
     if isinstance(endf_or_path, (str, Path)):
         endf_path: Optional[Path] = Path(endf_or_path)

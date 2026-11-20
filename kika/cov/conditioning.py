@@ -1,47 +1,25 @@
 """Pre-flight for a covariance matrix: can it be sampled, and what would a repair cost?
 
-Every perturbation pipeline in this library repairs its covariance on the way
-past. ``generate_samples`` clamps variances, rescales threshold bins, rescales
-statistical outliers, caps what is left, masks inert rows and then projects onto
-the PSD cone — six repairs, all of them inside the call that draws the samples,
-several of them not reachable any other way. So the first time anyone learns
-that an evaluation's covariance needed surgery is *after* a run has produced
-tapes, and the only record of what was done is a log line.
+The sampling pipelines repair a covariance on the way to a draw (clamp
+variances, rescale threshold bins and outliers, cap, mask inert rows, project
+onto the PSD cone). This module inspects matrices before the draw and changes
+none of them that a caller keeps. :func:`inspect_blocks` answers three questions
+for each block:
 
-This module is the other half of that arrangement, and it does no surgery at
-all. :func:`inspect_blocks` reads matrices and answers three questions:
+1. **Can it be sampled as it stands?** Non-finite entries, negative stated
+   variances and correlations outside [-1, 1] (beyond rounding) say no.
+2. **If it can, would a draw reproduce what the file states?** A negative
+   eigenvalue, or a variance far above its neighbours, is repaired during
+   sampling, and the draw then differs from the stated covariance.
+3. **What would each PSD repair do to this matrix?**
+   :func:`predict_psd_repairs` measures them (diagonal movement, Frobenius
+   distance, spectrum, sum rule).
 
-1. **Can this be sampled as it stands?** Non-finite entries, negative stated
-   variances and correlations outside [-1, 1] make the answer no, and no repair
-   makes it yes without changing what the evaluation says.
-2. **If it can, will the draw reproduce what the file states?** A matrix with a
-   negative eigenvalue is sampled by projecting it somewhere else first; a
-   matrix with one bin at 10⁹× the median of its neighbours is sampled with
-   that bin capped. Both succeed. Neither reproduces the input.
-3. **What would each available repair actually do to it?** Not "clip is
-   eigenvector-preserving" — the measured diagonal movement, Frobenius
-   distance, resulting spectrum and surviving sum rule, on *this* matrix.
-
-Question 3 is the point. The choice between ``clip``, ``higham`` and
-``clip_rescale`` is not decidable in the abstract: for PFNS the deciding fact is
-that ``C·1 ≈ 0`` and a congruence transform destroys it, which was established
-last session by running the candidates by hand on four Cf-252 bands and
-measuring. :func:`predict_psd_repairs` is that experiment as a function.
-
-**Nothing here modifies a matrix that a caller keeps.** The remedy predictions
-build repaired copies to measure them and throw them away. The appliers live in
-:mod:`kika.cov.decomposition`, are unchanged, and are still what the pipelines
-call. Wiring inspection *into* the pipelines — so that a run declares its
-repairs up front instead of discovering them — is the migration, and this module
-is deliberately the half of it that changes no result.
-
-**Format-agnostic by construction.** A block is a ``(key, matrix)`` pair, as in
-:func:`kika.sampling.core.draw_samples`; the key can be anything hashable. The
-one optional piece of structure is *families* — a label per row saying which
-rows are comparable to each other, so "this variance is an outlier" can mean
-"among its own reaction" rather than "among everything in the block". MF33
-passes reaction labels, MF35 passes band labels, MF32 passes parameter names,
-and a caller with nothing to say passes nothing.
+The result is a :class:`ConditioningReport`; a human turns it into a
+:class:`ConditioningPlan`, and :func:`apply_plan` carries the plan out. A block
+is a ``(key, matrix)`` pair with any hashable key. The optional *families* is a
+label per row saying which rows are comparable (rows of one reaction, one band),
+so that an outlier is judged among its own family.
 """
 from __future__ import annotations
 
@@ -160,10 +138,11 @@ SUM_RULE_TOL = 1e-3
 #: from two points on a three-point trade-off.
 DEFAULT_PSD_CANDIDATES = ("clip", "clip_rescale", "higham")
 
-#: Iteration cap used when *predicting* what Higham would do; the real applier
-#: has no cap. 200 rather than the applier's default because it is within 5% of
-#: the converged answer on a real band (stated-diagonal movement 5.78e-3 against
-#: 5.52e-3) for 1/20th of the time — convergence takes ~1900 iterations and
+#: Iteration cap used when *predicting* what Higham would do; the applier's own
+#: default is 1000 up to n = 2000 and 200 above. 200 rather than 1000 because
+#: it is within 5% of the converged answer on a real band (stated-diagonal
+#: movement 5.78e-3 against 5.52e-3) for 1/20th of the time — convergence takes
+#: ~1900 iterations and
 #: ~13 s where 200 costs ~0.6 s. Predictions made under the cap report
 #: ``converged=False`` rather than passing the number off as the converged one.
 _PREDICT_HIGHAM_MAX_ITER = 200
@@ -188,11 +167,33 @@ PREDICT_HIGHAM_MAX_ORDER = 250
 class Remedy:
     """One available repair, and what it was measured to do to this matrix.
 
-    ``effect`` is not a description of the algorithm. It is the outcome of
-    running it here: how far the diagonal moved, how far the whole matrix
-    moved, what the spectrum became, whether a sum rule survived. Two matrices
-    can rank the same three remedies in opposite orders, which is why the
-    ranking is not hardcoded anywhere in this module.
+    ``effect`` is the outcome of running the repair on the matrix (not a
+    description of the algorithm). Two matrices can rank the same remedies in
+    opposite orders, so the module ranks none. A :class:`Finding` holds them.
+
+    Attributes
+    ----------
+    name : str
+        The repair: ``"clip"``, ``"clip_rescale"``, ``"higham"``, ``"none"``,
+        or a remedy of another check (``"zero_non_finite"``, ``"symmetrise"``,
+        ``"renormalise"``, ``"truncate"``, ``"mask_inert"``,
+        ``"rescale_to_family_median"``, ``"cap"``, ``"preserve"``,
+        ``"assemble"``).
+    parameters : dict
+        Arguments the remedy would be applied with (for example ``null_tol``,
+        ``floor``, or the ``indices`` and ``targets`` of a rescale).
+    effect : dict
+        For a PSD repair that was measured: ``predicted`` (True),
+        ``stated_diagonal_max_relative_change`` (largest relative change of a
+        stated variance), ``inert_rows_gaining_variance``,
+        ``max_variance_added_to_an_inert_row``, ``n_inert_rows``,
+        ``frobenius_relative_change``, ``min_eigenvalue_ratio``,
+        ``sum_rule_residual_before`` and ``_after``, ``seconds`` and, for
+        ``"higham"``, ``converged`` and ``iterations``. For one that was not,
+        ``predicted`` is False and ``reason`` says why. Empty for remedies of
+        the other checks.
+    note : str
+        What the remedy does and when it is wrong.
     """
 
     name: str
@@ -201,6 +202,7 @@ class Remedy:
     note: str = ""
 
     def describe(self) -> str:
+        """One-line text of the remedy and its measured effect."""
         if self.effect.get("predicted") is False:
             return f"{self.name}(not measured: {self.effect.get('reason', 'no reason given')})"
         bits = []
@@ -231,7 +233,25 @@ class Remedy:
 
 @dataclass(frozen=True)
 class Finding:
-    """One thing that is true about a matrix, with its evidence and options."""
+    """One thing that is true about a matrix, with its evidence and options.
+
+    Attributes
+    ----------
+    check : str
+        Name of the check: ``"finiteness"``, ``"negative_variance"``,
+        ``"symmetry"``, ``"correlation_bound"``, ``"definiteness"``,
+        ``"variance_outliers"``, ``"inert_rows"``, ``"rank"``, ``"sum_rule"`` or
+        ``"cross_block"``. :func:`inspect_matrix` lists what each one tests.
+    severity : str
+        ``"blocks"`` (:data:`BLOCKS`), ``"distorts"`` (:data:`DISTORTS`) or
+        ``"note"`` (:data:`NOTE`).
+    summary : str
+        One line with the numbers.
+    evidence : dict
+        The quantities behind the summary (counts, indices, ratios).
+    remedies : tuple of Remedy
+        The repairs available; empty when none is offered.
+    """
 
     check: str
     severity: str
@@ -248,7 +268,18 @@ class Finding:
 
 @dataclass(frozen=True)
 class BlockReport:
-    """Everything :func:`inspect_matrix` found in one block."""
+    """Everything :func:`inspect_matrix` found in one block.
+
+    Attributes
+    ----------
+    key : Hashable
+        Key of the block.
+    order : int
+        Number of rows of the block.
+    findings : tuple of Finding
+        Ordered by severity (blocks, distorts, note), then in the order the
+        checks run.
+    """
 
     key: Hashable
     order: int
@@ -256,10 +287,12 @@ class BlockReport:
 
     @property
     def blocking(self) -> Tuple[Finding, ...]:
+        """The findings of severity ``"blocks"``."""
         return tuple(f for f in self.findings if f.severity == BLOCKS)
 
     @property
     def distorting(self) -> Tuple[Finding, ...]:
+        """The findings of severity ``"distorts"``."""
         return tuple(f for f in self.findings if f.severity == DISTORTS)
 
     @property
@@ -284,30 +317,48 @@ class BlockReport:
 class ConditioningReport:
     """The pre-flight for a whole set of blocks.
 
-    Truthiness is *not* defined on this object on purpose. "Is the report ok"
-    has two different answers — :attr:`samplable` and :attr:`faithful` — and a
-    caller that writes ``if report:`` has certainly not decided which one it
-    meant.
+    *Samplable* and *faithful* are two different answers to "is the report ok",
+    so the object has no truthiness: ``if report:`` is not defined.
+
+    Attributes
+    ----------
+    blocks : tuple of BlockReport
+        One report per block, in the order the blocks were given.
     """
 
     blocks: Tuple[BlockReport, ...]
 
     @property
     def samplable(self) -> bool:
+        """True when every block is samplable: no finding of severity ``"blocks"``."""
         return all(b.samplable for b in self.blocks)
 
     @property
     def faithful(self) -> bool:
+        """True when every block is faithful: no finding that blocks or distorts."""
         return all(b.faithful for b in self.blocks)
 
     def failing(self) -> Tuple[BlockReport, ...]:
+        """The blocks that are not samplable."""
         return tuple(b for b in self.blocks if not b.samplable)
 
     def distorting(self) -> Tuple[BlockReport, ...]:
+        """The blocks that are samplable but not faithful."""
         return tuple(b for b in self.blocks if b.samplable and not b.faithful)
 
     def findings(self, check: Optional[str] = None) -> Tuple[Finding, ...]:
-        """Every finding across every block, optionally filtered by check name."""
+        """Every finding across every block, optionally filtered by check name.
+
+        Parameters
+        ----------
+        check : str, optional
+            Name of a check, as in :attr:`Finding.check`. None returns all.
+
+        Returns
+        -------
+        tuple of Finding
+            In block order, then the order within each block.
+        """
         return tuple(
             f for b in self.blocks for f in b.findings
             if check is None or f.check == check
@@ -330,32 +381,24 @@ class ConditioningReport:
         return "\n".join(parts).rstrip()
 
     def recommended_plan(self) -> "ConditioningPlan":
-        """A default a human can accept or edit — never one applied unseen.
+        """A default plan for a human to accept or edit; it is never applied unseen.
 
-        **It repairs definiteness and nothing else.** That is a position, not an
-        omission, and it is the one the three-stage design implies: a negative
-        eigenvalue is the only finding a draw cannot decline to act on, because
-        the decomposition projects the matrix somewhere PSD whether or not
-        anyone chose to. Every other repair — capping a variance, rescaling an
-        outlier bin, masking an inert row — changes what the evaluation states
-        in order to make it more pleasant to sample, and which of those is
-        admissible is a judgement about the evaluation. The pipelines make all
-        six today, silently; the point of a plan is that they stop.
+        It repairs definiteness and nothing else. A block with a ``"distorts"``
+        finding of the ``definiteness`` check gets a ``clip`` step. Every other
+        block, including one with no such finding, gets an explicit ``none`` step,
+        so that the plan names every block. The PSD repair is always ``clip``,
+        whatever ``psd_method="auto"`` would pick: it keeps the eigenvectors, so
+        it preserves a sum rule ``C·1 ≈ 0``, and it costs one decomposition where
+        Higham iterates. Capping a variance, rescaling an outlier and masking an
+        inert row change what the evaluation states, so they are left out and
+        listed in :attr:`ConditioningPlan.notes` with the remedies available.
 
-        So blocks with no definiteness finding get an explicit ``none`` step
-        rather than no step. A plan that names every block says *this one was
-        looked at and left alone*, which is what makes the applied log a record
-        of the whole run rather than of its exceptions. What was deliberately
-        left out is carried on :attr:`ConditioningPlan.notes`.
-
-        The PSD repair is always ``clip``, whatever ``psd_method="auto"`` would
-        pick (Juan, 2026-11-19): it keeps the eigenvectors and moves only the
-        negative directions, it preserves a sum rule's ``C·1 ≈ 0`` (which any
-        congruence destroys, ~500x on the Cf-252 MF35 bands with
-        ``clip_rescale``, and Higham degrades ~40x), and it costs one
-        decomposition where Higham iterates them (tens of minutes on
-        ENDF/B-VIII.1 Fe-56 MF33 MT2). Higham stays available to a plan that
-        names it.
+        Returns
+        -------
+        ConditioningPlan
+            One step per block, in the order of ``blocks``, and the notes. A
+            blocking finding with no remedy (such as a negative variance) is also
+            a note.
         """
         steps: List[PlanStep] = []
         notes: List[str] = []
@@ -403,11 +446,10 @@ class ConditioningReport:
         return ConditioningPlan(steps=tuple(steps), notes=tuple(notes))
 
     def to_markdown(self) -> str:
-        """A table, for pasting into a run log or a notebook cell.
+        """The summary line and a Markdown table of the findings, one row per finding.
 
-        Summaries carry ``|ρ|``-style notation, so cell text is escaped — an
-        unescaped pipe silently splits the row into extra columns and the table
-        renders wrong rather than failing.
+        A block with no findings has one row marked clean. Pipes in the summary
+        text are escaped so that they do not split the row.
         """
         rows = [
             "| block | n | severity | check | summary |",
@@ -432,16 +474,21 @@ class ConditioningReport:
 def block_key_text(key: Hashable) -> str:
     """A block key as the text a plan is written and matched by.
 
-    A plan is serialised to JSON and read back next to ``run_metadata.json``,
-    and block keys are tuples of ints — ``(26056, 2, 1)`` — which JSON has no
-    type for. Rather than inventing an encoding that round-trips tuples, a step
-    identifies its block by this text and :func:`apply_plan` matches on it. The
-    consequence is worth stating: **two blocks whose keys render alike are the
-    same block as far as a plan is concerned**, which is why the function
-    recurses into tuples instead of calling ``str`` on them. ``str`` of a tuple
-    uses ``repr`` on the elements, so a numpy integer renders as
-    ``np.int64(26056)`` under NumPy 2 and ``26056`` under NumPy 1, and a plan
-    written on one machine would not match on the other.
+    A plan is serialised to JSON, which has no tuple type, so a step names its
+    block by this text and :func:`apply_plan` matches on it: two blocks whose keys
+    render alike are the same block as far as a plan is concerned. A tuple renders
+    as ``"(26056, 2, 1)"`` and a NumPy scalar as its Python value, so the text does
+    not depend on the NumPy version.
+
+    Parameters
+    ----------
+    key : Hashable
+        A block key.
+
+    Returns
+    -------
+    str
+        The text of the key.
     """
     if isinstance(key, tuple):
         return "(" + ", ".join(block_key_text(part) for part in key) + ")"
@@ -467,10 +514,23 @@ def _jsonable(value):
 class PlanStep:
     """One repair, on one block, with the parameters it runs with.
 
-    *reason* is not decoration. A run directory that says ``clip`` records what
-    was done; one that says ``clip`` *because* λ_min/λ_max was -1.4e-04 and the
-    block carries a sum rule records why, and that is the difference between a
-    reproducible run and a repeatable one.
+    Attributes
+    ----------
+    key : Hashable
+        Key of the block. A step read back with :meth:`from_dict` holds the
+        text of :func:`block_key_text`.
+    remedy : str
+        One of :data:`APPLIABLE_REMEDIES`.
+    parameters : dict
+        Keyword arguments passed to the repair: ``max_variance`` (and others of
+        ``cap_variance_congruence``) for ``"cap"``; ``indices`` and ``targets``
+        for ``"rescale_to_family_median"``; ``floor`` for ``"mask_inert"``; the
+        arguments of the decomposition function for ``"clip_rescale"`` and
+        ``"higham"``. ``"clip"`` and ``"none"`` ignore them: the clip always
+        uses ``floor=0.0``, no symmetrisation, and returns a matrix without
+        negative eigenvalues untouched.
+    reason : str
+        Why the step was chosen, recorded with the plan.
     """
 
     key: Hashable
@@ -485,6 +545,8 @@ class PlanStep:
         return f"{head}  — {self.reason}" if self.reason else head
 
     def to_dict(self) -> Dict[str, Any]:
+        """The step as a JSON-ready dict: ``block`` (the key as text), ``remedy``,
+        ``parameters`` and ``reason``."""
         return {
             "block": block_key_text(self.key),
             "remedy": self.remedy,
@@ -494,6 +556,19 @@ class PlanStep:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "PlanStep":
+        """The step of a dict made by :meth:`to_dict`; its key is the block text.
+
+        Parameters
+        ----------
+        data : dict
+            Needs ``block`` and ``remedy``; ``parameters`` and ``reason`` default
+            to empty.
+
+        Returns
+        -------
+        PlanStep
+            The step, with the block text as its key.
+        """
         return cls(
             key=data["block"],
             remedy=data["remedy"],
@@ -506,25 +581,23 @@ class PlanStep:
 class ConditioningPlan:
     """The repairs a run is authorised to make, frozen before it starts.
 
-    Stage 2 of the design: a human reads a :class:`ConditioningReport`, decides,
-    and writes the decision down. The plan then goes in the run directory beside
-    ``run_metadata.json`` and, per ``run-metadata-is-the-config-authority``, **it
-    is the authority** — a script default that disagrees with a shipped plan is
-    the script's bug, not the plan's.
-
-    Two things it deliberately is not:
-
-    * **Not a policy.** There is no "recommended" flag on a step and no severity
-      here. By the time a plan exists the trade-offs have been decided; what is
-      left is a list of operations. :meth:`ConditioningReport.recommended_plan`
-      produces a starting point, and a human is expected to edit it.
-    * **Not ordered by block.** Steps are applied in the order they are listed,
-      per block, which matters: capping a variance and then projecting onto the
-      PSD cone is not the same matrix as projecting and then capping.
+    A human reads a :class:`ConditioningReport`, decides, and writes the decision
+    down as a plan; :meth:`ConditioningReport.recommended_plan` gives a starting
+    point to edit. A step has no severity or recommendation, only an operation.
+    Steps for one block are applied in the order listed, and the order matters:
+    capping a variance and then projecting onto the PSD cone is not the same
+    matrix as projecting and then capping.
 
     A round trip through :meth:`to_dict` / :meth:`from_dict` keeps the steps and
-    their order. It does **not** keep the block key's Python type — see
-    :func:`block_key_text` — because a plan identifies blocks by text.
+    their order, but not the Python type of the block keys (a plan identifies
+    blocks by the text of :func:`block_key_text`).
+
+    Attributes
+    ----------
+    steps : tuple of PlanStep
+        The repairs, in order.
+    notes : tuple of str
+        What was deliberately left unrepaired, as text.
     """
 
     steps: Tuple[PlanStep, ...] = ()
@@ -539,11 +612,23 @@ class ConditioningPlan:
         return "\n".join(lines)
 
     def steps_for(self, key: Hashable) -> Tuple[PlanStep, ...]:
-        """The steps naming *key*, in plan order."""
+        """The steps naming *key*, in plan order.
+
+        Parameters
+        ----------
+        key : Hashable
+            A block key, matched by the text of :func:`block_key_text`.
+
+        Returns
+        -------
+        tuple of PlanStep
+            Empty if the plan has no step for the block.
+        """
         text = block_key_text(key)
         return tuple(s for s in self.steps if block_key_text(s.key) == text)
 
     def to_dict(self) -> Dict[str, Any]:
+        """The plan as a JSON-ready dict: ``version`` (1), ``steps`` and ``notes``."""
         return {
             "version": 1,
             "steps": [step.to_dict() for step in self.steps],
@@ -552,6 +637,23 @@ class ConditioningPlan:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ConditioningPlan":
+        """The plan of a dict made by :meth:`to_dict`.
+
+        Parameters
+        ----------
+        data : dict
+            Dict with ``steps`` and ``notes`` (both optional) and ``version``.
+
+        Returns
+        -------
+        ConditioningPlan
+            The plan, with its steps in order.
+
+        Raises
+        ------
+        ValueError
+            If ``data["version"]`` is not 1 (a missing version counts as 1).
+        """
         version = data.get("version", 1)
         if version != 1:
             raise ValueError(
@@ -573,9 +675,17 @@ def as_blocks(blocks) -> List[Tuple[Hashable, np.ndarray]]:
     """Accept a mapping, a sequence of ``(key, matrix)`` pairs, or bare matrices.
 
     A pair is recognised by its second element being 2-D, which a key never is.
-    Ordering is taken as given and never sorted: downstream, the block index
-    sets the seed offset, so reordering the input must reorder the draws with
-    it rather than silently repairing itself.
+    A bare matrix gets its position as key.
+
+    Parameters
+    ----------
+    blocks : mapping, sequence of (key, matrix), or sequence of matrices
+        The blocks. The order is kept as given and never sorted.
+
+    Returns
+    -------
+    list of (Hashable, np.ndarray)
+        Each matrix as a float array.
     """
     if hasattr(blocks, "items"):
         return [(key, np.asarray(m, dtype=float)) for key, m in blocks.items()]
@@ -706,16 +816,40 @@ def predict_psd_repairs(
 ) -> Tuple[Remedy, ...]:
     """Run each candidate PSD repair on *matrix* and measure what it did.
 
-    This is the function the module exists for. It answers "which projection
-    should this covariance use" with numbers from this covariance rather than
-    from the literature, because the properties that decide it — does the
-    diagonal have to be exact, does a sum rule have to survive, is the matrix
-    small enough for Higham to terminate — are properties of the data.
+    The numbers come from this matrix, because what decides the choice (whether
+    the diagonal has to be exact, whether a sum rule has to survive, whether
+    Higham terminates in reasonable time) is a property of the data. The repaired
+    matrices are measured and discarded.
 
-    The repaired matrices are measured and discarded; nothing is returned but
-    the measurements. ``higham_max_iter`` caps the *prediction* only, and a
-    prediction that hit the cap reports ``converged=False`` rather than
-    pretending the number is the converged one.
+    Parameters
+    ----------
+    matrix : np.ndarray
+        Square symmetric matrix, in the space the caller will sample in.
+    candidates : sequence of str
+        Repairs to run, from ``"clip"``, ``"clip_rescale"``, ``"higham"`` and
+        ``"none"``. ``"clip"`` is the eigenvalue clip at 0 (symmetrised),
+        ``"clip_rescale"`` is :func:`~kika.cov.decomposition.clip_and_rescale`,
+        ``"higham"`` is :func:`~kika.cov.nearest_psd_higham` with the diagonal
+        preserved, and ``"none"`` leaves the matrix as it is.
+    higham_max_iter : int
+        Iteration cap of the Higham prediction. The repair applied by a plan uses
+        the default of :func:`~kika.cov.nearest_psd_higham` (1000 up to 2000 rows,
+        200 above) unless the step gives ``max_iter``. A prediction that hits
+        the cap reports ``converged`` False.
+    inert_floor : float
+        Rows with a variance below ``inert_floor`` times the largest variance
+        are counted apart from the stated rows in the effect.
+
+    Returns
+    -------
+    tuple of Remedy
+        One per candidate, in order, with the measured ``effect`` (see
+        :class:`Remedy`) and a ``note`` on what the repair preserves.
+
+    Raises
+    ------
+    ValueError
+        If a candidate is not one of the four names above.
     """
     original = np.asarray(matrix, dtype=float)
     remedies: List[Remedy] = []
@@ -958,15 +1092,31 @@ def negative_mass_by_family(
     the evaluation that a human can act on -- by leaving MT16 out of the
     request, or by fixing the file -- and a projection cannot make.
 
-    This is the *scoring* half of ``CrossSectionCovariance._autofix_covariance``
-    steps 3-4, kept as a diagnostic and stripped of the half that removed
-    blocks: which component to drop is a decision about the evaluation, and it
-    is taken in the request, not inside a repair.
+    It only scores; it removes nothing.
 
-    Returns the pairs sorted by share, largest first, with ``share`` as a
-    fraction of the total negative mass (so the shares sum to one and a pair
-    that *reduces* the negativity shows a negative share). Empty when there is
-    no negative mode.
+    Parameters
+    ----------
+    matrix : np.ndarray
+        Square matrix, symmetrised as ``(C + Cᵀ) / 2`` before the decomposition.
+    families : sequence of Hashable
+        One label per row of *matrix*.
+    tolerance : float
+        Eigenvalues below ``-abs(tolerance)`` count as negative modes.
+
+    Returns
+    -------
+    list of dict
+        One dict per pair of families (each unordered pair once, a family with
+        itself included), sorted by decreasing ``share``: ``pair`` (the two labels
+        as text), ``mass`` (the negative mass the pair contributes) and ``share``
+        (``mass`` over the total negative mass, so the shares sum to one and a pair
+        that reduces the negativity has a negative share). Empty when there is no
+        negative mode.
+
+    Raises
+    ------
+    ValueError
+        If *families* does not have one label per row.
     """
     matrix = np.asarray(matrix, dtype=float)
     labels = np.asarray(list(families), dtype=object)
@@ -1140,11 +1290,20 @@ def inert_row_mask(
 
     ``True`` where the diagonal is non-finite or below *floor* in magnitude —
     a reaction below threshold, or a bin the processing code never computed.
+    The ``inert_rows`` finding, the ``mask_inert`` remedy and the draw itself
+    share this test.
 
-    One predicate, three callers, and that is the point: the ``inert_rows``
-    finding, the ``mask_inert`` remedy and the draw's own drop all have to
-    agree about which rows are inert, and until this existed they agreed by
-    each carrying the same expression.
+    Parameters
+    ----------
+    matrix : np.ndarray
+        Square matrix.
+    floor : float
+        Smallest absolute variance that counts as stated.
+
+    Returns
+    -------
+    np.ndarray
+        Boolean array with one entry per row.
     """
     diagonal = np.diag(matrix)
     return ~(np.isfinite(diagonal) & (np.abs(diagonal) >= floor))
@@ -1301,6 +1460,37 @@ def inspect_matrix(
 ) -> BlockReport:
     """Run every check against one covariance matrix.
 
+    Each check gives a :class:`Finding` of one severity. ``"blocks"`` means a
+    draw would fail or sample nothing meaningful (the block is not samplable);
+    ``"distorts"`` means a draw runs but does not reproduce the stated covariance
+    (the block is not faithful); ``"note"`` implies no action. The checks, in the
+    order they run:
+
+    - ``finiteness`` (blocks): any NaN or infinity.
+    - ``negative_variance`` (blocks): a finite diagonal entry below 0. No remedy.
+    - ``symmetry``: ``max|C - Cᵀ| / max|C|`` above 1e-12. Distorts below 1e-6,
+      blocks from 1e-6 on.
+    - ``correlation_bound``: ``|ρ| > 1`` by more than 1e-10, over the rows with a
+      positive finite variance. A note when the excess is at most
+      ``CORRELATION_ROUNDOFF`` (1e-4), or when *stated* shows the excess comes
+      only from the log transform; otherwise blocks.
+    - ``definiteness``: the negativity ratio ``-λ_min / λ_max`` above
+      ``order * ROUNDOFF_RATIO`` (the machine epsilon of float64) distorts, and
+      the finding records which repair ``psd_method="auto"`` would pick (``clip``
+      below 1e-2, else ``higham``). A matrix with no positive eigenvalue is a
+      note if every entry is at most *inert_floor* in magnitude, else blocks.
+      Skipped if the matrix is not finite.
+    - ``variance_outliers`` (distorts): within a family with at least
+      *min_family_size* rows of positive finite variance, a variance above
+      *outlier_factor* times the family median.
+    - ``inert_rows`` (note): diagonal non-finite or below *inert_floor* in
+      magnitude (see :func:`inert_row_mask`).
+    - ``rank`` (note): fewer than ``order`` eigenvalues above *null_tol* times the
+      largest. Skipped if the matrix is not finite.
+    - ``sum_rule`` (note): ``max|Σ_j C_ij| / max|C|`` at most *sum_rule_tol*, which
+      marks a covariance of a normalised quantity. Skipped if the matrix is not
+      finite.
+
     Parameters
     ----------
     matrix :
@@ -1308,6 +1498,8 @@ def inspect_matrix(
         depend on the space — the outlier factor most of all — are calibrated
         for a *relative* covariance, which is what every pipeline here hands to
         a sampler.
+    key : Hashable
+        Key recorded in the report.
     families :
         One label per row saying which rows are comparable. Outlier detection
         takes medians within a family, so passing ``(zaid, mt)`` per row asks
@@ -1321,12 +1513,27 @@ def inspect_matrix(
         block the diagonal is not a variance, asymmetry is expected and the
         spectrum means nothing; passing False runs only the checks that still
         apply and says why the rest were skipped.
+    null_tol : float
+        An eigenvalue at or below ``null_tol`` times the largest is a null
+        direction (``rank`` check).
+    inert_floor : float
+        Absolute variance below which a row is inert, and the relative split of
+        the effect measurements (see :class:`Remedy`).
+    outlier_factor : float
+        Multiple of the family median above which a variance is an outlier.
+    min_family_size : int
+        Smallest number of usable rows for a family to be judged.
+    sum_rule_tol : float
+        Threshold of the ``sum_rule`` check.
     psd_candidates :
         Which PSD repairs to measure. See :data:`DEFAULT_PSD_CANDIDATES`.
     predict :
         Whether to run those repairs at all. Turning it off makes the
         inspection cheap and leaves the definiteness finding with unmeasured
         options; blocks over ``predict_max_order`` turn it off themselves.
+        ``"higham"`` is measured only up to :data:`PREDICT_HIGHAM_MAX_ORDER` rows.
+    predict_max_order : int
+        Largest order for which the repairs are measured.
     stated :
         When *matrix* is ``log1p(Σ)`` of a relative covariance to be drawn in
         log space, Σ as the file states it. A correlation above 1 that only
@@ -1337,6 +1544,16 @@ def inspect_matrix(
     -------
     BlockReport
         Findings ordered by severity, then by the order the checks run in.
+
+    Raises
+    ------
+    ValueError
+        If *matrix* is not 2-D, or if it is not square while *square_form* is
+        True. Also if *families* does not have one label per row, but only when
+        it is read: with *square_form* False it never is, and otherwise the
+        outlier check reads it when at least *min_family_size* rows have a
+        positive finite variance, and the definiteness check when it finds a
+        negative eigenvalue and *predict* is on for this order.
     """
     matrix = np.asarray(matrix, dtype=float)
     if matrix.ndim != 2:
@@ -1415,18 +1632,33 @@ def inspect_blocks(blocks, *, families=None, square_form=None, stated=None,
                    **kwargs) -> ConditioningReport:
     """Run :func:`inspect_matrix` over a set of blocks.
 
-    *blocks* takes the same three shapes :func:`kika.sampling.core.draw_samples`
-    accepts — a mapping, ``(key, matrix)`` pairs, or bare matrices — so a
-    caller can inspect exactly what it is about to sample without rearranging
-    it. *families* and *square_form* may each be a single value applied to
-    every block, or a mapping from block key to that block's value.
-
-    Usage is the two-step the pipelines do not have today::
+    Usage::
 
         report = inspect_blocks(blocks)
         print(report)                       # decide, in front of a human
         if not report.samplable:
             raise SystemExit(report.summary())
+
+    Parameters
+    ----------
+    blocks : mapping, sequence of (key, matrix), or sequence of matrices
+        The blocks, as in :func:`as_blocks`.
+    families : sequence or mapping, optional
+        Labels per row (see :func:`inspect_matrix`): one sequence applied to every
+        block, or a mapping from block key to that block's labels.
+    square_form : bool or mapping, optional
+        One value for every block, or a mapping from block key to that block's
+        value. None means True for every block.
+    stated : mapping, optional
+        Block key to the stated covariance of a block drawn in log space (see
+        :func:`inspect_matrix`). A block without an entry gets None.
+    **kwargs
+        The remaining keywords of :func:`inspect_matrix`, applied to every block.
+
+    Returns
+    -------
+    ConditioningReport
+        One :class:`BlockReport` per block, in the order of *blocks*.
     """
     reports = [
         inspect_matrix(
@@ -1547,34 +1779,47 @@ def apply_plan(
     verbose: bool = False,
     logger=None,
 ) -> Tuple[List[Tuple[Hashable, np.ndarray]], Tuple[Dict[str, Any], ...]]:
-    """Stage 3: carry out *plan* on *blocks*, and say what was carried out.
+    """Carry out *plan* on *blocks*, and say what was carried out.
 
-    The new code here is the dispatch. Every repair is the applier that runs
-    today in :mod:`kika.cov.decomposition`, called with the parameters a human
-    approved instead of with whatever the sampler's defaults were — which is the
-    whole of the change, and the reason a conditioned draw can be compared
-    against an unconditioned one bit for bit.
+    Each repair calls the function of :mod:`kika.cov.decomposition` that the
+    sampling pipelines use, with the parameters of the step. The ``"clip"`` step
+    is the clip of ``svd_decomposition``: floor 0, no symmetrisation, and a matrix
+    with no negative eigenvalue is returned untouched. ``"mask_inert"`` zeroes the
+    rows and columns found by :func:`inert_row_mask` and keeps the order of the
+    block.
 
-    Blocks come back **in the order they went in**, repaired or not. That is not
-    cosmetic: downstream the block index sets the seed offset, so a function
-    that dropped an untouched block or sorted the output would silently reseed
-    every draw after it.
-
-    A plan step naming a block that is not here **raises**. A plan is written
-    against a specific set of matrices, and one that half-fits is far more
-    likely to be a plan from another run than a plan with a typo — applying the
-    steps that happen to match would then condition some blocks and quietly
-    leave others raw.
+    Parameters
+    ----------
+    blocks : mapping, sequence of (key, matrix), or sequence of matrices
+        The blocks, as in :func:`as_blocks`.
+    plan : ConditioningPlan
+        The steps. Blocks are matched to steps by the text of
+        :func:`block_key_text`.
+    verbose : bool
+        Passed to the repair functions.
+    logger : logging.Logger, optional
+        Passed to the repair functions.
 
     Returns
     -------
-    (blocks, applied)
-        *applied* has one record per step actually run, with the applier's own
-        info dict and two cheap measurements: how far the stated diagonal moved
-        and how far the whole matrix moved. **The spectrum is not measured
-        here** — that is another O(n³) per block, and the honest check that a
-        plan did what it was chosen for is to run :func:`inspect_blocks` on the
-        result, which reports it against every other criterion at the same time.
+    tuple of (list, tuple of dict)
+        The blocks as ``(key, matrix)`` pairs, in the order they went in, repaired
+        or not (the block index sets the seed offset downstream), and one record
+        per step run. A record has ``block``, ``remedy``, ``parameters``,
+        ``reason``, ``n`` (order), ``changed`` (whether the matrix is a new
+        object), ``stated_diagonal_max_relative_change``,
+        ``frobenius_relative_change``, ``seconds`` and ``applier_info`` (the
+        repair's own info dict). The spectrum is not measured here; run
+        :func:`inspect_blocks` on the result for that.
+
+    Raises
+    ------
+    ValueError
+        If a step names a block that is not in *blocks* (nothing is applied), if
+        a remedy is unknown or is ``"preserve"`` (a constraint, not an
+        operation), or if a step lacks a parameter it needs: ``max_variance``
+        for ``"cap"``, ``indices`` and ``targets`` for
+        ``"rescale_to_family_median"``; ``"mask_inert"`` takes only ``floor``.
     """
     normalised = as_blocks(blocks)
     present = {block_key_text(key) for key, _ in normalised}

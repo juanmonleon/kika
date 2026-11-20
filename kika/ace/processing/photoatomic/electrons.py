@@ -23,7 +23,7 @@ The method of LANL's eprdata25 (NJOY3), so the two agree number for number:
 
 **Locators.** The EION header names where each subshell's block starts as an XSS
 index. Here those indices are counted **from the first electron word** (as if
-JXS(19) were 1); :func:`kika.ace.encoders.photoatomic.encode_photoatomic` adds
+JXS(19) were 1); ``kika.ace.encoders.photoatomic.encode_photoatomic`` adds
 where the electron blocks actually start, so the photon blocks before them can
 change length.
 """
@@ -203,6 +203,28 @@ def electronBlocks(electrons) -> Tuple[List[int], np.ndarray, List]:
     ``e-``). The words are laid out ESZE, EXCIT, ELASI, ELAS, EION, BREMI, BREME,
     BREML, SELAS; the EION header's block indices count from the first word
     (see the module docstring).
+
+    Parameters
+    ----------
+    electrons : ReactionSuite
+        The electro-atomic evaluation, with energies in eV and cross sections in
+        barns. Every cross section must be lin-lin, and MT 525, 526, 527 and 528
+        and the ionisation MTs from 534 on must be present.
+
+    Returns
+    -------
+    tuple
+        ``(nxs, words, jxs)``. ``nxs`` is the list ``[NE, NXL, NA, NB, NBL]``, the
+        counts that go to NXS(8) to NXS(12). ``words`` is the ``float64`` array of
+        the electron blocks, with energies in MeV (the model's eV times 10**-6),
+        cross sections in barns and the energy losses in MeV. ``jxs`` is the list
+        for JXS(19) to JXS(32): the offset of each block from the first word of
+        ``words`` (0 for ESZE), ``None`` for a JXS entry with no block.
+
+    Raises
+    ------
+    ValueError
+        If an electro-atomic cross section is not lin-lin.
     """
     reactions = {r.ENDF_MT: r for r in list(electrons.reactions) + list(electrons.incompleteReactions)
                  + list(electrons.sums) if r.ENDF_MT is not None}

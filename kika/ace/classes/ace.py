@@ -34,10 +34,72 @@ from kika._constants import MT_COMPOSITES, MT_COMPOSITE_ORDER
 
 @dataclass
 class Ace:
-    """
-    Class representing ACE format data.
-    
-    ACE (A Compact ENDF) is a format used in nuclear data libraries.
+    """An ACE table: its header, its XSS array and the blocks decoded from it.
+
+    :func:`~kika.ace.read_ace` returns one for a neutron or other particle table.
+    The blocks are views of ``xss_data``, so writing into a block writes into the
+    XSS that :func:`~kika.ace.writers.write_ace.write_ace` serialises. Energies are in
+    MeV and cross sections in barns, as ACE states them; the header temperature is
+    kT in MeV. A block the table does not have is ``None``.
+
+    Attributes
+    ----------
+    filename : str or None
+        The path the table was read from.
+    header : Header or None
+        The parsed header (ZAID, extension, AWR, kT, NXS and JXS).
+    xss_data : numpy.ndarray or None
+        The XSS array, ``float64``, ``NXS(1) + 1`` long; ``xss_data[0]`` is a
+        placeholder, so ``xss_data[i]`` is XSS(i).
+    xss_int_words : numpy.ndarray or None
+        A bit mask over XSS(1..n), little-endian: set where the file spells the
+        word as an integer.
+    esz_block : EszBlock or None
+        The ESZ block: energy grid, total, absorption and elastic cross sections and
+        heating numbers.
+    nubar : NuContainer or None
+        The NU block (fission neutron yield).
+    delayed_neutron_data : DelayedNeutronData or None
+        The BDD block (delayed-neutron precursor groups).
+    reaction_mt_data : ReactionMTData or None
+        The MTR block (reaction numbers).
+    q_values : QValues or None
+        The LQR block (Q-value of each reaction).
+    particle_release : ParticleRelease or None
+        The TYR block (secondary-neutron multiplicity and frame of each reaction).
+    xs_locators : CrossSectionLocators or None
+        The LSIG block.
+    cross_section : CrossSectionData or None
+        The SIG block (reaction cross sections).
+    angular_locators : AngularDistributionLocators or None
+        The LAND block.
+    angular_distributions : AngularDistributionContainer or None
+        The AND block (angular distributions).
+    energy_distribution_locators : EnergyDistributionLocators or None
+        The LDLW block.
+    energy_distributions : EnergyDistributionContainer or None
+        The DLW block (energy laws).
+    photon_production_data : PhotonProductionData or None
+        The GPD block (total photon production).
+    photon_production_xs, particle_production_xs : object or None
+        The SIGP block: production cross sections or yields of photons and of other
+        particles.
+    photon_yield_multipliers, particle_yield_multipliers : object or None
+        The YP block, for photons and for other particles.
+    fission_xs : FissionCrossSection or None
+        The FIS block.
+    unresolved_resonance : UnresolvedResonanceTables or None
+        The UNR block (probability tables).
+    secondary_particle_types : SecondaryParticleTypes or None
+        The PTYPE block.
+    secondary_particle_reactions : SecondaryParticleReactions or None
+        The NTRO block.
+    secondary_particle_data_locations : SecondaryParticleDataLocators or None
+        The IXS block.
+    secondary_particle_cross_sections : SecondaryParticleCrossSections or None
+        The HPD block.
+    read_report : ReadReport or None
+        What the read could not take, or took with a caveat.
     """
     # Original filename
     filename: Optional[str] = None
@@ -85,12 +147,7 @@ class Ace:
     
     @property
     def zaid(self) -> int:
-        """
-        Get the ZAID (Z number, A number, isotope identifier) of the ACE file.
-        
-        :returns: ZAID as an integer
-        :rtype: int
-        """
+        """The ZAID of the header, or ``None`` when there is no header or no ZAID."""
         if self.header and self.header.zaid:
             return self.header.zaid
         return None
@@ -143,13 +200,13 @@ class Ace:
         return energies.copy(), sigma.copy()
 
     def copy(self) -> 'Ace':
-        """
-        Create an exact copy of the Ace object.
-        
-        Returns:
-        --------
+        """A deep copy of the table.
+
+        Returns
+        -------
         Ace
-            A new Ace object that is an exact copy of this one
+            A new table whose blocks are views of its own copy of ``xss_data``,
+            so changing the copy does not change this table.
         """
         import copy
         return copy.deepcopy(self)
@@ -190,11 +247,10 @@ class Ace:
     
     @property
     def mt_numbers(self) -> List[int]:
-        """
-        Get a list of all available MT numbers, including standard ones (total, elastic, absorption).
-        
-        :returns: List of MT numbers in ascending order
-        :rtype: List[int]
+        """The MT numbers of the table in ascending order, without repeats.
+
+        Always 1, 2 and 101 (whether or not the table states them), plus the
+        incident-neutron reactions of MTR.
         """
         mt_list = [1, 2, 101]  # Standard MT numbers (total, elastic, absorption)
         
@@ -208,42 +264,43 @@ class Ace:
     __repr__ = ace_repr
 
     def get_cross_section(self, reaction: Union[int, List[int], None] = None) -> pd.DataFrame:
-        """
-        Get cross section data for a specific reaction or list of reactions.
-        
-        This method provides a unified way to access all cross sections using MT numbers:
-        - MT=1: Total cross section
-        - MT=2: Elastic scattering cross section
-        - MT=101: Absorption cross section
-        - Other MT numbers: Reaction-specific cross sections
-        
-        Examples:
-        ---------
-        # Get total cross section (MT=1)
-        >>> xs = ace.get_cross_section(1)
-        
-        # Get cross sections for total, elastic, and fission (MT=18)
-        >>> xs = ace.get_cross_section([1, 2, 18])
-        
-        # Get all available cross sections
-        >>> all_xs = ace.get_cross_section()
-        
-        Parameters:
-        -----------
-        reaction : int or List[int], optional
-            MT number(s) of the reaction(s). If None, returns all available cross sections.
-                
-        Returns:
-        --------
-        pd.DataFrame
-            DataFrame with energies and cross sections
-        
-        Raises:
+        """The cross sections of some reactions on the energy grid of the table.
+
+        MT 1, 2 and 101 are the total, elastic and absorption columns of the ESZ
+        block; any other MT is a reaction of the SIG block.
+
+        Parameters
+        ----------
+        reaction : int or list of int, optional
+            MT number(s) of the reaction(s). If None, every MT of ``mt_numbers``
+            that the table can supply; one that cannot is left out silently.
+
+        Returns
         -------
+        pandas.DataFrame
+            A column ``"Energy"`` with the ESZ grid in MeV, then one column
+            ``"MT=<n>"`` per reaction in the order asked, with the cross section
+            in barns at every grid point. A reaction that starts above the first grid
+            point is zero below it.
+
+        Raises
+        ------
         ValueError
-            If the requested reaction is not available in the data
+            If there is no energy grid, or (when ``reaction`` is given) a requested
+            reaction is not available or its data does not fit the grid.
         TypeError
             If reaction is not an integer or list of integers
+
+        Examples
+        --------
+        # Get total cross section (MT=1)
+        >>> xs = ace.get_cross_section(1)
+
+        # Get cross sections for total, elastic, and fission (MT=18)
+        >>> xs = ace.get_cross_section([1, 2, 18])
+
+        # Get all available cross sections
+        >>> all_xs = ace.get_cross_section()
         """
         
         # If reaction is None, get all available cross sections
@@ -332,40 +389,44 @@ class Ace:
 
     def plot_cross_section(self, reactions=None, energies=None, ax=None, **kwargs):
         """
-        Plot cross sections for specified reactions.
-        
-        Examples:
-        ---------
-        # Plot total, elastic, and fission cross sections
-        >>> ace.plot_cross_section([1, 2, 18])
-        
-        # Plot with custom styling
-        >>> ace.plot_cross_section([1, 2], linewidth=2, color=['blue', 'red'])
-        
-        # Plot on an existing axis
-        >>> fig, ax = plt.subplots()
-        >>> ace.plot_cross_section([18], ax=ax)
-        
-        Parameters:
-        -----------
+        Plot cross sections against energy on log-log axes.
+
+        Energy is in MeV and the cross section in barns, each reaction over the
+        whole ESZ grid (see :meth:`get_cross_section`).
+
+        Parameters
+        ----------
         reactions : int or list of int, optional
             MT number(s) to plot. Default is [1, 2, 101] (total, elastic, absorption)
         energies : list, optional
-            Energy range to plot, default is the full energy grid
+            Not used: the plot always covers the full energy grid.
         ax : matplotlib.axes.Axes, optional
             Axes to plot on, if None a new figure is created
-        **kwargs : dict
-            Additional keyword arguments passed to plot function
-            
-        Returns:
-        --------
+        **kwargs
+            Passed to ``ax.plot`` for every reaction.
+
+        Returns
+        -------
         matplotlib.axes.Axes
             The matplotlib axes containing the plot
-        
-        Raises:
-        -------
+
+        Raises
+        ------
         ValueError
-            If any of the requested cross sections are not available
+            If any of the requested cross sections are not available. Diagnostic
+            lines are printed before it is raised.
+
+        Examples
+        --------
+        # Plot total, elastic, and fission cross sections
+        >>> ace.plot_cross_section([1, 2, 18])
+
+        # Plot with custom styling
+        >>> ace.plot_cross_section([1, 2], linewidth=2, color=['blue', 'red'])
+
+        # Plot on an existing axis
+        >>> fig, ax = plt.subplots()
+        >>> ace.plot_cross_section([18], ax=ax)
         """
         
         if ax is None:
@@ -413,6 +474,23 @@ class Ace:
     
 
     def update_cross_sections(self):
+        """Rewrite the redundant cross sections as the sums of their components.
+
+        The totals are rebuilt in the order MT 103-107 (from the levels 600-649 up to
+        800-849), 101 (from 102-117), 18 (from 19, 20, 21, 38), 4 (from 50-91), 3,
+        and finally MT 1 as MT 2 + MT 3 + MT 101. A total that the table stores is
+        overwritten in place in the XSS only when at least one of its components is
+        there (stored, or itself rebuilt); otherwise it is left as it is. Sums are
+        taken energy by energy on the exact energies of the total's own grid: a
+        point of the total with no component at that energy becomes 0.0. Units are
+        unchanged (barns). Returns ``None``; the change is in ``xss_data``, so
+        :func:`~kika.ace.writers.write_ace.write_ace` writes it.
+
+        Raises
+        ------
+        RuntimeError
+            If the table has no MT 1.
+        """
         cs = self.cross_section.reaction
 
         # ----------------------------------------------------------------------------
@@ -515,7 +593,7 @@ class Ace:
     def to_plot_data(self, data_type: str, mt: int, **kwargs):
         """
         Extract plot data from ACE file in a format compatible with PlotBuilder.
-        
+
         Parameters
         ----------
         data_type : str
@@ -524,14 +602,31 @@ class Ace:
             MT reaction number
         **kwargs
             Additional parameters:
-            - For angular distributions: 'energy' (incident energy in MeV)
-            - For styling: 'label', 'color', 'linestyle', etc.
-            
+
+            - For angular distributions: 'energy' (incident energy in MeV, required),
+              and the options of the angular-distribution table: 'particle_type'
+              ('neutron'), 'particle_idx' (0), 'num_points' (100), 'interpolate'
+              (True), 'normalize_to_xs' (False), 'cross_section_unit' ('b'),
+              'energy_folding' (False), 'tof' ((27.037, 5.0))
+            - For styling: 'label', 'color', 'linestyle' ('-'), 'linewidth',
+              'marker', 'markersize'. Without 'label' one is made from the ZAID,
+              the MT and, for angles, the energy.
+
         Returns
         -------
-        PlotData
-            PlotData object compatible with PlotBuilder
-            
+        ~kika.plotting.PlotData
+            A line. For a cross section, x is the energy in MeV and y the cross
+            section in barns on the reaction's own energies. For an angular
+            distribution, x is the cosine and y the distribution at ``energy``.
+
+        Raises
+        ------
+        ValueError
+            If ``data_type`` is not one of the four names above, or the table has
+            no cross section (or no angular distribution) data for ``mt``, or
+            ``energy`` is missing for an angular distribution or no distribution
+            can be extracted at it.
+
         Examples
         --------
         >>> ace = kika.read_ace('fe56.ace')

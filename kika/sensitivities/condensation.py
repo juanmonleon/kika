@@ -16,7 +16,33 @@ class CondensationError(ValueError):
 
 @dataclass(frozen=True)
 class CondensationReport:
-    """Diagnostics and assumptions for one exact condensation operation."""
+    """What one condensation did: the grids, the matched boundaries and the assumptions.
+
+    The ``report`` of a :class:`CondensationResult`.
+
+    Attributes
+    ----------
+    source_groups, target_groups : int
+        Number of groups before and after.
+    source_energy_grid, target_energy_grid : tuple of float
+        The boundaries of the two grids, in their own units, ascending.
+    source_energy_unit, target_energy_unit : {"eV", "MeV"}
+        Units of those grids.
+    boundary_indices : tuple of int
+        For each target boundary, the index of the matching source boundary:
+        ``target_groups + 1`` strictly increasing indices. Target group ``k`` sums the
+        source groups ``boundary_indices[k]`` up to ``boundary_indices[k + 1] - 1``.
+    energy_rtol : float
+        Relative tolerance with which boundaries were taken as equal.
+    uncertainty_method : str
+        ``"independent source-group quadrature"`` when any profile had an uncertainty,
+        otherwise ``"not available"``.
+    assumptions : tuple of str
+        The statistical assumption made, empty when no profile had an uncertainty.
+    max_integral_drift : float
+        Largest absolute difference, over the profiles, between the sum of the
+        condensed values and the sum of the source values. Zero up to rounding.
+    """
 
     source_groups: int
     target_groups: int
@@ -33,7 +59,22 @@ class CondensationReport:
 
 @dataclass(frozen=True)
 class CondensationResult:
-    """A condensed profile together with its operator and diagnostics."""
+    """A condensed profile with the matrix and the report that produced it.
+
+    Returned by
+    :func:`~kika.sensitivities.condensation.condense_sensitivity_profile`.
+
+    Attributes
+    ----------
+    profile : SensitivityProfile
+        The condensed profile, on the target grid.
+    operator : numpy.ndarray
+        Matrix of shape ``(target_groups, source_groups)`` with entries 1 where a
+        source group lies in a target group and 0 elsewhere. The condensed
+        sensitivities of a profile are ``operator @ sensitivity``.
+    report : CondensationReport
+        What was done.
+    """
 
     profile: SensitivityProfile
     operator: np.ndarray
@@ -142,18 +183,42 @@ def condense_sensitivity_profile(
     range and every target boundary must be present in the source grid after
     explicit unit conversion. Non-nested grid projection is not performed.
 
+    There is no weight: no flux or lethargy enters, and nothing is averaged. A target
+    group's sensitivity is the plain sum of its source groups' and its uncertainty is
+    the square root of the sum of their squared uncertainties. A profile without an
+    uncertainty keeps None. The response, its uncertainty and the label are copied; the
+    metadata of the result gains an entry in ``"condensation_history"``.
+
     Parameters
     ----------
     profile
-        Validated, format-neutral source profile.
+        The source profile.
     target_grid
-        Ascending boundaries for the coarser output grid.
-    target_energy_unit
-        Unit of ``target_grid`` and of the returned profile. Defaults to the
-        source profile unit.
+        Boundaries of the coarser grid, strictly ascending, in *target_energy_unit*.
+    target_energy_unit : {"eV", "MeV"}, optional
+        Unit of ``target_grid`` and of the returned profile. None is the unit of
+        *profile*.
     energy_rtol
-        Relative tolerance used only to identify physically equal boundaries.
-        The default covers the six-digit boundary rounding used by DICE SDFs.
+        Relative tolerance (no absolute one) with which a target boundary is taken as
+        equal to a source boundary, after both are put in MeV. The default covers the
+        rounding of the boundaries that an SDF file keeps (six decimals).
+
+    Returns
+    -------
+    CondensationResult
+        The condensed profile, the 0/1 operator and the report.
+
+    Raises
+    ------
+    TypeError
+        If *profile* is not a
+        :class:`~kika.sensitivities.profile.SensitivityProfile`.
+    CondensationError
+        If *target_grid* is not a one-dimensional strictly increasing grid of at
+        least two finite, non-negative values; *target_energy_unit* is not ``"eV"`` or
+        ``"MeV"``; *energy_rtol* is negative or not finite; the end points of the
+        target grid are not those of the source; or a target boundary is not a source
+        boundary.
     """
     if not isinstance(profile, SensitivityProfile):
         raise TypeError("profile must be a SensitivityProfile")

@@ -66,12 +66,24 @@ class ResultsFile:
 
     @property
     def n_variables(self) -> int:
+        """Number of variables read from the file."""
         return len(self.variables)
 
     # ── Utility methods ─────────────────────────────────────────────────
 
     def get_variable(self, name: str) -> Optional[np.ndarray]:
-        """Get a variable by name, or ``None`` if absent."""
+        """Get a variable by name, or ``None`` if absent.
+
+        Parameters
+        ----------
+        name : str
+            Variable name as written in the file, upper case (``"ANA_KEFF"``).
+
+        Returns
+        -------
+        numpy.ndarray or None
+            Shape ``(n_burnup_steps, n_values)``, one row per occurrence in the file.
+        """
         return self.variables.get(name)
 
     def get_mean_error_pairs(
@@ -79,11 +91,18 @@ class ResultsFile:
     ) -> Optional[Tuple[np.ndarray, np.ndarray]]:
         """Split interleaved ``[mean, err, mean, err, ...]`` columns.
 
+        Parameters
+        ----------
+        name : str
+            Variable name as written in the file, upper case.
+
         Returns
         -------
         (means, errors) : tuple of ndarray
             ``means`` has shape ``(n_steps, n_values/2)``,
-            ``errors`` has shape ``(n_steps, n_values/2)``.
+            ``errors`` has shape ``(n_steps, n_values/2)``. The even columns are
+            taken as means and the odd ones as errors, without checking; Serpent's
+            convention is a relative error after each mean.
             Returns ``None`` if the variable is absent or has odd column count.
         """
         arr = self.variables.get(name)
@@ -99,7 +118,19 @@ class ResultsFile:
         return means, errors
 
     def get_last_step(self, name: str) -> Optional[np.ndarray]:
-        """Get the values from the last burnup step for a variable."""
+        """Get the values from the last burnup step for a variable.
+
+        Parameters
+        ----------
+        name : str
+            Variable name as written in the file, upper case.
+
+        Returns
+        -------
+        numpy.ndarray or None
+            The last row of the variable, shape ``(n_values,)``; None if the variable
+            is absent.
+        """
         arr = self.variables.get(name)
         if arr is None:
             return None

@@ -23,18 +23,31 @@ def read_exfor(filepath: str) -> "ExforAngularDistribution":
     """
     Read an EXFOR angular distribution from a JSON file.
 
-    This is the primary function for loading EXFOR data in kika. It supports
-    both the standardized v1.0 schema and legacy formats.
+    The file is read whatever its ``quantity`` field says, as an angular
+    distribution. Both the standardised v1.0 schema and the older one (reaction
+    given as a string, energies under ``E``, points under ``result``) are read. The
+    frame, units and values are kept as the file gives them, with no conversion.
 
-    Parameters:
-        filepath: Path to the JSON file
+    Parameters
+    ----------
+    filepath : str
+        Path to the JSON file.
 
-    Returns:
-        ExforAngularDistribution object
+    Returns
+    -------
+    ExforAngularDistribution
+        The distribution, in the ``angle_frame`` and ``units`` of the file. On it,
+        ``sigma_sys_scalar_relative`` and ``sigma_sys_indep_relative`` are set to
+        0.0 and ``uncertainty_manifest_flag`` to ``"default"``: reading a file
+        applies no systematic uncertainty.
 
-    Raises:
-        FileNotFoundError: If the file doesn't exist
-        ValueError: If the file format is invalid
+    Raises
+    ------
+    FileNotFoundError
+        If *filepath* does not exist.
+    ValueError
+        If the file is not valid JSON. A valid file with missing or unexpected
+        fields may raise other errors.
 
     Example:
         >>> from kika.exfor import read_exfor
@@ -82,59 +95,95 @@ def read_all_exfor(
     target_zaid: Union[int, List[int]] = None,
 ) -> Union[Dict[float, List], Dict[str, "ExforAngularDistribution"], Tuple[Dict, Dict]]:
     """
-    Read EXFOR angular distribution data.
+    Read EXFOR angular distributions from the X4Pro database, JSON files, or both.
 
-    This is the main function for loading EXFOR experimental data. By default,
-    it loads from the X4Pro database (189k+ datasets). You can also load from
-    your own curated JSON files.
+    From the database only angular distributions are read (quantity ``DA``, ENDF
+    file MF 4); JSON files are read as angular distributions whatever their
+    quantity. A dataset is identified by its entry and subentry numbers joined (``"27673002"``).
+    When two sources give the same identifier, the first one read is kept, in the
+    order database, JSON directory, supplementary files.
 
     Parameters
     ----------
-    target : str, int, List[str], or List[int], optional
-        Target isotope(s). Accepts multiple formats:
-        - "Fe56" (symbol + mass)
-        - 26056 (ZAID)
-        - "Fe-56" (database format)
-        - "26-FE-56" (EXFOR notation)
-        - [26056, 26000] (list of ZAIDs for multiple targets)
-        - ["Fe-56", "Fe-0"] (list of targets)
+    target : str, int, list of str or list of int, optional
+        Target nucleus, or a list of them: ``"Fe56"``, ``"Fe-56"``, ``"26-FE-56"``,
+        a ZAID such as ``26056`` (``26000`` is natural iron), or a bare symbol
+        such as ``"Fe"``, which is natural iron. It selects database datasets
+        only; None applies no target filter. JSON files are never filtered by it.
     mt : int, optional
-        ENDF MT number (e.g., 2 for elastic scattering)
-    source : str, optional
-        Data source (default: "database"):
-        - "database": Load from X4Pro database
-        - "json": Load from JSON files only
-        - "auto": Database with JSON fallback
+        ENDF MT number to select in the database (2 for elastic scattering). None
+        applies no MT filter. Not used for JSON files.
+    source : {"database", "json", "auto", "both"}
+        Where to read, case-insensitive. ``"database"`` reads the X4Pro database
+        and raises if it cannot. ``"json"`` reads the files of *directory* only.
+        ``"auto"`` and ``"both"`` behave the same: the database first, then the
+        files of *directory* if one is given. If the database is missing or its
+        query fails, a warning is printed and the JSON files are used.
     directory : str, optional
-        Path to JSON files (required if source="json")
-    group_by_energy : bool, optional
-        If True (default), group by energy. If False, return dict by ID.
+        Directory of JSON files. If it holds no ``.json`` file, its ``data``
+        subdirectory is tried, then the ``data`` subdirectory of its parent. Only
+        read for ``"json"``, ``"auto"`` and ``"both"``; with ``"json"`` and no
+        directory nothing is read from it, and the call raises unless
+        *supplementary_json_files* loaded something.
+    pattern : str
+        Glob pattern of the files in *directory*.
+    group_by_energy : bool
+        If True, key the result by incident energy. If False, key it by dataset
+        identifier.
     db_path : str, optional
-        Path to X4Pro database (uses default if None)
-    projectile : str, optional
-        Projectile (default: "n" for neutrons)
-    energy_range : Tuple[float, float], optional
-        Energy range (min, max) in MeV
-    supplementary_json_files : List[str], optional
-        List of additional JSON file paths to load. Useful for loading
-        experiments not yet in the database (e.g., recent publications).
-        These are loaded after the main source and deduplicated by ID.
-    return_load_status : bool, optional
-        If True, return a tuple of (data, supplementary_status) where
-        supplementary_status is a dict with 'loaded', 'failed', and 'skipped'
-        lists. Useful for logging which supplementary files were processed.
-    exclude_experiments : List[str], optional
-        List of experiments to exclude from loading. Accepts multiple formats:
-        - "20743" - excludes all subentries starting with 20743
-        - "20743002" - excludes specific dataset
-        - "20743/002" - same as above
+        Path of the X4Pro database. Defaults to the one set with
+        :func:`~kika.exfor.configure`, then to the ``KIKA_X4PRO_DB_PATH``
+        environment variable.
+    projectile : str
+        Projectile, selected in the database (``"n"`` for neutrons). Not used for
+        JSON files.
+    energy_range : tuple of float, optional
+        ``(minimum, maximum)`` incident energy in MeV. A database dataset is kept
+        when its energy span overlaps this window, and it is kept whole: its
+        points outside the window stay. Datasets with no energies are dropped.
+        Not used for JSON files or supplementary files.
+    supplementary_json_files : list of str, optional
+        JSON files to add after the main source, for experiments the database
+        lacks. A file whose identifier is already loaded is skipped, and a
+        file that is missing or cannot be read is recorded as failed without
+        raising.
+    return_load_status : bool
+        If True, also return the status of *supplementary_json_files*.
+    exclude_experiments : list of str, optional
+        Experiments to drop from everything read, supplementary files included.
+        ``"20743"`` (up to five characters) drops every subentry of entry 20743;
+        ``"20743002"`` and ``"20743/002"`` drop one subentry. The last form joins
+        the two parts as written, so ``"20743/2"`` does not match ``"20743002"``.
+    target_zaid : int or list of int, optional
+        Same as *target*, and used only when *target* is None.
 
     Returns
     -------
-    Dict[float, List[ExforAngularDistribution]] or Tuple
-        Dictionary mapping energy (MeV) to list of datasets.
-        If group_by_energy=False: Dict mapping ID to dataset.
-        If return_load_status=True: Tuple of (data, supplementary_status).
+    dict
+        With ``group_by_energy=True``, a dict from incident energy in MeV to the
+        list of :class:`~kika.exfor.ExforAngularDistribution` that have a point
+        at that energy. Energies within 1e-6 MeV of each other share the key of
+        the first one met, and keys are not sorted. A dataset with several
+        energies is listed under each of them and keeps all its energies. With
+        ``group_by_energy=False``, a dict from dataset identifier to the
+        distribution. The distributions keep the frame and units of their
+        source: database data is in MeV and b/sr.
+
+        With ``return_load_status=True`` a tuple ``(data, status)``. *status* is a
+        dict with the lists ``"loaded"`` (entries ``file``, ``id``, ``label``,
+        ``n_energies``), ``"skipped"`` (``file``, ``id``, ``reason``) and
+        ``"failed"`` (``file``, ``error``). It covers the supplementary files
+        only. Files of *directory* that cannot be read are printed as warnings.
+
+    Raises
+    ------
+    ValueError
+        If *source* is not one of the four values.
+    FileNotFoundError
+        If nothing was read from any source, if *exclude_experiments* removed
+        everything, if ``source="database"`` and the database path is missing or
+        wrong, or if ``source="json"`` and *directory* holds no file matching
+        *pattern*.
 
     Examples
     --------

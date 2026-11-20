@@ -115,6 +115,19 @@ class Double:
     """
     GNDS §4.1.1. One number with a unit, and optionally its uncertainty.
 
+    Attributes
+    ----------
+    label : str or None
+        The label the entry gives it, if any.
+    value : float
+        As the file states it, in :attr:`unit`; NaN when the file gives none.
+    unit : str
+        The unit string as published; kika does not convert it.
+    uncertainty : Uncertainty or None
+        The ``uncertainty`` child of the entry, if any: its ``standard``
+        value, in the unit of :attr:`value`, and its confidence intervals as
+        ``(confidence, lower, upper)`` tuples.
+
     Examples
     --------
     >>> b["sourceStrength"].content.result.value        # doctest: +SKIP
@@ -182,7 +195,19 @@ def read_doubles(parent: ET.Element) -> Dict[str, Any]:
 
 @dataclass(frozen=True)
 class Axis:
-    """GNDS §5.1.2. An index, a label and a unit. Index 0 is the dependent axis."""
+    """
+    GNDS §5.1.2. An index, a label and a unit. Index 0 is the dependent axis.
+
+    Attributes
+    ----------
+    index : int
+        The axis number; 0 is the dependent axis, the one the array's values
+        are along.
+    label : str
+        The name the file gives the axis, e.g. ``"energy"``.
+    unit : str
+        The unit string as published; kika does not convert it.
+    """
 
     index: int
     label: str = ""
@@ -208,9 +233,19 @@ class Grid(Axis):
 
     Attributes
     ----------
+    index : int
+        The axis number, as for an axis; a grid is an independent axis.
+    label : str
+        The name the file gives the grid, e.g. ``"energy"``.
+    unit : str
+        The unit of :attr:`values`, as published; kika does not convert it.
     values : numpy.ndarray
+        The abscissae or boundaries, in the order the file gives them (not
+        sorted).
     style : str
+        ``"none"`` when the file gives no style.
     interpolation : str or None
+        As the file writes it, e.g. ``"lin-lin"``.
     """
 
     values: np.ndarray = field(default_factory=lambda: np.array([]))
@@ -257,6 +292,12 @@ class Axes:
 
     Look-up is by ``index``, never by position -- the specification's own
     examples list them highest first.
+
+    Attributes
+    ----------
+    axes : list of Axis
+        The axes in the order of the file; a :class:`~kika.sinbad.Grid` for an
+        independent axis that carries values.
     """
 
     axes: List[Axis] = field(default_factory=list)
@@ -300,6 +341,24 @@ class Axes:
         )
 
     def by_label(self, label: str) -> Axis:
+        """
+        The first axis whose label is *label*.
+
+        Parameters
+        ----------
+        label : str
+            The axis label, matched exactly.
+
+        Returns
+        -------
+        Axis
+            The axis, a :class:`~kika.sinbad.Grid` when it carries values.
+
+        Raises
+        ------
+        KeyError
+            If no axis carries it.
+        """
         for axis in self.axes:
             if axis.label == label:
                 return axis
@@ -323,7 +382,21 @@ class Content:
     tag: str = ""
 
     def to_dataframe(self):
-        """Return the content as a :class:`pandas.DataFrame`."""
+        """
+        Return the content as a ``pandas.DataFrame``; the base class has none.
+
+        Returns
+        -------
+        pandas.DataFrame
+            What a container with a table form returns; see its own
+            ``to_dataframe``.
+
+        Raises
+        ------
+        ContentTypeError
+            Always, for a container with no single table form (an unmodelled
+            tag, a polynomial, a functional form).
+        """
         raise ContentTypeError(
             f"{type(self).__name__} has no single table form; "
             f"read its attributes instead"
@@ -407,9 +480,18 @@ class Table(Content):
     ``position`` -- which is what makes two tables from different files
     comparable without an index.
 
+    Cells are read as the file states them, in the unit each column declares
+    (:meth:`units`). A blank or missing cell is NaN; a column whose ``types``
+    says text keeps its cells as strings.
+
+    Parameters
+    ----------
+    element : xml.etree.ElementTree.Element
+        The ``table`` element.
+
     Examples
     --------
-    >>> t = b["reactionRate-S32"].table                  # doctest: +SKIP
+    >>> t = b["reactionRate-S32"].table                 # doctest: +SKIP
     >>> t["reactionRate"][:2]                            # doctest: +SKIP
     array([2.02e-17, 4.29e-18])
     >>> t.to_dataframe().head(2)                         # doctest: +SKIP
@@ -440,6 +522,7 @@ class Table(Content):
 
     @property
     def nrows(self) -> int:
+        """The number of rows, blank-valued ones included."""
         return len(self._rows)
 
     def __len__(self) -> int:
@@ -458,7 +541,24 @@ class Table(Content):
             ) from None
 
     def column(self, name: str) -> Column:
-        """The header of one column."""
+        """
+        The header of one column.
+
+        Parameters
+        ----------
+        name : str
+            The column name, matched exactly.
+
+        Returns
+        -------
+        Column
+            Its role, unit, kind and the other attributes of the header.
+
+        Raises
+        ------
+        KeyError
+            If the table has no such column.
+        """
         for candidate in self.columns:
             if candidate.name == name:
                 return candidate
@@ -467,19 +567,36 @@ class Table(Content):
     # -- roles ------------------------------------------------------------
 
     def by_role(self, role: str) -> List[Column]:
-        """Every column with this role."""
+        """
+        Every column with this role.
+
+        Parameters
+        ----------
+        role : str
+            ``independent``, ``value`` or ``uncertainty``, matched exactly
+            against the role the file declares (``value`` when it declares
+            none).
+
+        Returns
+        -------
+        list of Column
+            In the order of the file; empty when there is none.
+        """
         return [c for c in self.columns if c.role == role]
 
     @property
     def independent(self) -> List[Column]:
+        """The columns of role ``independent``, in file order."""
         return self.by_role("independent")
 
     @property
     def value_columns(self) -> List[Column]:
+        """The columns of role ``value``, in file order."""
         return self.by_role("value")
 
     @property
     def uncertainty_columns(self) -> List[Column]:
+        """The columns of role ``uncertainty``, in file order."""
         return self.by_role("uncertainty")
 
     @property
@@ -516,10 +633,18 @@ class Table(Content):
 
     def to_dataframe(self):
         """
-        The table as a :class:`pandas.DataFrame`, columns in document order.
+        The table as a ``pandas.DataFrame``, columns in document order.
 
-        Units are not in the column names; they are in :attr:`columns`, and
-        :meth:`units` gives them as a mapping.
+        Values are as the file states them: nothing is converted and the frame
+        has no unit. Units are not in the column names; they are in the
+        ``columns`` headers, and :meth:`units` gives them as a mapping.
+
+        Returns
+        -------
+        pandas.DataFrame
+            One row per row of the table and one column per column, named as the
+            file names it. Numeric columns are float (NaN for a blank cell);
+            text columns hold strings.
         """
         pd = _pandas()
         return pd.DataFrame({c.name: self._cells[c.name] for c in self.columns})
@@ -544,6 +669,24 @@ class Gridded(Content):
     §2.5: the array is row-major with the **highest** grid index first, so for
     a ``gridded2d`` with grids 2 and 1, ``values[i, j]`` is grid-2 cell ``i``
     and grid-1 cell ``j``.
+
+    ``values`` has the shape the file declares. When the stored values do not fill
+    that shape (a symmetric array stores one triangle), ``values`` is left flat.
+    The unit of the values is :attr:`unit`; kika does
+    not convert it.
+
+    Parameters
+    ----------
+    element : xml.etree.ElementTree.Element
+        The ``gridded1d``, ``gridded2d`` or ``gridded3d`` element.
+    index
+        The ``LabelIndex`` of the open files, used to follow a ``link`` that
+        stands for the values of a grid. Optional.
+
+    Raises
+    ------
+    SinbadFormatError
+        If the element holds no ``array``.
 
     Examples
     --------
@@ -572,6 +715,7 @@ class Gridded(Content):
 
     @property
     def ndim(self) -> int:
+        """The number of dimensions of the declared shape."""
         return len(self.shape)
 
     @property
@@ -580,7 +724,26 @@ class Gridded(Content):
         return self.axes.dependent.unit
 
     def grid(self, which) -> Grid:
-        """One grid, by label (``"energy"``) or by index (``1``)."""
+        """
+        One grid, by label (``"energy"``) or by index (``1``).
+
+        Parameters
+        ----------
+        which : str or int
+            The label of the axis, or its ``index``.
+
+        Returns
+        -------
+        Grid
+            The grid, with the values it carries.
+
+        Raises
+        ------
+        ContentTypeError
+            If that axis carries no values (it is a plain axis).
+        KeyError
+            If no axis has that index or label.
+        """
         if isinstance(which, int):
             axis = self.axes[which]
         else:
@@ -595,7 +758,18 @@ class Gridded(Content):
 
         For a 1-D array this is the natural table. For 2-D and 3-D it is the
         long form -- one row per cell, which is what a plot or a group-by
-        wants; :attr:`values` is there when the matrix itself is.
+        wants; ``values`` is there when the matrix itself is.
+
+        Returns
+        -------
+        pandas.DataFrame
+            One column per grid, highest index first (named by the grid label,
+            or ``axis<index>``), holding the grid centers (mid-points for a
+            ``boundaries`` grid, the values otherwise), then the value column
+            named by the label of the dependent axis (``"value"`` when it has
+            none). Values are as the file states them, in :attr:`unit`; the
+            frame carries no unit. With no grid, one column of the flattened
+            values.
         """
         pd = _pandas()
         grids = self.axes.independent  # highest index first, as the array is laid out
@@ -609,13 +783,22 @@ class Gridded(Content):
 
     def to_gnds(self):
         """
-        The same array as :mod:`kika.nuclear_data.model` objects.
+        The same array as ``kika.nuclear_data.model`` objects.
 
-        Returns a ``(Axes, ndarray)`` pair built with the model's own
-        :class:`~kika.nuclear_data.model.Axes`, :class:`~kika.nuclear_data.model.Grid`
-        and :class:`~kika.nuclear_data.model.Axis`, so a SINBAD group structure
-        or spectrum can be handed to code that speaks GNDS. The import happens
-        here, not at module scope; see :mod:`kika.sinbad.gnds`.
+        The axes are built with the model's own ``Axes``, ``Grid`` and ``Axis``,
+        so a SINBAD group structure or spectrum can be handed to code that speaks
+        GNDS. The import happens here, not at module scope. A unit string the
+        model's parser does not accept is dropped from the model axis (it becomes
+        ``""``); the published string stays on this object, and
+        ``kika.sinbad.gnds.check_units`` lists every such unit of a benchmark.
+
+        Returns
+        -------
+        tuple
+            ``(axes, values)``: the ``kika.nuclear_data.model.Axes`` of the array
+            (grids keep their values, labels and units; index 0 stays the
+            dependent axis), and ``values`` as stored, in the unit of the
+            dependent axis. kika converts nothing.
         """
         from kika.sinbad.gnds import to_model_axes  # noqa: PLC0415
 
@@ -627,7 +810,17 @@ class Gridded(Content):
 
 
 class GridContent(Content):
-    """A bare ``grid`` as the whole content -- an energy group structure (§2.2)."""
+    """
+    A bare ``grid`` as the whole content -- an energy group structure (§2.2).
+
+    Parameters
+    ----------
+    element : xml.etree.ElementTree.Element
+        The ``grid`` element.
+    index
+        The ``LabelIndex`` of the open files, used to follow a ``link`` that
+        stands for the values. Optional.
+    """
 
     tag = "grid"
 
@@ -636,10 +829,12 @@ class GridContent(Content):
 
     @property
     def values(self) -> np.ndarray:
+        """The values of the grid, in the order the file gives them."""
         return self.grid.values
 
     @property
     def unit(self) -> str:
+        """The unit of the values, as the file declares it; kika does not convert it."""
         return self.grid.unit
 
     @property
@@ -648,6 +843,18 @@ class GridContent(Content):
         return self.grid.size
 
     def to_dataframe(self):
+        """
+        The grid as a ``pandas.DataFrame``, in the unit of the grid.
+
+        Returns
+        -------
+        pandas.DataFrame
+            For a ``boundaries`` grid, one row per group with ``group`` (from 1,
+            in the order of the file's boundaries), ``lower`` and ``upper``;
+            descending boundaries are put the right way round. For any other
+            style, one column named by the grid label (``"value"`` if none) with
+            the values. The frame carries no unit; see :attr:`unit`.
+        """
         pd = _pandas()
         if self.grid.style == "boundaries" and self.grid.size:
             return pd.DataFrame({
@@ -667,7 +874,21 @@ class GridContent(Content):
 
 
 class XYs1d(Content):
-    """GNDS §6.1.1. A tabulated function, as interleaved x,y pairs."""
+    """
+    GNDS §6.1.1. A tabulated function, as interleaved x,y pairs.
+
+    The file's values are split into ``x`` (the even positions) and ``y`` (the
+    odd ones), in the units of the axes; kika converts nothing. ``interpolation``
+    is the file's string, ``"lin-lin"`` when it gives none.
+
+    Parameters
+    ----------
+    element : xml.etree.ElementTree.Element
+        The ``XYs1d`` element.
+    index
+        The ``LabelIndex`` of the open files, used to follow a ``link`` that
+        stands for the values. Optional.
+    """
 
     tag = "XYs1d"
 
@@ -679,6 +900,16 @@ class XYs1d(Content):
         self.y = flat[1::2]
 
     def to_dataframe(self):
+        """
+        The points as a ``pandas.DataFrame`` of two columns, ``x`` then ``y``.
+
+        Returns
+        -------
+        pandas.DataFrame
+            The columns are named by the labels of axis 1 and of the dependent
+            axis (``"x"`` and ``"y"`` when the file gives no label). The frame
+            carries no unit; see the axes.
+        """
         pd = _pandas()
         xlabel = self.axes[1].label if len(self.axes) > 1 else "x"
         ylabel = self.axes.dependent.label if len(self.axes) else "y"
@@ -689,7 +920,21 @@ class XYs1d(Content):
 
 
 class Polynomial1d(Content):
-    """GNDS §6.2.2. Coefficients, lowest order first, over a domain."""
+    """
+    GNDS §6.2.2. Coefficients, lowest order first, over a domain.
+
+    Calling the object evaluates the polynomial at ``x``. ``domain_min`` and
+    ``domain_max`` are the file's limits (NaN when absent); the evaluation does
+    not check them.
+
+    Parameters
+    ----------
+    element : xml.etree.ElementTree.Element
+        The ``polynomial1d`` element.
+    index
+        The ``LabelIndex`` of the open files, used to follow a ``link`` that
+        stands for the coefficients. Optional.
+    """
 
     tag = "polynomial1d"
 
@@ -725,13 +970,25 @@ class Material:
     """
     SFCOMPO ``MaterialType``. A density and a composition.
 
+    Several kika packages define a ``Material``; this one is the SINBAD reader's
+    record of what the file states, with nothing converted.
+
     Attributes
     ----------
     name : str
     density, density_unit : float, str
-    nuclides : tuple of Nuclide
+        The density as the file states it, with the unit it declares; NaN and
+        ``""`` when the file gives none.
+    nuclides : tuple of ``Nuclide``
+        One ``Nuclide`` per line of the file's csv block that has at least two
+        fields (other lines are skipped): its ``name`` as written (in
+        ``nuclide_format``) and its ``amount``, a float in ``units``.
     units : str
         What the amounts are -- ``weight fraction``, ``atom fraction``, ...
+        ``""`` when the file gives none.
+    nuclide_format : str
+        How the nuclide names are written, as the file's ``nuclideFormat``;
+        ``"ZA"`` when it gives none.
     """
 
     name: str
@@ -774,7 +1031,18 @@ class Material:
 
 
 class Materials(Content):
-    """SFCOMPO ``MaterialsType``. The materials of the assembly, by name."""
+    """
+    SFCOMPO ``MaterialsType``. The materials of the assembly, by name.
+
+    Iterating gives the ``kika.sinbad.Material`` records in file order;
+    indexing by name gives one. Two materials with the same name collapse into
+    the last one.
+
+    Parameters
+    ----------
+    element : xml.etree.ElementTree.Element
+        The ``materials`` element.
+    """
 
     tag = "materials"
 
@@ -802,10 +1070,20 @@ class Materials(Content):
 
     @property
     def names(self) -> List[str]:
+        """The material names, in file order."""
         return list(self.materials)
 
     def to_dataframe(self):
-        """One row per nuclide: material, density, nuclide, amount."""
+        """
+        One row per nuclide: material, density, nuclide, amount.
+
+        Returns
+        -------
+        pandas.DataFrame
+            Columns ``material``, ``density``, ``density_unit``, ``nuclide``,
+            ``amount`` and ``units``, as the file states them (nothing is
+            converted). A material with no nuclide has no row.
+        """
         pd = _pandas()
         rows = [
             {
@@ -823,11 +1101,27 @@ class Materials(Content):
 
     def to_kika_materials(self):
         """
-        The same compositions as :class:`kika.materials.MaterialCollection`.
+        The same compositions as a ``kika.materials.MaterialCollection``.
 
         kika already models a material as a density plus weight or atom
         fractions, and everything downstream -- MCNP cards, ACE look-ups --
-        speaks that. The import is deferred to call time.
+        speaks that. The import is deferred to call time. Materials are
+        numbered from 1 in file order. A natural element written with a mass
+        number of 0 (``Fe0``) becomes the element (``Fe``); amounts whose
+        ``units`` contain ``weight`` become weight fractions and those that
+        contain ``atom`` atom fractions. A density in ``g/cm**3`` or ``g/cc``
+        is passed as ``g/cc``, any other unit unchanged and unconverted.
+
+        Returns
+        -------
+        kika.materials.MaterialCollection
+            One material per entry of this object.
+
+        Raises
+        ------
+        SinbadError
+            If the ``units`` of a material say neither weight nor atom
+            fractions.
         """
         from kika.sinbad.gnds import to_kika_materials  # noqa: PLC0415
 
@@ -903,6 +1197,16 @@ class Geometry(Content):
     """
     SFCOMPO ``GeometryType``. The assembly, as stacked layers.
 
+    ``shapes`` holds one record per ``slab``, ``cylinder`` or ``sphere`` of the
+    file, each with its ``layers`` (name, material, ``min``, ``max`` and the
+    unit of ``min``) and its dimensions. Lengths are as the file states them,
+    in the unit it declares; kika converts nothing.
+
+    Parameters
+    ----------
+    element : xml.etree.ElementTree.Element
+        The ``geometry`` element.
+
     Examples
     --------
     >>> g = b["assemblyGeometry"].content                # doctest: +SKIP
@@ -925,7 +1229,26 @@ class Geometry(Content):
         return [layer for shape in self.shapes for layer in shape.layers]
 
     def layer(self, name: str) -> Layer:
-        """One layer, by name -- what a ``position`` points at."""
+        """
+        One layer, by name -- what a ``position`` points at.
+
+        Parameters
+        ----------
+        name : str
+            The layer name, matched exactly.
+
+        Returns
+        -------
+        Layer
+            The first layer of that name over all shapes, in file order: a
+            record with ``name``, ``material``, ``min``, ``max``, ``unit`` and
+            ``thickness`` (``max - min``).
+
+        Raises
+        ------
+        KeyError
+            If no layer has that name.
+        """
         for layer in self.layers:
             if layer.name == name:
                 return layer
@@ -979,6 +1302,15 @@ class FactorChain(Content):
     is how the checker verifies the published result -- and how a user finds
     out that a normalisation they are about to apply is the one the entry meant.
 
+    ``operator`` is the file's (``"product"`` when it gives none); ``factors``
+    are the stated terms, ``result`` the published result as a ``Double`` (or
+    ``None``). Values are as the file states them, with the unit each declares.
+
+    Parameters
+    ----------
+    element : xml.etree.ElementTree.Element
+        The ``factorChain`` element.
+
     Examples
     --------
     >>> chain = b["sourceStrength"].content              # doctest: +SKIP
@@ -1017,13 +1349,32 @@ class FactorChain(Content):
         raise KeyError(f"no factor {label!r}; have {[f.label for f in self.factors]}")
 
     def recompute(self) -> float:
-        """Combine the factors with the declared operator."""
+        """
+        Combine the factors with the declared operator.
+
+        Returns
+        -------
+        float
+            The sum of the factor values when the operator is ``sum``, their
+            product otherwise. Units are ignored; the value is not compared
+            with the published ``result``.
+        """
         values = [f.value.value for f in self.factors]
         if self.operator == "sum":
             return float(np.sum(values))
         return float(np.prod(values))
 
     def to_dataframe(self):
+        """
+        The factors as a ``pandas.DataFrame``, one row each.
+
+        Returns
+        -------
+        pandas.DataFrame
+            Columns ``factor`` (the label), ``value``, ``unit`` (as published),
+            ``provenance`` and ``uncertainty`` (the uncertainty as the entry
+            printed it, a string or ``None``). No unit conversion.
+        """
         pd = _pandas()
         return pd.DataFrame([
             {
@@ -1096,8 +1447,13 @@ class UnknownContent(Content):
     A container this reader does not model yet, kept as the raw element.
 
     A draft format grows, and a file written against a later one must still
-    open. :attr:`element` is the live :mod:`xml.etree` node, so nothing is lost
-    -- only the convenience.
+    open. ``element`` is the live ``xml.etree.ElementTree.Element`` node, so
+    nothing is lost -- only the convenience.
+
+    Parameters
+    ----------
+    element : xml.etree.ElementTree.Element
+        The container element; its tag is kept as ``tag``.
     """
 
     def __init__(self, element: ET.Element):

@@ -28,6 +28,40 @@ class TapeInventory:
     ``sections`` is ``None`` when they could not be established; ``problem``
     then says why. ``source`` is ``"directory"`` (MT451) or ``"scan"`` (every
     line's MF/MT columns).
+
+    :func:`tape_inventory` returns one; the fields are read, not computed.
+
+    Attributes
+    ----------
+    path : pathlib.Path
+        The tape.
+    mat : int, optional
+        MAT of the first material.
+    za : int, optional
+        ZA of MF1/MT451 (1000 Z + A), rounded to an integer.
+    awr : float, optional
+        Atomic weight ratio of the target, in neutron masses.
+    nlib : int, optional
+        NLIB of MT451, the library identifier.
+    nmod : int, optional
+        NMOD of MT451, the modification number.
+    nsub : int, optional
+        NSUB of MT451, the sublibrary number (3 for photo-atomic, 6 for atomic
+        relaxation, 12 for thermal scattering).
+    library_tag : str, optional
+        The text of the tape identification (TPID) record, up to column 66,
+        stripped. None when the first line is not a TPID record or is blank.
+    zsymam : str, optional
+        The first 11 characters of the first text line of MT451, stripped
+        (the material's name, for instance ``26-Fe- 56``).
+    sections : tuple of (int, int), optional
+        The ``(MF, MT)`` pairs of the first material, in directory order or, for
+        ``source="scan"``, in file order. None when they could not be established.
+    source : str, optional
+        ``"directory"`` or ``"scan"`` when ``sections`` is set.
+    problem : str, optional
+        Why ``sections`` is None. It is also kept when ``scan`` rebuilt the
+        sections of a tape whose MT451 is missing or cut short.
     """
 
     path: Path
@@ -51,7 +85,19 @@ class TapeInventory:
         return tuple(sorted({mf for mf, _ in self.sections}))
 
     def mt(self, mf: int) -> Optional[Tuple[int, ...]]:
-        """The sections of one file; ``None`` when the sections are unknown."""
+        """The sections of one file; ``None`` when the sections are unknown.
+
+        Parameters
+        ----------
+        mf : int
+            The file number.
+
+        Returns
+        -------
+        tuple of int or None
+            The MTs listed for ``mf``, in the order of ``sections``; empty when
+            ``mf`` is absent, None when ``sections`` is None.
+        """
         if self.sections is None:
             return None
         return tuple(mt for f, mt in self.sections if f == mf)

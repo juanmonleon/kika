@@ -12,6 +12,26 @@ class NeutronContext:
     The caller supplies these from the model's particle data. No ENDF provenance
     is used to infer physics. Constants are recorded and may be matched to an
     external processor in a validation run.
+
+    Attributes
+    ----------
+    atomic_weight_ratio : float
+        Target mass divided by the neutron mass. Finite and positive.
+    target_spin : float
+        Target spin in units of hbar: a non-negative integer or half-integer.
+    neutron_mass_mev : float
+        Neutron mass as an energy, in MeV (positive). Defaults to kika's
+        constant.
+    neutron_mass_amu : float
+        Neutron mass in atomic mass units (positive). Defaults to kika's constant;
+        it enters only the mass-based channel radius.
+    hbar_c_mev_fm : float
+        hbar c in MeV fm (positive). Default 197.3269804.
+
+    Raises
+    ------
+    ValueError
+        On construction, if a field breaks the conditions above.
     """
 
     atomic_weight_ratio: float

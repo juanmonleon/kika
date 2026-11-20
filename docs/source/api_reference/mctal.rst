@@ -4,6 +4,8 @@ MCNP tally output
 MCTAL files are read by :func:`kika.read_mctal`, FMESH mesh tallies (MESHTAL
 text or the MCNP 6.3+ HDF5 runtape) by :func:`kika.read_meshtal`.
 
+.. autofunction:: kika.mcnp.detect_mcnp_file_type
+
 kika.mcnp.parse_mctal
 ---------------------
 

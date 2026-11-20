@@ -220,10 +220,67 @@ def _get_curated_resolution(dataset_id: str) -> Dict[str, Any]:
 @dataclass
 class X4ProDataset:
     """
-    Raw dataset from X4Pro database before conversion to ExforAngularDistribution.
+    One X4Pro dataset as stored, before conversion to an EXFOR object.
 
-    This intermediate representation holds the parsed JSON data from the database
-    before it is converted to the full ExforAngularDistribution object.
+    Returned by :meth:`~kika.exfor.X4ProDatabase.parse_dataset`, and by
+    ``query_angular_distributions`` with ``convert_to_objects=False``. The arrays
+    are parallel, one element per data point, in the table's order. Nothing has
+    been converted to MeV or b/sr yet: the unit strings below say what each array
+    holds.
+
+    Attributes
+    ----------
+    dataset_id : str
+        Entry and subentry numbers joined, for example ``"10037024"``.
+    year, author : int, str
+        Publication year and first author of the dataset.
+    target : str
+        Target in the database spelling, for example ``"Fe-56"``.
+    projectile : str
+        Projectile as the database stores it.
+    mf, mt : int
+        ENDF file and reaction numbers assigned by the database.
+    quant : str
+        X4Pro quantity code, which contains ``"DA"`` for an angular distribution.
+    ndat : int
+        Number of data points the database records for the dataset.
+    reacode : str
+        EXFOR reaction code (see :func:`~kika.exfor.parse_reacode_fields`).
+    energies_ev : numpy.ndarray
+        Incident energies, in the unit ``energy_unit``. The name is historical:
+        the corrected data are in eV, the raw ones may be in keV or MeV.
+    angles_deg : numpy.ndarray
+        Scattering angles in degrees; a column given as cosines is converted. The
+        frame is ``angle_frame``.
+    cross_sections : numpy.ndarray
+        Differential cross-sections, in ``xs_unit``.
+    uncertainties : numpy.ndarray
+        Absolute uncertainties of ``cross_sections``, in ``xs_unit``. A column given
+        in per cent is converted; zeros when the dataset has none. The sigma level
+        is as the compiler gave it.
+    energy_unit, angle_unit, xs_unit : str
+        Unit strings as EXFOR and X4Pro spell them, in capitals: ``"EV"``,
+        ``"MEV"``, ``"ADEG"``, ``"B/SR"``, ``"MB/SR"``.
+    angle_frame : str
+        ``"CM"`` when X4Pro flags the angles as CM, when the reaction code says
+        ``DA/DA`` or when the angles were given as cosines; otherwise ``"LAB"``.
+    is_corrected : bool
+        True when X4Pro recorded automatic corrections for the dataset.
+    correction_notes : list of str
+        The notes of those corrections.
+    raw_json : dict or None
+        The whole parsed JSON record of the dataset.
+    uncertainty_components : list of dict
+        Every uncertainty column of the raw table, with the keys ``header``,
+        ``kind`` (``"scalar"`` or ``"per_point"``), ``value`` or ``values`` and
+        ``unit``.
+    energy_resolution : dict or None
+        The incident-energy resolution the authors declare in the EXFOR entry,
+        normalised to a full width at half maximum, or None when there is none.
+        The key ``kind`` is ``"absolute"`` (``fwhm_ev``), ``"relative"``
+        (``fwhm_fraction`` of the energy) or ``"per_flight_path"``
+        (``fwhm_ns_per_m``). The key ``convention`` records whether the entry said
+        full width, half width or nothing.
     """
 
     dataset_id: str
@@ -849,6 +906,18 @@ def parse_reacode_fields(reacode: Optional[str]) -> Dict[str, str]:
 
     For a ratio or sum of reactions the fields of the *first* reaction are
     returned. Unknown or empty codes give empty strings throughout.
+
+    Parameters
+    ----------
+    reacode : str or None
+        EXFOR reaction code. Case and surrounding spaces do not matter.
+
+    Returns
+    -------
+    dict of str
+        Upper-case strings under the keys ``target``, ``projectile``,
+        ``process``, ``product`` (SF4) and ``sf5`` to ``sf9``. A subfield the code
+        lacks is the empty string.
     """
     out = dict(_REACODE_EMPTY)
     if not reacode:
@@ -872,7 +941,21 @@ def parse_reacode_fields(reacode: Optional[str]) -> Dict[str, str]:
 
 
 def exfor_quantity(reacode: Optional[str], fallback: Optional[str] = None) -> str:
-    """SF6 of ``reacode`` (``SIG``, ``DA``, ``TRN`` …), or ``fallback`` when absent."""
+    """
+    Quantity of an EXFOR reaction code: its SF6 (``SIG``, ``DA``, ``TRN`` …).
+
+    Parameters
+    ----------
+    reacode : str or None
+        EXFOR reaction code, read with :func:`~kika.exfor.parse_reacode_fields`.
+    fallback : str, optional
+        Returned when the code has no SF6, or cannot be parsed.
+
+    Returns
+    -------
+    str
+        The SF6 in upper case, else *fallback*, else the empty string.
+    """
     sf6 = parse_reacode_fields(reacode)["sf6"]
     return sf6 or (fallback or "")
 
@@ -901,14 +984,32 @@ _BARN_RE = re.compile(r"^(P|N|MU-|MU|U|M|K|MILLI-|MICRO-|NANO-|PICO-|KILO-)?B$")
 
 def canonical_unit_factor(unit: Optional[str]) -> Tuple[Optional[float], Optional[str]]:
     """
-    Multiplier and label that bring ``unit`` to the canonical unit its family
-    uses in KIKA: energies to ``MeV``, cross sections to ``b`` (with ``/sr``
-    and ``/MeV`` denominators converted alongside).
+    Factor and label that bring an EXFOR unit to the unit kika keeps its family in.
 
-    ``("MB/SR")`` gives ``(1e-3, "b/sr")``; ``("KEV")`` gives ``(1e-3, "MeV")``;
-    ``("B/KEV")`` gives ``(1e3, "b/MeV")``. Units outside those two families
+    Energies go to ``MeV`` and cross-sections to ``b``, with a ``/sr`` or
+    ``/MeV`` denominator converted alongside. The factor multiplies values given
+    in *unit*.
+
+    ``"MB/SR"`` gives ``(1e-3, "b/sr")``; ``"KEV"`` gives ``(1e-3, "MeV")``;
+    ``"B/KEV"`` gives ``(1e3, "b/MeV")``. Units outside those two families
     (``NO-DIM``, ``PART/FIS``, ``ADEG`` …) return ``(None, None)`` and are left
     exactly as stored.
+
+    Parameters
+    ----------
+    unit : str or None
+        EXFOR unit string, as in Dictionary 25 (``"MB"``, ``"MICRO-EV"``,
+        ``"B/SR"``). Case and surrounding spaces do not matter. None or empty
+        gives ``(None, None)``.
+
+    Returns
+    -------
+    factor : float or None
+        Multiplier from *unit* to the canonical unit, None if there is none.
+    label : str or None
+        The canonical unit: ``"MeV"``, or ``"b"`` followed by the ``/sr`` and
+        ``/MeV`` denominators of *unit*, in its order. None if there is no
+        canonical unit.
     """
     if not unit:
         return None, None
@@ -1164,7 +1265,7 @@ class X4ProDatabase:
 
     def load_catalogue(self, force: bool = False) -> pd.DataFrame:
         """
-        The whole ``x4pro_ds`` table as a DataFrame, loaded once and kept.
+        The whole ``x4pro_ds`` table, one row per dataset, loaded once and kept.
 
         Columns: ``dataset_id, year, author, target, projectile, mf, mt, ndat,
         quant, reacode``. The repetitive text columns are categoricals, so the
@@ -1173,6 +1274,24 @@ class X4ProDatabase:
         Reads through its own short-lived connection so it can run on a
         background thread while the main connection serves other queries
         (``sqlite3`` connections are bound to the thread that opened them).
+
+        Parameters
+        ----------
+        force : bool
+            If True, read the table again even if it is already loaded.
+
+        Returns
+        -------
+        pandas.DataFrame
+            The table, kept on the object: later calls return the same frame.
+            ``dataset_id`` is text and ``year``, ``mf``, ``mt`` and ``ndat`` are
+            numbers (NaN where the database has none). Missing text is the
+            empty string. Do not modify it.
+
+        Raises
+        ------
+        FileNotFoundError
+            If the database path is not set or the file does not exist.
         """
         with self._catalogue_lock:
             if self._catalogue is not None and not force:
@@ -1234,11 +1353,42 @@ class X4ProDatabase:
         the window; datasets with no energy information are dropped by an
         energy filter and kept otherwise.
 
+        Parameters
+        ----------
+        targets : iterable of str, optional
+            Targets in the database spelling (``"Fe-56"``, ``"Fe"``). ``"Fe"``
+            matches ``Fe-56``, ``Fe-0`` and ``Fe-cmp``. Unlike ``read_all_exfor``,
+            no other spelling is converted. None or empty applies no filter.
+        projectile : str, optional
+            Projectile, compared in lower and upper case. None or empty applies no
+            filter.
+        quantities : iterable of str, optional
+            Quantity codes, each a case-insensitive substring of the database's
+            quantity field (``"DA"``, ``"CS"``).
+        mts : iterable of int, optional
+            ENDF MT numbers, matched exactly.
+        year_min, year_max : int, optional
+            Inclusive bounds on the publication year.
+        author : str, optional
+            Case-insensitive substring of the first author's name.
+        entry_prefix : str, optional
+            Keep the datasets whose identifier starts with it, case-insensitively.
+        energy_min_mev, energy_max_mev : float, optional
+            Bounds of the incident-energy window, in MeV. Either may be given
+            alone.
+        include_energy_range : bool
+            If False and no energy bound is given, the energy ranges are not read
+            from the database (which is slow when they are not cached) and
+            ``e_min`` and ``e_max`` are None.
+
         Returns
         -------
-        List[Dict[str, Any]]
+        list of dict
             Sorted by dataset id. Keys: ``dataset_id, year, author, target,
             projectile, mf, mt, ndat, quant, reacode, e_min, e_max, sf5, sf6``.
+            ``e_min`` and ``e_max`` are the incident-energy range in MeV, or None.
+            ``sf5`` and ``sf6`` are subfields of the reaction code (see
+            :func:`~kika.exfor.parse_reacode_fields`).
         """
         df = self.load_catalogue()
         mask = pd.Series(True, index=df.index)
@@ -1318,7 +1468,20 @@ class X4ProDatabase:
 
         Only the ids not yet in the cache touch the database, in ``IN (...)``
         chunks under SQLite's default parameter limit. Ids without a JSON row
-        or without an energy column are cached as ``(None, None)``.
+        or without an energy column are cached as ``(None, None)``. If the
+        database was opened with an ``energy_cache_path``, the cache is written
+        there after each call that read new ids.
+
+        Parameters
+        ----------
+        dataset_ids : iterable of str
+            Dataset identifiers. Repeated ones are looked up once.
+
+        Returns
+        -------
+        dict
+            From each identifier to ``(e_min, e_max)``, the lowest and highest
+            incident energy in MeV, or ``(None, None)``.
         """
         ids = list(dict.fromkeys(dataset_ids))
         cache = self._energy_range_cache
@@ -2993,25 +3156,39 @@ class X4ProDatabase:
         """
         Create a new SQLite database with a subset of the data.
 
+        The new file has the two tables this class reads, with the same columns for
+        the datasets that match, and can be opened with ``X4ProDatabase``. A file
+        already at *output_path* is deleted first.
+
         Parameters
         ----------
         output_path : str
             Path for the new database file
         targets : List[str], optional
-            List of targets in database format (e.g., ["Fe-0", "Fe-56"])
+            Targets, normalised like the *target* of ``read_all_exfor``
+            (e.g., ["Fe-0", "Fe-56"]). A target matches the database's target
+            name exactly: ``"Fe"`` is natural iron only.
         target_zaids : List[int], optional
             List of target ZAIDs (e.g., [26000, 26056])
         quantity : str, optional
-            Quantity type filter (default: "DA")
-        projectile : str, optional
-            Projectile filter (default: "n")
+            Case-insensitive substring of the database's quantity field
+            (default: "DA"). None or empty applies no filter.
+        projectile : str
+            Projectile, compared in lower and upper case (default: "n").
         mt : int, optional
             ENDF MT number filter (e.g., 2 for elastic)
 
         Returns
         -------
         int
-            Number of datasets copied
+            Number of datasets copied. A target listed twice in *targets* (for
+            example as ``"Fe56"`` and ``"Fe-56"``) counts its datasets twice,
+            though they are stored once.
+
+        Raises
+        ------
+        ValueError
+            If neither *targets* nor *target_zaids* gives a target.
 
         Examples
         --------

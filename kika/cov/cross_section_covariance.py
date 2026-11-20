@@ -184,25 +184,61 @@ class TransferResult:
 class CrossSectionCovariance:
     """
     Format-agnostic multigroup cross-section covariance.
-    
+
+    Holds a list of blocks. Block ``k`` is the ``(G, G)`` matrix ``matrices[k]``
+    between the groups of the reaction ``(isotope_rows[k], reaction_rows[k])``
+    (its rows) and those of ``(isotope_cols[k], reaction_cols[k])`` (its columns).
+    A block whose two reactions are the same is a diagonal block (the covariance
+    of one reaction with itself). A block between two different reactions is a
+    cross block; only one of the two orientations is stored, and
+    :attr:`~kika.cov.CrossSectionCovariance.covariance_matrix` fills the other with
+    its transpose. Group 0 is the
+    first entry of the grid. :func:`~kika.cov.read_covfil` and
+    :func:`~kika.cov.read_boxer` keep the order of the file;
+    :func:`~kika.cov.read_coverx` reverses a descending grid by default, with the
+    cross-section vectors and both axes of every matrix.
+
+    An instance comes from :func:`~kika.cov.read_coverx`,
+    :func:`~kika.cov.read_covfil` or :func:`~kika.cov.read_boxer` (or the
+    ``from_*`` class methods), or is built by hand with
+    :meth:`~kika.cov.CrossSectionCovariance.add_matrix`.
+    ``CovMat`` is another name for this class.
+
     Attributes
     ----------
     num_groups : int
-        Number of energy groups in the covariance matrices
-    energy_grid : Optional[List[float]]
-        List of energy grid boundaries (if available)
-    isotope_rows : List[int]
-        List of row isotope IDs
-    reaction_rows : List[int]
-        List of row reaction MT numbers
-    isotope_cols : List[int]
-        List of column isotope IDs
-    reaction_cols : List[int]
-        List of column reaction MT numbers
-    matrices : List[np.ndarray]
-        List of covariance matrices (one for each row-column combination)
+        Number of energy groups ``G`` of the multigroup structure. 0 when each
+        matrix carries its own grid in *energy_grids* (pointwise ENDF data).
+    energy_grid : list of float, optional
+        Group boundaries shared by every block (``num_groups + 1`` values), in
+        the unit of *energy_unit*. None when the blocks carry their own grids.
+    energy_grids : list of list of float
+        One grid per block, parallel to *matrices*, in the unit of
+        *energy_unit*. Filled by ``add_matrix`` when a grid is given or a
+        shared *energy_grid* exists; a reader that leaves it empty relies on
+        *energy_grid*.
+    isotope_rows, reaction_rows : list of int
+        ZAID and MT of the row reaction of each block.
+    isotope_cols, reaction_cols : list of int
+        ZAID and MT of the column reaction of each block.
+    matrices : list of np.ndarray
+        The blocks, in the order of the four lists above.
+    is_relative : list of bool
+        One flag per block: True for a relative covariance (dimensionless, the
+        covariance of ``Δσ/σ`` in each group, not a percentage), False for an
+        absolute one (in the square of the cross-section unit). A list shorter
+        than *matrices* is allowed (the readers of COVERX and BOXER leave it
+        empty): the code of this class reads a missing flag as relative.
+    cross_sections : dict
+        ``(isotope, mt)`` to a vector of ``G`` group cross sections, as the
+        file or the caller gave it (kika does not convert its unit). An absolute
+        covariance is turned into a relative one with them.
     energy_unit : str
-        Energy unit for energy_grid: 'eV' (default) or 'MeV'
+        Unit of *energy_grid* and *energy_grids*: ``'eV'`` (default) or
+        ``'MeV'``. Values of the matrices do not depend on it.
+    metadata : dict
+        File-level scalars set by the readers: ``'awr'`` (atomic weight ratio)
+        and ``'temperature'`` (K) for COVFIL.
     """
     num_groups: int = 0
     energy_grid: Optional[List[float]] = None
@@ -260,12 +296,25 @@ class CrossSectionCovariance:
         reaction_col : int
             Column reaction MT number
         matrix : np.ndarray
-            Covariance matrix
+            Covariance block between the groups of the row reaction (rows) and
+            those of the column reaction (columns). It is stored, not copied.
         energy_grid : list of float, optional
-            Energy grid for this matrix. If not provided, validates against
-            ``self.num_groups`` (multigroup mode).
+            Boundaries of the groups of this matrix, in ``energy_unit``. If not
+            provided, the matrix is checked against ``num_groups`` (multigroup
+            mode) and the shared ``energy_grid``, if there is one, is recorded
+            for it.
         is_relative : bool, optional
-            Whether the matrix is relative (True) or absolute (False).
+            Whether the matrix is relative (True) or absolute (False). None
+            (default) appends no flag, so ``is_relative`` stays shorter than
+            ``matrices``; give it for every matrix or for none.
+
+        Raises
+        ------
+        ValueError
+            If *energy_grid* is given and the matrix does not have
+            ``len(energy_grid) - 1`` rows, or if it is not given,
+            ``num_groups`` is positive and the matrix is not
+            ``(num_groups, num_groups)``.
         """
         if energy_grid is not None:
             # Per-matrix grid mode (ENDF MF33 or explicit grid)
@@ -314,6 +363,11 @@ class CrossSectionCovariance:
         -------
         CrossSectionCovariance
             CrossSectionCovariance instance loaded from the file
+
+        Raises
+        ------
+        TypeError
+            If the file holds MF34 covariances.
 
         Examples
         --------
@@ -497,41 +551,46 @@ class CrossSectionCovariance:
     ) -> "CrossSectionCovariance":
         """Create a CrossSectionCovariance from one GNDS §25.2 covariance section.
 
-        The model is treated as one more source format here, on the same footing
-        as GENDF, COVFIL, BOXER and COVERX — which is what the model layer is
-        for. The immediate reason it exists is MF35: its bands reach the model
-        directly (``decodeMF35MT``) and never pass through this class, so before
-        this there was no way to hand one to ``plot_covariance_heatmap``. It is
-        not MF35-specific: any section with a matrix and a row grid works, which
-        includes MF31, MF33 and MF34.
+        Any section with a matrix and a row grid works (MF31, MF33, MF34 or the
+        bands of MF35), so that it can be handed to
+        :meth:`plot_covariance_heatmap`.
 
-        **One section, one matrix, on purpose.** The bands of a single MF35 file
-        have different orders (84, 641, 641, 641, 641 on ENDF/B-VIII.1 U-235)
-        and all carry the same MT, so a whole suite loaded into one object would
-        hold several matrices indistinguishable by the ``(nuclide, mt)`` key
-        every selector here uses, and a plot would quietly draw the first. Loop
-        over the sections and call this per band instead.
+        One section gives one matrix. The bands of a single MF35 file have
+        different orders and all carry the same MT, so several of them in one
+        object could not be told apart by the ``(nuclide, mt)`` key that every
+        selector uses. Loop over the sections and call this per band.
 
         Parameters
         ----------
         section
-            A ``CovarianceSection``: anything exposing ``form.matrix``,
-            ``form.rowGrid`` and ``form.isRelative``, with an optional
-            ``rowData.ENDF_MFMT``. Duck-typed rather than imported so that
-            ``kika.cov`` keeps not depending on the model.
+            A ``CovarianceSection``: anything exposing ``form.matrix`` (a single
+            matrix), ``form.rowGrid`` and ``form.isRelative``, with an optional
+            ``rowData.ENDF_MFMT``. It is read by attribute, not imported.
         nuclide : int, optional
-            ZAID to file the matrix under. The model identifies a covariance by
-            its href rather than by a material header, so there is nothing to
-            read this from and it is the caller's to supply.
+            ZAID to file the matrix under. A section carries no material
+            header, so the caller supplies it.
         mt : int, optional
-            Reaction number. Defaults to the MT half of ``rowData.ENDF_MFMT``.
+            Reaction number. Defaults to the MT half of ``rowData.ENDF_MFMT``
+            (``"MF,MT"`` or ``"MF/MT"``).
         energy_unit : str, optional
-            Unit of ``form.rowGrid``. The model keeps ENDF's native eV.
+            Unit of ``form.rowGrid``. The model keeps ENDF's native eV, and the
+            grid is not converted.
 
         Returns
         -------
         CrossSectionCovariance
-            A single-matrix instance, ready for ``plot_covariance_heatmap``.
+            A single-block instance: a diagonal block of ``(nuclide, mt)`` whose
+            ``is_relative`` is ``form.isRelative``, with ``num_groups`` set to
+            the number of rows and the row grid as ``energy_grid`` and as
+            ``energy_grids[0]``.
+
+        Raises
+        ------
+        ValueError
+            If the section has no ``rowGrid``, if ``rowGrid`` does not have one
+            more entry than the matrix has rows, if the section has no form or
+            its form carries no matrix, or if *mt* is not given and
+            ``rowData.ENDF_MFMT`` is missing or does not hold an MT.
 
         Examples
         --------
@@ -599,6 +658,30 @@ class CrossSectionCovariance:
         Return a new CrossSectionCovariance without the specified matrices for a given isotope,
         but always keep any pairs listed in exceptions.
         Also removes cross section entries for diagonal or wildcard reactions that are removed.
+
+        Only blocks with *isotope* on both axes are candidates for removal; blocks of
+        other isotopes are kept. The result is a copy of the kept blocks with the
+        shared ``num_groups`` and ``energy_grid``; its ``energy_unit`` is the default
+        ``'eV'`` and its ``metadata`` is empty, whatever this object holds.
+
+        Parameters
+        ----------
+        isotope : int
+            ZAID whose blocks are filtered.
+        reaction_pairs : list of (int, int)
+            ``(mt_a, mt_b)`` pairs to remove. Equal MTs remove every block with
+            that MT on either axis. A pair with one MT equal to 0 is a wildcard:
+            every block with the other MT on either axis. Otherwise only the block
+            between the two MTs, in either orientation.
+        exceptions : list of (int, int), optional
+            ``(row_mt, col_mt)`` pairs to keep even if a pair above would remove
+            them, in either orientation. The cross-section vectors of *isotope* are
+            removed for the equal and wildcard pairs only.
+
+        Returns
+        -------
+        CrossSectionCovariance
+            New object; this one is not modified.
         """
         if exceptions is None:
             exceptions = []
@@ -918,20 +1001,30 @@ class CrossSectionCovariance:
     ) -> np.ndarray:
         """Project a self-self covariance entry onto a target bin-edge grid.
 
-        Selects the matrix where ``reaction_row == reaction_col == target_mt``
-        (defaulting to the most common MT in the covariance) and projects
-        every matching self-self contribution onto the target grid via
-        ``kika.processing.multigroup`` (piecewise-constant overlap).
+        Selects the blocks with ``(isotope, reaction)`` equal to
+        ``(target_isotope, target_mt)`` on both axes and projects each onto the
+        target grid with a piecewise-constant overlap operator ``R`` (the entry
+        ``R[g, h]`` is the fraction of target bin ``g`` covered by native bin
+        ``h``): ``C' = R C Rᵀ``. The projected blocks are summed. A target bin
+        only partly covered by the native grid gets weights that sum to less
+        than 1.
+
+        A relative block is first made absolute with the cross section at the
+        arithmetic centre of each native group: ``C_abs = diag(σ) C diag(σ)``,
+        that is ``C_abs[i, j] = C[i, j] σ_i σ_j``. A block flagged absolute is
+        projected as it is. A block with no flag counts as relative.
 
         Parameters
         ----------
         target_bin_edges_ev : np.ndarray
-            Target bin edges in eV (length ``N+1``, strictly increasing).
-        xs_source : MF3MT or CrossSection, optional
-            Pointwise σ(E) used to convert any relative-form matrices to
-            absolute. Required when at least one matched entry has
-            ``is_relative=True``; otherwise that entry is skipped with a
-            warning.
+            Target bin edges in eV (length ``N+1``, strictly increasing). The
+            native grids of the blocks are not converted, so they must also be
+            in eV.
+        xs_source : MF3MT or ~kika.nuclear_data.CrossSection, optional
+            Pointwise σ(E) that converts the relative blocks to absolute. It is
+            evaluated by its ``get_cross_section`` method if it has one, else by
+            interpolation of its ``energies`` and ``values``. Without it, a relative
+            block is skipped with a warning (the result is then under-counted).
         target_mt : int, optional
             MT to look up. Defaults to the first ``reaction_rows`` value.
         target_isotope : int, optional
@@ -941,7 +1034,16 @@ class CrossSectionCovariance:
         Returns
         -------
         np.ndarray
-            Absolute covariance (b²), shape ``(N, N)``, symmetric.
+            Covariance on the target grid, shape ``(N, N)``, symmetrised as
+            ``(C + Cᵀ) / 2``. Absolute, in the square of the unit of
+            *xs_source* (b² for a cross section in barn) when the blocks were
+            relative; as stored when they were absolute. Zeros, with a warning,
+            if no block matches or the object has no matrices.
+
+        Raises
+        ------
+        ValueError
+            If *target_bin_edges_ev* has fewer than 2 entries.
 
         Notes
         -----
@@ -1202,6 +1304,23 @@ class CrossSectionCovariance:
 
             4 → 51-91, 103 → 600-649, 104 → 650-699,
             105 → 700-749, 106 → 750-799, 107 → 800
+
+        A summed reaction on the left of the rules (MT 4, 103 to 107) is dropped,
+        with its cross-section vector, when any MT of its range on the right is
+        present for the isotope (in a block or in ``cross_sections``).
+
+        Parameters
+        ----------
+        isotope : int
+            ZAID to keep. Only blocks with this isotope on both axes survive.
+
+        Returns
+        -------
+        CrossSectionCovariance
+            New object with this object's ``num_groups`` and ``energy_grid``,
+            the kept blocks (matrices shared, not copied) and the kept
+            cross-section vectors (copied). Its ``energy_unit`` is the default
+            ``'eV'`` and its ``metadata`` is empty.
         """
 
         # ---- 1. indices with the requested isotope on both axes ----
@@ -1284,6 +1403,19 @@ class CrossSectionCovariance:
         All reactions for that isotope are retained.
 
         Similar to clean_cov, but without dropping any reactions.
+
+        Parameters
+        ----------
+        isotope : int
+            ZAID to keep. Only blocks with this isotope on both axes survive.
+
+        Returns
+        -------
+        CrossSectionCovariance
+            New object with this object's ``num_groups`` and ``energy_grid``, the
+            blocks of the isotope (matrices shared, not copied) and its
+            cross-section vectors (copied). Its ``energy_unit`` is the default
+            ``'eV'`` and its ``metadata`` is empty.
         """
         # Indices where both row and column isotopes match the requested isotope
         idxs = [
@@ -1377,6 +1509,14 @@ class CrossSectionCovariance:
             Reaction MT numbers to keep.
         isotope : int, optional
             If given, also filter by this isotope.
+
+        Returns
+        -------
+        CrossSectionCovariance
+            New object with the blocks selected (matrices shared, not copied)
+            and the cross-section vectors whose MT is in *mts* (and whose
+            isotope is *isotope*, if given; copied). It keeps this object's
+            ``energy_unit``; ``metadata`` is empty.
         """
         mt_set = set(mts)
         idxs = [
@@ -1484,6 +1624,11 @@ class CrossSectionCovariance:
         """
         Clean the covariance matrix until it is positive-(semi)definite.
 
+        Works on the assembled :attr:`covariance_matrix`, whatever its blocks are, so
+        the thresholds below are meaningful for relative covariances (a variance of
+        5.0 is a relative standard deviation of about 224 %). Block pairs and reactions
+        are removed only for a single-isotope object.
+
         Parameters
         ----------
         level
@@ -1491,23 +1636,46 @@ class CrossSectionCovariance:
             'medium' - clamp then drop the worst *block pairs*
             'hard'   - clamp then drop the worst *reactions* (all blocks)
         high_val_thresh
-            Diagonal variances above this threshold are clamped.
+            Diagonal variances with an absolute value above this threshold are
+            clamped.
         clamp_target
-            Target variance assigned to clamped diagonals (off-diagonals
-            rescaled by ``sqrt(target/|old|)`` to preserve correlations).
+            Target variance assigned to clamped diagonals (the row and column of
+            the entry are scaled by ``sqrt(target/|old|)``, which keeps its
+            correlations).
         accept_tol
-            Minimum eigenvalue tolerated for acceptance.
+            Smallest eigenvalue accepted: the matrix passes when it is at least
+            this, a small negative number by default.
         clamp_max_iter
             Maximum clamping passes before switching strategy.
         max_steps
             Maximum block-removal iterations (if used).
         verbose
-            Forwarded to the removal routine.
+            Print progress, as the removal routine does; the clamping pass
+            prints (or logs) its own lines whatever this is.
         clamp_detail
             Dump every off-diagonal before/after pair on each clamp event.
             Very noisy — opt in only to debug a specific clamp.
         logger
             Optional logger instance for file output. If None, uses print().
+
+        Returns
+        -------
+        tuple of (CrossSectionCovariance, dict)
+            A new object (this one is not modified) and a log. The log has
+            ``iterations``, ``min_eigenvalue`` (of the final matrix),
+            ``converged`` (whether it reached *accept_tol*), ``strategy`` (the
+            level) and ``used_removal``. ``'soft'`` adds ``soft_threshold_met``.
+            ``'medium'`` and ``'hard'`` that had to remove blocks add
+            ``removal_log``, with ``removed_pairs``, ``removed_mts`` and
+            ``removed_correlations`` (lists of the reaction pairs and MTs
+            removed). When clamping is enough, no block is removed.
+
+        Raises
+        ------
+        ValueError
+            If *level* is not one of the three above, if ``num_groups`` is
+            zero, or if 'medium' or 'hard' has to remove blocks from an object
+            with more than one isotope.
         """
 
         lvl = level.lower()
@@ -1637,14 +1805,27 @@ class CrossSectionCovariance:
         Measure how each (block_i, block_j) sub-matrix of the covariance matrix
         contributes to a chosen eigenvalue λ.
 
-        Args
-        ----
-        idx        : Index of the eigenvalue to inspect (overrides *which*).
-        which      : If *idx* is None, choose 'max' or 'min' eigenvalue.
-        top_n      : Return only the *top_n* largest ``|contribution|`` entries.
-        tol        : Skip blocks with ``|contribution| ≤ tol``.
-        symmetric  : If True, include only pairs with i ≤ j (avoids duplicates).
-        relative   : If True, report each block's share of ``|λ|``.
+        With ``v`` the eigenvector of λ split into the groups of each ``(isotope,
+        mt)`` block of :attr:`covariance_matrix`, the contribution of the pair
+        ``(i, j)`` is ``v_iᵀ M_ij v_j``. Summed over all ordered pairs they add up to
+        λ (with *symmetric* True each off-diagonal pair is listed once, not twice).
+        A summary table is printed to standard output.
+
+        Parameters
+        ----------
+        idx : int, optional
+            Index of the eigenvalue to inspect, in the ascending order of
+            ``numpy.linalg.eigh`` (0 is the smallest). Overrides *which*.
+        which : {'min', 'max'}
+            Eigenvalue to inspect when *idx* is None.
+        top_n : int
+            Return only the *top_n* largest ``|contribution|`` entries.
+        tol : float
+            Skip blocks with ``|contribution| ≤ tol``.
+        symmetric : bool
+            If True, include only pairs with i ≤ j (avoids duplicates).
+        relative : bool
+            If True, report each block's share of ``|λ|`` (``weight``).
 
         Returns
         -------
@@ -1657,6 +1838,14 @@ class CrossSectionCovariance:
                     { 'block': (param_pairs[i], param_pairs[j]),
                         'contribution': c_ij,
                         'weight': |c_ij| / |λ|   # only if relative=True }
+
+            ``param_pairs`` are the ``(isotope, mt)`` pairs sorted by isotope, then
+            MT; the entries are sorted by decreasing ``|contribution|``.
+
+        Raises
+        ------
+        ValueError
+            If *idx* is None and *which* is neither 'max' nor 'min'.
         """
         M = self.covariance_matrix               # full (n × n) matrix
         G = self.num_groups                      # rows per single block
@@ -1873,9 +2062,46 @@ class CrossSectionCovariance:
     ) -> plt.Figure:
         """
         Plot relative uncertainties for one or more (ZAID, MT) pairs.
-        
-        This method now uses the modern PlotBuilder-based implementation from
-        kika.plotting.covariance for cleaner, more maintainable code.
+
+        Each curve is the square root of the diagonal of the diagonal block
+        ``(nuclide, mt)``, as a percentage (1σ). A relative block gives it
+        directly; an absolute block is divided by the cross section stored for
+        the reaction, and has no curve if there is none (a warning is logged).
+        The x-axis is the energy grid as stored and is labelled "Energy (MeV)"
+        whatever ``energy_unit`` is.
+
+        Parameters
+        ----------
+        nuclide : int, str or sequence of int or str
+            ZAID, symbol such as ``'U235'``, or a sequence of them.
+        mt : int or sequence of int
+            Reaction MT number or numbers. One curve per (nuclide, mt) pair.
+        energy_range : tuple of float, optional
+            Limits ``(low, high)`` of the x-axis, in the unit of the energy
+            grid. None shows the whole grid.
+        style : str
+            Name of a :class:`~kika.plotting.PlotBuilder` style.
+        figsize : tuple of float
+            Figure size in inches, ``(width, height)``.
+        dpi : int
+            Resolution of the figure.
+        font_family : str
+            Font family of the text.
+        legend_loc : str
+            Matplotlib legend location.
+        xscale, yscale : {'log', 'linear'}
+            Axis scales; 'logarithmic' and 'lin' are accepted too.
+        title : str or None
+            'default' builds a title from the nuclides and MTs, None omits it, any
+            other string is used as it is.
+        **step_kwargs
+            Styling keywords passed to the curves (colour, line style, line
+            width).
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+            The figure, not shown.
         """
         from kika.plotting.covariance import plot_uncertainties as _plot_uncertainties
 
@@ -1905,10 +2131,17 @@ class CrossSectionCovariance:
     ):
         """
         Create PlotData objects for multigroup cross sections with uncertainties.
-        
+
         This unified method extracts both nominal cross section data and uncertainty data.
         Both are returned as PlotData objects that can be plotted independently or combined.
-        
+
+        The uncertainty is the square root of the diagonal of the diagonal block
+        ``(nuclide, mt)``, as a percentage times *sigma*: a relative block gives it
+        directly, and an absolute block is divided by the cross section stored for
+        the reaction. An absolute block with no stored cross section gives no
+        uncertainty (a warning is logged). The energy axis of both is the grid as
+        stored, in ``energy_unit``; with no grid it is the group index.
+
         Parameters
         ----------
         nuclide : int or str
@@ -1923,13 +2156,18 @@ class CrossSectionCovariance:
             Custom label for the plot. If None, auto-generates from ZAID and MT.
         **styling_kwargs
             Additional styling kwargs (color, linestyle, linewidth, etc.)
-            
+
         Returns
         -------
-        tuple of (MultigroupCrossSectionPlotData, MultigroupUncertaintyPlotData)
-            - xs_data: Cross section data for plotting (or None if not available)
-            - unc_data: Uncertainty data as percentages (or None if not available)
-            
+        tuple
+            ``(xs_data, unc_data)``:
+
+            - xs_data: :class:`~kika.plotting.MultigroupCrossSectionPlotData` with
+              the group cross sections (or None if not stored for the reaction)
+            - unc_data: :class:`~kika.plotting.MultigroupUncertaintyPlotData` with
+              the uncertainty in percent (or None if there is no diagonal block
+              or it cannot be made relative)
+
         Raises
         ------
         ValueError
@@ -2088,9 +2326,50 @@ class CrossSectionCovariance:
     ) -> plt.Figure:
         """
         Plot multigroup cross sections with optional uncertainty bands.
-        
-        This method now uses the modern PlotBuilder-based implementation from
-        kika.plotting.covariance for cleaner, more maintainable code.
+
+        The cross sections are the group values in ``cross_sections``; a
+        reaction without them is not drawn. The bands come from
+        :meth:`to_plot_data`: relative standard deviation times the cross section,
+        times *sigma*. The x-axis is the energy grid as stored.
+
+        Parameters
+        ----------
+        nuclide : int, str or sequence of int or str
+            ZAID, symbol such as ``'U235'``, or a sequence of them.
+        mt : int or sequence of int
+            Reaction MT number or numbers.
+        ax : matplotlib.axes.Axes, optional
+            Not used.
+        energy_range : tuple of float, optional
+            Limits ``(low, high)`` of the x-axis, in the unit of the energy
+            grid. None shows the whole grid.
+        show_uncertainties : bool
+            Draw a band of ``sigma`` standard deviations around each curve.
+        sigma : float
+            Number of standard deviations of the band.
+        style : str
+            Name of a :class:`~kika.plotting.PlotBuilder` style.
+        figsize : tuple of float
+            Figure size in inches, ``(width, height)``.
+        dpi : int
+            Resolution of the figure.
+        font_family : str
+            Font family of the text.
+        legend_loc : str
+            Matplotlib legend location.
+        xscale, yscale : {'log', 'linear'}
+            Axis scales; 'logarithmic' and 'lin' are accepted too.
+        title : str or None
+            'default' builds a title from the nuclides and MTs, None omits it, any
+            other string is used as it is.
+        **step_kwargs
+            Styling keywords passed to the curves (colour, line style, line
+            width).
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+            The figure, not shown.
         """
         from kika.plotting.covariance import plot_multigroup_xs as _plot_multigroup_xs
 
@@ -2129,6 +2408,21 @@ class CrossSectionCovariance:
         and packages everything into a CovarianceHeatmapData object that can
         be rendered by PlotBuilder.add_heatmap().
 
+        The matrix is taken from the assembled :attr:`covariance_matrix` of the
+        isotope (a correlation is the clipped one, :attr:`clipped_correlation_matrix`).
+        For several MTs the diagonal blocks are laid side by side, in sorted MT
+        order. With a tuple ``(row_mt, col_mt)`` the block has the groups of
+        ``row_mt`` as rows and those of ``col_mt`` as columns. Missing and
+        zero-variance groups are NaN. The grid, in eV (an ``energy_unit`` of
+        ``'MeV'`` is converted), is ``energy_grid`` of the result. The axes
+        ``x_edges`` and ``y_edges`` are not energies: each block's edges are the
+        grid (or its ``log10`` when *scale* is log, a non-positive first edge
+        placed one decade below the smallest positive one) minus its first value,
+        so the axis starts at 0, and successive blocks follow end to end. The
+        uncertainty drawn above the heatmap is in percent: relative blocks give
+        ``100 * sqrt(variance)``; an absolute block is divided by its stored cross
+        section, and without one it is left as ``100 * sqrt(variance)``.
+
         Parameters
         ----------
         nuclide : int, str, or sequence of int/str
@@ -2147,14 +2441,23 @@ class CrossSectionCovariance:
         scale : str, default 'log'
             Energy axis scale: 'log'/'logarithmic' or 'lin'/'linear'
         energy_range : tuple of float, optional
-            Energy window (emin, emax). Only bins overlapping the window are kept.
+            Energy window (emin, emax) in eV. Only bins overlapping the window are kept.
         **kwargs
-            Additional parameters (reserved for future use)
+            Set as attributes of the returned object when it has them, else added
+            to its ``metadata``. ``mask_color`` is ignored.
 
         Returns
         -------
-        CovarianceHeatmapData
+        ~kika.plotting.CovarianceHeatmapData
             Heatmap data object ready for PlotBuilder.add_heatmap()
+
+        Raises
+        ------
+        ValueError
+            If *matrix_type* or *scale* is not one of the strings above, if the
+            isotope has no data or no energy grid, if an MT is not found for the
+            isotope, if *energy_range* is not an increasing pair or removes every
+            group, or if a tuple ``(row_mt, col_mt)`` is given for several isotopes.
 
         Examples
         --------
@@ -2798,7 +3101,51 @@ class CrossSectionCovariance:
         verbose: bool = True,
         logger=None,
     ) -> np.ndarray:
-        """Robust Cholesky factor L such that M ≈ L Lᵀ."""
+        """Robust Cholesky factor L such that M ≈ L Lᵀ.
+
+        ``M`` is :attr:`covariance_matrix` when *space* is ``'linear'`` and
+        :attr:`log_covariance_matrix` (``log1p`` of the covariance, which assumes
+        relative covariances) for any other value. Blocks absent from the object
+        are NaN in it. If ``M`` is not positive definite it is repaired as
+        *psd_method* says. The eigenvalue floor is 1e-14 for 'clip' and 'higham'
+        (and the clip Higham falls back to), and 0 for 'clip_rescale'. A diagonal
+        jitter is added if the factorisation still fails after 'clip', 'higham' or
+        'clip_rescale'.
+
+        Parameters
+        ----------
+        space : {'log', 'linear'}
+            Matrix to factorise. Any value other than ``'linear'`` selects the log
+            space.
+        psd_method : {'auto', 'higham', 'clip', 'clip_rescale', 'none'}
+            Repair when ``M`` is not positive definite. 'auto' replaces non-finite
+            entries by 0, then uses 'clip' if the most negative eigenvalue is below
+            1 % of the largest in magnitude, else 'higham'. 'higham' is
+            :func:`~kika.cov.nearest_psd_higham` with the diagonal preserved (it
+            falls back to 'clip' on the original matrix if it does not converge
+            and the relative Frobenius error stays above 1 %). 'clip_rescale' is
+            :func:`~kika.cov.decomposition.clip_and_rescale`. 'none' only adds a
+            diagonal jitter.
+        jitter_scale : float
+            Base jitter, as a fraction of the Frobenius norm of ``M``.
+        max_jitter_ratio : float
+            Largest jitter allowed, as a fraction of the Frobenius norm of ``M``.
+        verbose : bool
+            Print progress.
+        logger : logging.Logger, optional
+            Receives the progress lines at ``info`` level.
+
+        Returns
+        -------
+        np.ndarray
+            Lower-triangular factor ``L``, of the size of the assembled matrix
+            (``G`` rows per ``(isotope, mt)`` pair, pairs sorted by isotope then MT).
+
+        Raises
+        ------
+        ValueError
+            If *psd_method* is not one of the five values above.
+        """
         from kika.cov.decomposition import cholesky_decomposition
         return cholesky_decomposition(
             self,
@@ -2819,7 +3166,41 @@ class CrossSectionCovariance:
         verbose: bool = True,
         logger=None,
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """Eigendecomposition with PSD correction."""
+        """Eigendecomposition with PSD correction.
+
+        ``M`` is :attr:`covariance_matrix` when *space* is ``'linear'`` and
+        :attr:`log_covariance_matrix` (``log1p`` of the covariance, which assumes
+        relative covariances) for any other value.
+
+        Parameters
+        ----------
+        space : {'log', 'linear'}
+            Matrix to decompose. Any value other than ``'linear'`` selects the log
+            space.
+        clip_negatives : bool
+            Deprecated; used only when *psd_method* is None (True means 'auto',
+            False means 'none').
+        psd_method : {'auto', 'higham', 'clip', 'clip_rescale', 'none'}, optional
+            Correction applied first. 'clip' sets the negative eigenvalues to 0
+            and leaves the eigenvectors; 'higham' and 'clip_rescale' replace ``M``
+            by the repaired matrix before decomposing it; 'auto' chooses 'clip'
+            or 'higham' as in :meth:`cholesky_decomposition`; 'none' does nothing.
+        verbose : bool
+            Print progress.
+        logger : logging.Logger, optional
+            Receives the progress lines at ``info`` level.
+
+        Returns
+        -------
+        tuple of (np.ndarray, np.ndarray)
+            Eigenvalues (ascending, as ``numpy.linalg.eigh`` returns them) and the
+            eigenvectors as columns.
+
+        Raises
+        ------
+        ValueError
+            If *psd_method* is not one of the five values above.
+        """
         from kika.cov.decomposition import eigen_decomposition
         return eigen_decomposition(
             self,
@@ -2840,7 +3221,41 @@ class CrossSectionCovariance:
         full_matrices: bool = False,
         logger=None,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """SVD with PSD pre-processing."""
+        """SVD with PSD pre-processing.
+
+        ``M`` is :attr:`covariance_matrix` when *space* is ``'linear'`` and
+        :attr:`log_covariance_matrix` (``log1p`` of the covariance, which assumes
+        relative covariances) for any other value.
+
+        Parameters
+        ----------
+        space : {'log', 'linear'}
+            Matrix to decompose. Any value other than ``'linear'`` selects the log
+            space.
+        clip_negatives : bool
+            Deprecated; used only when *psd_method* is None (True means 'auto',
+            False means 'none').
+        psd_method : {'auto', 'higham', 'clip', 'clip_rescale', 'none'}, optional
+            Correction applied to ``M`` before the SVD. 'clip' leaves ``M``
+            untouched when it has no negative eigenvalue. 'auto' chooses 'clip' or
+            'higham' as in :meth:`cholesky_decomposition`; 'none' does nothing.
+        verbose : bool
+            Print progress.
+        full_matrices : bool
+            Return square ``U`` and ``Vt`` instead of the reduced ones.
+        logger : logging.Logger, optional
+            Receives the progress lines at ``info`` level.
+
+        Returns
+        -------
+        tuple of (np.ndarray, np.ndarray, np.ndarray)
+            ``U``, the singular values (descending) and ``Vt``.
+
+        Raises
+        ------
+        ValueError
+            If *psd_method* is not one of the five values above.
+        """
         from kika.cov.decomposition import svd_decomposition
         return svd_decomposition(
             self,
@@ -3573,6 +3988,25 @@ class CrossSectionCovariance:
         Return all nodes (zaid, mt) known to the covariance store.
         If require_nonzero=True, nodes are restricted to those that participate
         in at least one non-zero block (or have a non-zero diagonal block).
+
+        A node is a reaction ``(isotope, mt)``. Two nodes are connected when a
+        cross block between them is stored.
+
+        Parameters
+        ----------
+        require_nonzero : bool
+            If True, only blocks with at least one entry of absolute value above
+            *tol* count, for the nodes and for the connections.
+        tol : float
+            Threshold of the test above.
+
+        Returns
+        -------
+        list of dict
+            One dict per node, sorted by isotope then MT, with ``id``
+            (``"<symbol>:<mt>"``, for example ``"Fe56:2"``), ``nuclide`` (the
+            symbol), ``mt``, ``reaction_label`` (the name of the MT) and
+            ``degree`` (number of other nodes it is connected to).
         """
         adj = self._cov_adjacency(require_nonzero=require_nonzero, tol=tol)
 
@@ -3597,17 +4031,20 @@ class CrossSectionCovariance:
         max_neighbors: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
-        Main method for your UI graph.
+        Return the reactions connected to one reaction by a stored covariance block.
 
         Returns a JSON-friendly payload with:
 
         - center node
         - nodes + edges within BFS depth
-        - (if depth >= 2) a grouped mapping of second-level nodes per first-level neighbor,
-          ideal for your "mini nodes next to each neighbor".
+        - (if depth >= 2) a grouped mapping of second-level nodes per first-level neighbor.
 
         Parameters
         ----------
+        nuclide : int or str
+            ZAID, or a symbol such as ``'Fe56'``.
+        mt : int
+            Reaction MT number.
         depth : int
             1 -> show center + its neighbors
             2 -> also include neighbors-of-neighbors
@@ -3618,6 +4055,20 @@ class CrossSectionCovariance:
             Threshold for nonzero detection when require_nonzero=True
         max_neighbors : Optional[int]
             If set, cap the number of neighbors expanded per node (safety for huge graphs)
+
+        Returns
+        -------
+        dict
+            ``center`` and ``nodes`` (node dicts as in :meth:`list_cov_nodes`, with
+            ``degree``), ``edges`` (list of ``{"source", "target"}`` node ids, each
+            pair once), ``depth``, ``require_nonzero``, ``tol``, ``layer1`` (ids of
+            the direct neighbours) and, if ``depth >= 2``, ``layer2_by_neighbor``
+            (neighbour id to the ids of its own neighbours other than the centre).
+
+        Raises
+        ------
+        ValueError
+            If ``(nuclide, mt)`` has no block in this object.
         """
         zaid = self._normalize_nuclide(nuclide)
         mt = int(mt)
@@ -3727,6 +4178,29 @@ class CrossSectionCovariance:
         - name: human-readable symbol
         - count: number of entries > threshold
         - max_value: largest flagged value
+
+        Values are compared as stored, and only the positive side is tested: a
+        large negative entry is not flagged. The blocks are read as ``(G, G)``
+        with ``G = num_groups``, and the isotope named in the report is the first
+        row isotope.
+
+        Parameters
+        ----------
+        threshold : float
+            An entry is flagged when it is greater than this value, in the units
+            of the matrices (for a relative covariance, a fraction squared).
+        top_n : int or None
+            Report the *top_n* largest flagged entries; None reports all of them.
+        return_text : bool
+            If True, return the report instead of printing it.
+
+        Returns
+        -------
+        tuple of (str, dict) or None
+            The report and its summary if *return_text* is True and some entry
+            exceeds *threshold*. None otherwise: nothing exceeds the threshold,
+            ``num_groups`` is 0, or *return_text* is False (the report is then
+            printed).
         """
         G = self.num_groups
         if G == 0:
@@ -3878,6 +4352,18 @@ class CrossSectionCovariance:
         1. Symmetry: ρ_ij == ρ_ji within *atol*.
         2. Diagonal consistency: 1 if variance > 0, else 0.
         3. Range: off‑diagonal in [‑1, 1].
+
+        The matrix tested is :attr:`correlation_matrix`, which sets the diagonal to 1
+        whatever the variance, so the zero-variance branch of check 2 does not run
+        on it. Nothing is returned or raised: each problem found is printed.
+
+        Parameters
+        ----------
+        atol : float
+            Absolute tolerance of the symmetry and diagonal checks.
+        rtol : float
+            Relative tolerance of the diagonal check, and the margin beyond 1 in
+            absolute value that the range check allows.
         """
         R = self.correlation_matrix
         G = self.num_groups
@@ -3960,6 +4446,11 @@ class CrossSectionCovariance:
         Clip out-of-range correlations, zero out huge outliers, inspect eigenvalues,
         and (optionally) project to PSD.
 
+        Works on the assembled :attr:`covariance_matrix`, symmetrised, and writes the
+        result back into the blocks of a copy. The variances are kept (the diagonal of
+        the correlation matrix is reset to 1, to 0 where the variance is 0) unless the
+        PSD projection moves them.
+
         Parameters
         ----------
         max_abs_corr
@@ -3973,8 +4464,26 @@ class CrossSectionCovariance:
             Floor for eigenvalues when projecting to PSD.
         project_psd
             Whether to do the PSD projection here.
+        psd_method : {'auto', 'higham', 'clip', 'clip_rescale', 'none'}
+            Projection used when *project_psd* is True. 'auto' picks 'clip' when
+            the most negative eigenvalue is below 1 % of the largest one in
+            magnitude, else 'higham'. 'higham' runs the diagonal-preserving
+            iteration when there is a negative eigenvalue. Every other case
+            (including 'clip_rescale' and 'none', and 'higham' with no negative
+            eigenvalue) floors the eigenvalues at *eigen_floor*.
         verbose
             Print detailed diagnostics.
+
+        Returns
+        -------
+        CrossSectionCovariance
+            A new object with the cleaned blocks; this one is not modified.
+
+        Raises
+        ------
+        ValueError
+            If *project_psd* is True and *psd_method* is not one of the five
+            values above.
         """
 
         # --- build and symmetrize covariance C0 ---

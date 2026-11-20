@@ -23,7 +23,21 @@ _TARGET_RE = re.compile(r"^([A-Za-z]{1,2})-?(\d+|nat)(?:-?[mM](\d*))?$")
 
 @dataclass(frozen=True, order=True)
 class IsotopeKey:
-    """``Z``, ``A`` and isomeric state ``M``. ``A`` is ``None`` for ``nat``."""
+    """The identity of a G4NDL isotope: ``Z``, ``A`` and isomeric state ``M``.
+
+    Built by hand, or returned by :meth:`~kika.g4ndl.G4NDLLibrary.isotopes`. It is
+    frozen and hashable. ``str`` gives ``"Fe56"``, ``"Cnat"``
+    or ``"Co58m1"``.
+
+    Attributes
+    ----------
+    Z : int
+        Atomic number.
+    A : int or None
+        Mass number; ``None`` for a natural element (``nat`` in the file name).
+    M : int
+        Metastable index as G4NDL writes it in ``m<M>``; 0 is the ground state.
+    """
 
     Z: int
     A: Optional[int]
@@ -31,10 +45,12 @@ class IsotopeKey:
 
     @property
     def symbol(self) -> str:
+        """Element symbol of ``Z``, or ``"Z<Z>"`` when ``Z`` is not in kika's table."""
         return ATOMIC_NUMBER_TO_SYMBOL.get(self.Z, f"Z{self.Z}")
 
     @property
     def isNatural(self) -> bool:
+        """Whether the key names the natural element (``A`` is ``None``)."""
         return self.A is None
 
     def __str__(self) -> str:

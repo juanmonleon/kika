@@ -95,6 +95,21 @@ class LazyFiles(MutableMapping):
 
     Assigning a key stores the object as given (``ENDF.add_file`` does this);
     deleting one forgets it.
+
+    :func:`open_endf` builds one and puts it in ``ENDF.files``; construct it
+    directly only to index a tape without the ``ENDF`` around it. Indexing reads
+    the whole tape once and parses nothing. Reading a key whose MF is on the tape
+    but has no parser raises ``KeyError``, as for an absent MF.
+
+    Parameters
+    ----------
+    path : str
+        The ENDF-6 tape. It is stored as an absolute path in ``path``.
+
+    Raises
+    ------
+    FileNotFoundError
+        If ``path`` does not exist (from the ``os.stat`` of the constructor).
     """
 
     def __init__(self, path: str):
@@ -159,7 +174,19 @@ class LazyFiles(MutableMapping):
         return self._sections
 
     def mts(self, mf: int) -> Tuple[int, ...]:
-        """The MT numbers of one file, from the scan; ``()`` if it is absent."""
+        """The MT numbers of one file, from the scan; ``()`` if it is absent.
+
+        Parameters
+        ----------
+        mf : int
+            The file number. It need not have a parser.
+
+        Returns
+        -------
+        tuple of int
+            The MTs of ``mf`` in file order, each once. A SEND or FEND line
+            (MT 0) is not listed.
+        """
         return tuple(mt for f, mt in self._sections if f == mf)
 
     @property
@@ -168,6 +195,18 @@ class LazyFiles(MutableMapping):
         return tuple(sorted(self._parsed))
 
     def is_loaded(self, mf: int) -> bool:
+        """True when file *mf* has been parsed or assigned already.
+
+        Parameters
+        ----------
+        mf : int
+            The file number.
+
+        Returns
+        -------
+        bool
+            Whether ``mf`` is in :attr:`loaded`.
+        """
         return mf in self._parsed
 
     def mt451(self):
@@ -188,7 +227,21 @@ class LazyFiles(MutableMapping):
     # -- parsing ---------------------------------------------------------------
 
     def load(self, *mfs: int) -> None:
-        """Parse the given files now (all of them if none are given)."""
+        """Parse the given files now (all of them if none are given).
+
+        Parameters
+        ----------
+        *mfs : int
+            The file numbers. With none, every key of the mapping, that is the
+            files of the tape that have a parser.
+
+        Raises
+        ------
+        KeyError
+            If a given MF is not a key of the mapping.
+        TapeChangedError
+            If the tape changed on disk since it was opened.
+        """
         for mf in (mfs or tuple(self._keys)):
             self[mf]
 
@@ -294,6 +347,11 @@ def open_endf(filepath: str) -> ENDF:
     -----
     Opening costs one read of the tape and a pass over its lines (about 0.1 s
     per 10 MB); see the module docstring for what is and is not guaranteed.
+
+    Raises
+    ------
+    FileNotFoundError
+        If ``filepath`` does not exist.
     """
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"ENDF file not found: {filepath}")

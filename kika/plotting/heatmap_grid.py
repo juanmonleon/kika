@@ -42,6 +42,21 @@ def shared_norm(datas: Sequence) -> Optional[Normalize]:
     covariances take the union of the ranges, centred on zero when it spans it.
     ``None`` when the panels mix correlations and covariances, which no single
     scale describes.
+
+    Parameters
+    ----------
+    datas : sequence of HeatmapPlotData
+        The heatmaps of the panels. Their ``norm`` gives each range; a heatmap
+        without a usable ``norm`` adds nothing to the range.
+
+    Returns
+    -------
+    matplotlib.colors.Normalize or None
+        ``TwoSlopeNorm`` for correlations, symmetric about zero and spanning the
+        largest absolute limit of any panel; for covariances ``TwoSlopeNorm``
+        over the union of the ranges when it spans zero and ``Normalize``
+        otherwise. None when the panels differ in ``matrix_type`` or none has a
+        finite range.
     """
     kinds = {getattr(d, "matrix_type", None) for d in datas}
     if len(kinds) != 1:
@@ -87,6 +102,17 @@ def heatmap_grid(
     title_fontsize : float, optional
         Its size; default ``"x-large"``. Each panel's own title follows its
         builder (``set_font_sizes(title=...)``).
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        One figure with a sub-figure per builder, filled in reading order, row
+        by row. Cells left over in the last row stay empty.
+
+    Raises
+    ------
+    ValueError
+        If ``builders`` is empty, or a builder has no heatmap yet.
     """
     builders = list(builders)
     if not builders:
@@ -138,6 +164,16 @@ def grid_columns(n: int) -> int:
     ``ceil(sqrt(n))``: 2 panels on one row, 3 and 4 in a 2 x 2, 5 and 6 on two
     rows of three, 7 to 9 in a 3 x 3. A single row of more than two square
     panels grows wide and short, and every panel shrinks with it.
+
+    Parameters
+    ----------
+    n : int
+        Number of panels.
+
+    Returns
+    -------
+    int
+        The number of columns, at least 1.
     """
     return max(1, math.ceil(math.sqrt(n)))
 

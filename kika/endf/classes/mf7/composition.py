@@ -81,7 +81,28 @@ class ElementComposition:
 
 @dataclass
 class MF7MT451(MF7MT):
-    """One MF7/MT451 section: HEAD, then one LIST per element."""
+    """One MF7/MT451 section: HEAD, then one LIST per element.
+
+    It states the composition of the compound a thermal-scattering evaluation
+    describes. A user gets one from ``endf[7][451]`` on a thermal-scattering tape
+    read with :func:`kika.endf.read_endf` or :func:`kika.endf.open_endf`. It can
+    also be built by hand: ``number`` has no default and every other field has
+    one.
+
+    Attributes
+    ----------
+    number : int
+        The MT number, 451.
+    data : dict
+        A free-form dictionary. The parser does not fill it.
+    num_lines : int
+        The number of lines of the section on the tape, as the parser counted them.
+    pad : PadStyle
+        How the tape filled the unused fields of a short line, kept so that the
+        section writes back in the dialect it came in.
+    elements : list of ElementComposition
+        One entry per element, each with its isotopes.
+    """
 
     elements: List[ElementComposition] = field(default_factory=list)
 

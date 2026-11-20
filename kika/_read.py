@@ -79,7 +79,13 @@ COVARIANCE_MF = (31, 32, 33, 34, 35)
 
 
 class UnknownFormatError(ValueError):
-    """The file matched none of the formats kika can open."""
+    """The file matched none of the formats kika can open.
+
+    :func:`~kika.sniff_format` raises it for a file whose content is not ENDF, ACE,
+    GNDS XML or OpenMC HDF5, and for a directory that is not the root of a G4NDL
+    library. :func:`~kika.read` raises it when no ``format`` is given and the sniff
+    fails. It is a ``ValueError``, and its message says what was tried.
+    """
 
 
 # ----------------------------------------------------------------------
@@ -183,14 +189,37 @@ def _looksLikeHdf5(path) -> bool:
 
 
 def sniff_format(path) -> str:
-    """Which of :data:`FORMATS` this file is, decided on **content**.
+    """Which of ``FORMATS`` this file is, decided on **content**.
 
     Extensions are not consulted. In this field they are unreliable to the point
     of being misleading — ``.dat``, ``.txt``, ``.endf``, no extension at all, and
     ACE files named after their ZAID are all routine.
 
-    Raises :class:`UnknownFormatError` naming what was tried, so the message is
-    actionable rather than "could not read file".
+    A directory is ``"g4ndl"`` when it is a G4NDL library root (it holds
+    ``Elastic/CrossSection`` and ``Elastic/FS``) or the ``ThermalScattering``
+    folder of one. A file is read only for its first lines: an HDF5 file is
+    ``"hdf5"`` only if it is an OpenMC data file; XML opening with ``<?xml`` or
+    ``<reactionSuite`` is ``"gnds"``; a first line ``ZAID AWR TEMP ...`` (or the
+    name of a thermal table) is ``"ace"``; MAT, MF and MT in columns 67-75 of two
+    of the first six lines is ``"endf"``. The check is in that order.
+
+    Parameters
+    ----------
+    path
+        A file, or a G4NDL directory.
+
+    Returns
+    -------
+    str
+        ``"endf"``, ``"ace"``, ``"gnds"``, ``"g4ndl"`` or ``"hdf5"``.
+
+    Raises
+    ------
+    FileNotFoundError
+        If *path* does not exist.
+    UnknownFormatError
+        If the file or directory matches none of the formats. It is a
+        ``ValueError`` and its message says what was tried.
     """
     if not os.path.exists(path):
         raise FileNotFoundError(f"no such file: {path}")
@@ -231,7 +260,7 @@ def sniff_format(path) -> str:
 
 def read(path, format: Optional[str] = None, covariances: bool = True,
          target=None):
-    """Read any supported file into a :class:`ReactionSuite`.
+    """Read any supported file into one GNDS-shaped object, whatever its format.
 
     Parameters
     ----------
@@ -239,9 +268,10 @@ def read(path, format: Optional[str] = None, covariances: bool = True,
         The file. Its format is detected from content unless ``format`` is given.
     format
         ``'endf'``, ``'ace'``, ``'gnds'``, ``'g4ndl'`` or ``'hdf5'`` (OpenMC's
-        HDF5 data, :mod:`kika.hdf5`), forcing the choice.
-        For the file whose header is malformed, or an ACE 2.0 file the sniffer
-        cannot place.
+        HDF5 data, ``kika.hdf5``), forcing the choice. Matched without regard
+        to case.
+        Use it for a file whose header is malformed, or an ACE 2.0 file the
+        sniffer cannot place.
     covariances
         When true, the covariances are decoded onto ``suite.covarianceSuite``.
         For ENDF that means MF31/33/34 off the same tape; for GNDS it means
@@ -264,17 +294,31 @@ def read(path, format: Optional[str] = None, covariances: bool = True,
 
     Returns
     -------
-    ReactionSuite or PoPs
-        A **PoPs** for a radioactive decay evaluation -- an ENDF decay
-        sublibrary tape (NSUB=4) or a GNDS file whose root is ``PoPs`` -- whose
-        one nuclide carries ``halflife`` and ``decayData``; a
-        :class:`~kika.ace.classes.photoatomic.PhotoatomicAce` for a
-        photo-atomic ACE table (``.84p``, ``.14p``...), which the model has
-        no suite for yet; a :class:`ReactionSuite` for everything else.
+    ReactionSuite, ~kika.nuclear_data.model.pops.PoPs, fissionFragmentData or PhotoatomicAce
+        By what the file holds. A **PoPs** for an ENDF decay (NSUB=4),
+        fission-yield (NSUB=5 or 11) or atomic-relaxation (NSUB=6) sublibrary
+        tape, and for a GNDS file whose root is ``PoPs``; for a decay
+        evaluation its one nuclide carries ``halflife`` and ``decayData``. A
+        ``fissionFragmentData`` for a GNDS file with that root. A
+        ``PhotoatomicAce`` for a photo-atomic ACE table (``.84p``, ``.14p``...),
+        which the model has no suite for yet. A
+        :class:`~kika.nuclear_data.model.suite.ReactionSuite` for everything
+        else.
         With ``suite.report`` set — what the decode lost, approximated or could
         not represent. Check it. A partial decode is still possible (of MF6,
         every law but LAW=5 reaches the model) and the report is the only thing
         that says so.
+
+    Raises
+    ------
+    ValueError
+        If *format* is not one of the five above, or *target* is given for a
+        format other than ``"g4ndl"``, or is missing for it.
+    FileNotFoundError
+        If *path* does not exist and *format* is None.
+    UnknownFormatError
+        If *format* is None and the content matches none of the formats (see
+        :func:`sniff_format`). It is a ``ValueError``.
     """
     if format is None:
         format = sniff_format(path)

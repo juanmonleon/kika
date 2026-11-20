@@ -1,23 +1,8 @@
-"""General-purpose materials module for multi-code support.
+"""Material compositions for the Monte Carlo codes, independent of the code.
 
-This module provides classes for defining, manipulating, and exporting
-material compositions for various Monte Carlo codes including MCNP and Serpent.
-
-Classes
--------
-Nuclide
-    Lightweight nuclide entry for a material with ZAID, fraction, and libraries.
-NuclideAccessor
-    Dictionary-like accessor that allows retrieving nuclides by ZAID or symbol.
-Material
-    General-purpose material representation with nuclide composition.
-MaterialCollection
-    Container class for multiple materials.
-
-Functions
----------
-read_material
-    Parse a material card from MCNP input lines.
+A material holds nuclides (ZAID, fraction, library overrides), a density and a
+temperature. It is built by hand or read from an MCNP or Serpent input, converted
+between atomic and weight fractions, and written back as an MCNP or Serpent card.
 
 Examples
 --------

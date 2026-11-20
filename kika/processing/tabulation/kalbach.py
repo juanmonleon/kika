@@ -32,7 +32,27 @@ def _zan(za):
 
 
 def separationEnergy(compound, nucleus, particle) -> float:
-    """Eq. 4 of Kalbach 1988, MeV. Arguments are ZA numbers."""
+    """Eq. 4 of Kalbach 1988, MeV. Arguments are ZA numbers.
+
+    Parameters
+    ----------
+    compound, nucleus
+        ZA (``1000 Z + A``) of the compound nucleus and of the nucleus that is
+        separated from it.
+    particle
+        ZA of the emitted light particle: 1 or 1001 (neutron or proton, as the
+        break-up table has them), 1002, 1003, 2003 or 2004.
+
+    Returns
+    -------
+    float
+        The separation energy in MeV.
+
+    Raises
+    ------
+    KeyError
+        If *particle* has no break-up energy in the table.
+    """
     Zc, Ac, Nc = _zan(compound)
     Za, Aa, Na = _zan(nucleus)
     return (15.68 * (Ac - Aa)
@@ -48,6 +68,33 @@ def kalbachSlope(energyIncident, energyEmitted, zaEmitted, zaTarget, zaProjectil
     """The slope at incident energy (lab, eV) and emitted energy (CM, eV); vectorised in the latter.
 
     ``zaProjectile`` is 1 (a neutron) or 0 (a photon, ENDF-6 Eq. 6.5).
+
+    Parameters
+    ----------
+    energyIncident
+        Incident energy in the laboratory frame, in eV.
+    energyEmitted
+        Emitted-particle energy in the centre-of-mass frame, in eV: a scalar or an
+        array.
+    zaEmitted
+        ZA (``1000 Z + A``) of the emitted particle. Natural carbon (6000) is taken
+        as C-12.
+    zaTarget
+        ZA of the target (6000 is C-12).
+    zaProjectile
+        1 for a neutron, 0 for a photon.
+
+    Returns
+    -------
+    float or numpy.ndarray
+        The slope ``a`` (dimensionless), in the shape of *energyEmitted*.
+
+    Raises
+    ------
+    NotImplementedError
+        If *zaProjectile* is neither 0 nor 1.
+    KeyError
+        If *zaEmitted* is not a light particle of the systematics.
     """
     if zaProjectile == 0:
         from kika._constants import NEUTRON_MASS_MEV

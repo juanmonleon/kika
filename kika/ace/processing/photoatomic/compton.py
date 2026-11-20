@@ -42,7 +42,26 @@ _LABEL = re.compile(r"(\d+)([spdfgh])(?:(\d+)/2)?$")
 
 @dataclass
 class ComptonShell:
-    """One Compton shell of a table: its profile and the subshells it stands for."""
+    """One Compton shell of a table: its profile and the subshells it stands for.
+
+    Attributes
+    ----------
+    label : str
+        The BMM shell label (``"1s"``, ``"2p"``, or ``"2p3/2"`` for Z of 36 and over).
+    electrons : float
+        The number of electrons of the subshells it stands for, summed.
+    bindingEnergy : float
+        Their binding energy in eV, weighted by electron number.
+    pz : numpy.ndarray
+        The projected electron momentum in atomic units (BMM's 31 momenta).
+    pdf : numpy.ndarray
+        The profile J(p_z) divided by its trapezoid integral over ``pz``.
+    cdf : numpy.ndarray
+        The cumulative trapezoid integral of ``pdf``, starting at 0; its last value
+        is set to exactly 1.
+    subshells : tuple of str
+        The labels of the evaluation's subshells this shell stands for.
+    """
 
     label: str
     electrons: float
@@ -60,7 +79,25 @@ def _table():
 
 
 def bmmProfiles(z: int) -> Tuple[np.ndarray, List[str], np.ndarray]:
-    """``(p_z, labels, J)`` of element ``z``: J unnormalised, one row per BMM shell."""
+    """``(p_z, labels, J)`` of element ``z``: J unnormalised, one row per BMM shell.
+
+    Parameters
+    ----------
+    z : int
+        The atomic number.
+
+    Returns
+    -------
+    tuple
+        ``p_z``, the momenta in atomic units shared by every shell; ``labels``, the
+        list of BMM shell labels; and ``J``, the profile of each shell on ``p_z``,
+        one row per label.
+
+    Raises
+    ------
+    KeyError
+        If Biggs, Mendelsohn and Mann tabulate no profiles for ``z``.
+    """
     t = _table()
     if f"labels_{z}" not in t:
         raise KeyError(f"Biggs-Mendelsohn-Mann tabulate no profiles for Z = {z}")
@@ -93,6 +130,28 @@ def comptonShells(z: int, subshells) -> Tuple[List[ComptonShell], List[str]]:
     ``subshells`` is ``[(label, electrons, binding energy in eV), ...]`` in the
     evaluation's order. ``notes`` names every BMM shell dropped and every
     subshell joined to a sibling or left without a profile.
+
+    Parameters
+    ----------
+    z : int
+        The atomic number.
+    subshells : list of tuple
+        ``(label, electrons, binding energy in eV)`` per subshell, with labels such
+        as ``"2p1/2"``.
+
+    Returns
+    -------
+    tuple
+        ``(shells, notes)``: a list of :class:`ComptonShell` in BMM's order, and a
+        list of messages.
+
+    Raises
+    ------
+    KeyError
+        If BMM tabulate no profiles for ``z``.
+    ValueError
+        If a label is not a shell label, or a subshell would stand in two Compton
+        shells.
     """
     pz, labels, js = bmmProfiles(z)
     parsed = [(label, *_parse(label)) for label in labels]

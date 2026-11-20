@@ -248,14 +248,17 @@ class SinbadBenchmark(_Blocks):
 
     @property
     def title(self) -> str:
+        """The title in the entry's documentation; ``""`` when it has none."""
         return self.documentation.title
 
     @property
     def abstract(self) -> str:
+        """The abstract in the entry's documentation; ``""`` when it has none."""
         return self.documentation.abstract
 
     @property
     def year(self) -> Optional[int]:
+        """The earliest year any date of the documentation gives, or ``None``."""
         return self.documentation.year
 
     @property
@@ -270,11 +273,26 @@ class SinbadBenchmark(_Blocks):
         Any object of the entry, by its label.
 
         Data objects first, then detectors, positions, frames, sources,
-        normalisations, conventions and files; then the calculations files.
+        normalisations, conventions and files; then the calculations files
+        (the file itself, then what it defines). ``benchmark[label]`` is the
+        same call. Unlike a data-object look-up, the label must match exactly.
+
+        Parameters
+        ----------
+        label : str
+            The label of any object of the entry or of its calculations files.
+
+        Returns
+        -------
+        object
+            The first match: a data object, detector, position, frame, source,
+            normalisation, value convention, external file, calculations file,
+            run or comparison.
 
         Raises
         ------
         LabelNotFoundError
+            If no object carries the label.
         """
         for view in (
             self.data, self.detectors, self.positions, self.frames, self.sources,
@@ -318,8 +336,30 @@ class SinbadBenchmark(_Blocks):
             argument that makes tables stored in different conventions
             comparable; without it, they are returned as stored.
         **filters
-            Passed to :meth:`DataObjectCollection.__call__` -- ``quantity``,
-            ``nature``, ``reaction``, ``detector``.
+            Passed to the filter call of
+            :class:`~kika.sinbad.DataObjectCollection` (``quantity``,
+            ``nature``, ``reaction``, ``detector``, ``kind``, ``library``,
+            ``position``, ``calculated_by``). With none, the measured objects;
+            with any, the filter is applied to every data object of the benchmark
+            (``nature`` is then not implied).
+
+        Returns
+        -------
+        pandas.DataFrame
+            The tables of the selected objects stacked as in
+            :meth:`~kika.sinbad.DataObjectCollection.to_dataframe`: an ``object``
+            column (and ``reaction``), then the table's columns. Values are as
+            the file states them, in the unit each table declares; with
+            *convention*, the value column is corrected to it and a
+            ``convention`` column records it. No unit is converted or added to the
+            frame.
+
+        Raises
+        ------
+        SinbadError
+            If an object would have to be corrected to reach *convention* and
+            cannot be (no declared correction, no magnitude, or several value
+            columns).
 
         Examples
         --------
@@ -338,11 +378,26 @@ class SinbadBenchmark(_Blocks):
             Which data objects to include. Default: every measured object that
             holds a table and a budget.
         relative : bool, default False
+            Return the relative (dimensionless) covariance instead of the
+            absolute one, which is in the square of the unit of the values.
 
         Returns
         -------
         matrix : numpy.ndarray
+            Square, one row per point whose value is filled, of the selected
+            objects: by default the measured tables with a budget, and with
+            *labels* the objects named, whatever their nature. Built from the
+            uncertainty budgets as described in :func:`kika.sinbad.covariance`.
         index : list of (label, position)
+            What each row is of.
+
+        Raises
+        ------
+        SinbadError
+            If no object is selected (none measured holds both a table and a
+            budget) or a chosen object has no budget.
+        IncompleteBudgetError
+            If a budget gives a component only at some positions.
 
         Examples
         --------
@@ -353,7 +408,26 @@ class SinbadBenchmark(_Blocks):
         return covariance(self._covariance_objects(labels), relative=relative)
 
     def correlation(self, labels: Optional[Sequence[str]] = None):
-        """The correlation matrix of the same points. See :meth:`covariance`."""
+        """
+        The correlation matrix of the same points. See :meth:`covariance`.
+
+        Parameters
+        ----------
+        labels : sequence of str, optional
+            Which data objects to include, by label (a fragment is enough when
+            it is unambiguous). Default: every measured object that holds a table
+            and a budget.
+
+        Returns
+        -------
+        matrix : numpy.ndarray
+            Square, with 1 on the diagonal, as
+            :func:`kika.sinbad.correlation` builds it from the relative
+            covariance. A point with no quantified component has 0 in its row
+            and column.
+        index : list of (label, position)
+            What each row is of.
+        """
         return correlation(self._covariance_objects(labels))
 
     def _covariance_objects(self, labels: Optional[Sequence[str]]) -> List[DataObject]:
@@ -424,8 +498,14 @@ class SinbadBenchmark(_Blocks):
         Returns
         -------
         pandas.DataFrame
-            Empty when no calculations file was opened -- there is then
-            nothing to check, which is not the same as everything being well.
+            Columns ``what``, ``name`` (the calculations label), ``expected``
+            (the sha1 the calculations file recorded for the benchmark, ``None``
+            when it recorded none), ``found`` (the sha1 of the bytes of this
+            benchmark file as it is on disk when called, the same for every row)
+            and ``ok`` (:attr:`Calculations.matches_benchmark`: ``expected``
+            equals ``found``, or nothing was recorded). Empty when no
+            calculations file was opened -- there is then nothing to check,
+            which is not the same as everything being well.
 
         Examples
         --------
@@ -462,8 +542,16 @@ class SinbadBenchmark(_Blocks):
         Returns
         -------
         pandas.DataFrame
-            One row per file: its role, its path, and whether it is present and
-            unchanged. Files inside an archive are reported as not checked.
+            One row per file, with columns ``label``, ``role``, ``path``, ``ok``
+            and ``note``. ``ok`` is whether the sha1 of the file on disk equals
+            the recorded checksum; it is ``None``, with the reason in ``note``,
+            when the file could not be checked (inside an archive, no checksum
+            recorded, file absent, or an algorithm other than sha1).
+
+        Raises
+        ------
+        SinbadError
+            If no entry directory is known (none given here or when opening).
         """
         import pandas as pd  # noqa: PLC0415
 
@@ -558,13 +646,34 @@ class Calculations(_Blocks):
     Opened through its benchmark, not directly -- it needs the benchmark to
     resolve the labels it borrows.
 
+    Parameters
+    ----------
+    path : str or pathlib.Path
+        The calculations XML file.
+    benchmark : SinbadBenchmark
+        The benchmark it belongs to. Labels this file does not define resolve
+        there.
+
+    Raises
+    ------
+    SinbadFormatError
+        If the file is not a calculations file.
+    BenchmarkMismatchError
+        If the file names a different benchmark: it declares an ``id`` or a
+        ``shortCode`` that the benchmark also has, and every such pair differs.
+        A changed sha1 is not an error; see :attr:`matches_benchmark`.
+
     Attributes
     ----------
     label : str
+        The ``label`` of the file, or the file name without extension.
     runs : dict-like view of Calculation
     data : DataObjectCollection
     comparisons : dict-like view of Comparison
     matches_benchmark : bool
+        Whether the benchmark file still has the sha1 this file recorded.
+    benchmark_checksum : str or None
+        The sha1 of the benchmark file as the calculations file records it.
 
     Examples
     --------
@@ -643,7 +752,13 @@ class Calculations(_Blocks):
         """
         Whether the benchmark file still has the sha1 this file was written against.
 
-        ``True`` when they agree or when the file records no checksum.
+        The sha1 of the bytes of the benchmark XML file, as it is on disk at the
+        moment of the call (not as it was when opened), is compared with the
+        checksum recorded in this file's ``benchmark`` element
+        (``benchmark_checksum``). Only the benchmark file is hashed, not the
+        calculations files or anything it refers to, and any edit to it, a
+        whitespace one included, changes the digest. ``True`` when they agree or
+        when the file records no checksum (nothing is then checked).
         """
         if not self.benchmark_checksum:
             return True
@@ -657,7 +772,26 @@ class Calculations(_Blocks):
         return None
 
     def resolve(self, label: str) -> Any:
-        """Any object of this file, or of its benchmark."""
+        """
+        Any object of this file, or of its benchmark.
+
+        Parameters
+        ----------
+        label : str
+            Matched exactly. This file's data objects, runs, comparisons,
+            normalisations, conventions and files are searched first, then
+            everything :meth:`SinbadBenchmark.resolve` searches.
+
+        Returns
+        -------
+        object
+            The first match.
+
+        Raises
+        ------
+        LabelNotFoundError
+            If neither this file nor its benchmark has it.
+        """
         found = self._resolve_own(label)
         if found is not None:
             return found

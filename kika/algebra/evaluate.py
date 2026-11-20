@@ -13,7 +13,7 @@ Three readings of the same table, because a step needs all three:
 At a tabulated abscissa the value is the tabulated one, bit for bit, whatever
 the law -- no ``exp(log(y))`` round trip. Between abscissae each law is
 evaluated in closed form. A log law over a non-positive value is refused when
-the table is checked (:func:`~kika.algebra.laws.validate`), not quietly read
+the table is checked (:func:`~kika.algebra.validate`), not quietly read
 lin-lin.
 """
 from __future__ import annotations
@@ -166,21 +166,92 @@ def evaluate(x: ArrayLike, y: ArrayLike, laws, q: Union[float, ArrayLike],
              outside: str = "zero") -> Union[float, np.ndarray]:
     """The table's value at *q*: right-continuous, closed at both ends.
 
-    *laws* is one code or one per interval (:func:`~kika.algebra.laws.interval_laws`
+    *laws* is one code or one per interval (:func:`~kika.algebra.interval_laws`
     builds it from ENDF pairs). *outside* is ``"zero"`` (the default: the
     function is zero off its own domain), ``"hold"`` (the end value continues)
     or ``"raise"``.
+
+    Parameters
+    ----------
+    x, y, laws
+        The table: abscissae (non-decreasing), ordinates, and one interpolation
+        law per interval (codes 1-5). A single code applies to every interval.
+    q : float or array_like
+        Where to read the table.
+    outside : {"zero", "hold", "raise"}
+        What the table is off its domain ``[x[0], x[-1]]``: zero, the nearest
+        end value, or an error. An empty table is zero everywhere, or an error
+        under ``"raise"``.
+
+    Returns
+    -------
+    float or numpy.ndarray
+        The value at *q*: a float for a scalar *q*, otherwise an array of the
+        shape of *q*.
+
+    Raises
+    ------
+    ValueError
+        If the table is not valid (:func:`~kika.algebra.validate`), if
+        *outside* is not one of the three above, or if it is ``"raise"`` and a
+        *q* lies off the domain.
     """
     return _read(x, y, laws, q, "point", outside)
 
 
 def left_limit(x, y, laws, q, outside: str = "zero"):
-    """``lim y(t)`` as ``t -> q`` from below; the outside value at ``x[0]``."""
+    """``lim y(t)`` as ``t -> q`` from below; the outside value at ``x[0]``.
+
+    Parameters
+    ----------
+    x, y, laws
+        The table: abscissae (non-decreasing), ordinates, and one interpolation
+        law per interval (codes 1-5). A single code applies to every interval.
+    q : float or array_like
+        Where to take the limit.
+    outside : {"zero", "hold", "raise"}
+        What the table is off its domain; as in :func:`evaluate`. For this
+        limit that is every ``q <= x[0]`` and every ``q > x[-1]``.
+
+    Returns
+    -------
+    float or numpy.ndarray
+        The limit: a float for a scalar *q*, otherwise an array of the shape of
+        *q*.
+
+    Raises
+    ------
+    ValueError
+        As :func:`evaluate`.
+    """
     return _read(x, y, laws, q, "left", outside)
 
 
 def right_limit(x, y, laws, q, outside: str = "zero"):
-    """``lim y(t)`` as ``t -> q`` from above; the outside value at ``x[-1]``."""
+    """``lim y(t)`` as ``t -> q`` from above; the outside value at ``x[-1]``.
+
+    Parameters
+    ----------
+    x, y, laws
+        The table: abscissae (non-decreasing), ordinates, and one interpolation
+        law per interval (codes 1-5). A single code applies to every interval.
+    q : float or array_like
+        Where to take the limit.
+    outside : {"zero", "hold", "raise"}
+        What the table is off its domain; as in :func:`evaluate`. For this
+        limit that is every ``q < x[0]`` and every ``q >= x[-1]``.
+
+    Returns
+    -------
+    float or numpy.ndarray
+        The limit: a float for a scalar *q*, otherwise an array of the shape of
+        *q*.
+
+    Raises
+    ------
+    ValueError
+        As :func:`evaluate`.
+    """
     return _read(x, y, laws, q, "right", outside)
 
 
@@ -188,13 +259,31 @@ def sample_on_union(x, y, laws, u: ArrayLike) -> np.ndarray:
     """The table read at every point of a union grid *u* that may repeat.
 
     *u* is non-decreasing, and an abscissa it repeats is a step of the result
-    (:func:`~kika.algebra.grid.union` builds such a grid). At an abscissa that
+    (:func:`~kika.algebra.union` builds such a grid). At an abscissa that
     appears once the table gives its value; at one that appears ``m >= 2``
     times the first copy gets the left limit and the last the right limit, so
     every step of every table -- a repeated abscissa of its own, or the edge of
     its domain -- comes through as a step. Copies in between (``m >= 3``) take
     the table's own entry of that rank when it has one, and its value
     otherwise.
+
+    Parameters
+    ----------
+    x, y, laws
+        The table: abscissae (non-decreasing), ordinates, and one interpolation
+        law per interval (codes 1-5). A single code applies to every interval.
+    u : array_like
+        The grid to read the table on. Off the table's domain the result is zero.
+
+    Returns
+    -------
+    numpy.ndarray
+        One value per point of *u*, in its order.
+
+    Raises
+    ------
+    ValueError
+        If the table is not valid (:func:`~kika.algebra.validate`).
     """
     x, y, laws = validate(x, y, laws)
     u = np.asarray(u, dtype=float)
@@ -238,11 +327,36 @@ def interpolate_between(x1: float, y1: ArrayLike, x2: float, y2: ArrayLike,
     ``q == x1`` the result is ``y1`` and at ``q == x2`` it is ``y2`` (``y1``
     for a histogram), bit for bit.
 
-    A log law with a non-positive value or abscissa raises: the element has no
-    value under that law, and reading it lin-lin instead is how a wrong number
-    used to come back silently. An element with an end at exactly 0 and none
+    A log law with a non-positive abscissa or a negative value raises: the
+    element has no value under that law, and reading it lin-lin instead would
+    return a wrong number silently. An element with an end at exactly 0 and none
     below is read as the limit of the law, 0 between the ends
-    (:func:`~kika.algebra.laws.vanishing_panels`).
+    (``kika.algebra.laws.vanishing_panels``).
+
+    Parameters
+    ----------
+    x1, x2 : float
+        The outer coordinates of the two functions.
+    y1, y2 : array_like
+        The two functions, as arrays of one shape.
+    law : int
+        Interpolation law between *x1* and *x2*, code 1-5.
+    q : float
+        The outer coordinate to read at.
+
+    Returns
+    -------
+    numpy.ndarray
+        An array of the shape of *y1*: a copy of *y1* when ``q == x1``,
+        ``x1 == x2`` or *law* is 1, and a copy of *y2* when ``q == x2``.
+
+    Raises
+    ------
+    ValueError
+        If *law* is not 1-5; if *law* is a ln x law (3 or 5) and *x1*, *x2* or
+        *q* is not positive; or if *law* is a ln y law (4 or 5) and a value of
+        *y1* or *y2* is negative. The last two are checked only when *q* equals
+        neither end, *x1* and *x2* differ and *law* is not 1.
     """
     law = int(law)
     if law not in (HISTOGRAM, LINLIN, LINLOG, LOGLIN, LOGLOG):

@@ -12,7 +12,30 @@ from ..plotting import endf_to_plot_data
 @dataclass
 class ENDF:
     """
-    Data class representing an ENDF file.
+    An ENDF tape: its MF files, by number.
+
+    :func:`kika.endf.read_endf` and :func:`kika.endf.open_endf` return one; the
+    first parses at once only the MFs asked for with ``mf_numbers`` (without it,
+    only the MFs that have a registered parser; the others are skipped with a
+    warning), the second each MF when it is first accessed.
+    ``endf[1]`` and ``endf.mf[1]`` give the MF file with that number (``KeyError``
+    for ``endf[1]`` when the tape has none); ``get_file`` gives None instead.
+
+    Attributes
+    ----------
+    files : dict
+        MF number to its MF file object.
+    metadata : dict
+        A free-form dictionary. The readers do not fill it.
+    mat : int or None
+        The MAT number of the tape's material.
+    source_path : str or None
+        The absolute path of the file the object was read from, set by
+        :func:`kika.endf.read_endf`. NJOY runs on that file when a cross-section
+        has to be reconstructed.
+    tape_id : str or None
+        The tape identification record (the whole first line as read), or None
+        when the file does not start with one.
     """
     files: Dict[int, MF] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)

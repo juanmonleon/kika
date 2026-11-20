@@ -1,3 +1,11 @@
+"""In-memory model of a SCALE Sensitivity Data File (SDF) and its writer.
+
+:class:`SDFData` holds one response and the sensitivity profiles
+(:class:`SDFReactionData`) of its nuclides and reactions on one energy grid, in MeV
+and per group. Uncertainties are absolute one-sigma standard deviations.
+:func:`~kika.sensitivities.sdf_parser.read_sdf` reads a file into it and
+:meth:`SDFData.write_file` writes it.
+"""
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple, Union
 import os
@@ -23,35 +31,59 @@ def sensitivity_to_plot_data(
     label: str = None,
     **styling_kwargs,
 ) -> Union['MultigroupCrossSectionPlotData', Tuple['MultigroupCrossSectionPlotData', 'UncertaintyBand']]:
-    """Build PlotData objects from raw sensitivity arrays.
+    """Step-plot data and an optional absolute uncertainty band from raw arrays.
 
-    Shared core behind :meth:`SDFReactionData.to_plot_data`; usable directly on
-    plain arrays (e.g. the dicts returned by
-    :meth:`kika.benchmarks.database.BenchmarksDatabase.get_profile_vector`) so
-    both SDF objects and benchmark profiles render through the same code path.
+    The core of :meth:`SDFReactionData.to_plot_data`, usable on plain arrays, such as
+    the profile vectors of
+    :meth:`~kika.benchmarks.BenchmarksDatabase.get_profile_vector`. The step plot is on
+    the boundaries *pert_energies*, for the :class:`~kika.plotting.PlotBuilder`. The
+    band is ``y +/- sigma * std`` with ``std`` the absolute standard deviation, divided
+    by the lethargy width too when *per_lethargy* is True.
 
-    Produces a :class:`~kika.plotting.MultigroupCrossSectionPlotData` step plot
-    and, when *uncertainty* is True and per-group absolute standard deviations
-    are available, an
-    :class:`~kika.plotting.UncertaintyBand`, both suitable for
-    :class:`~kika.plotting.PlotBuilder`.
+    Parameters
+    ----------
+    pert_energies
+        Group boundaries, ``n + 1`` values in ascending order, in MeV. A descending
+        grid gives negative lethargy widths when *per_lethargy* is True.
+    sensitivity
+        The ``n`` group sensitivities, per group (not per unit lethargy).
+    error : array_like, optional
+        The ``n`` **absolute** one-sigma standard deviations, in the units of
+        *sensitivity*. None gives no band.
+    zaid, mt : int, optional
+        Metadata of the plot, and the default label when *nuclide* or
+        *reaction_name* is missing.
+    nuclide : str, optional
+        Symbol for the default label (for example ``"Fe-56"``).
+    reaction_name : str, optional
+        Reaction for the default label (for example ``"(n,el)"``).
+    per_lethargy
+        If True the values (and *error*) are divided by ``ln(E[i+1] / E[i])`` of each
+        group.
+    uncertainty
+        If False no band is returned.
+    sigma
+        Number of standard deviations of the band.
+    uncertainty_style : {"errorbar", "band"}
+        How the band is drawn.
+    label : str, optional
+        Legend label. None joins the nuclide (or ``"ZAID <zaid>"``) and the reaction
+        name (or ``"MT<mt>"``); None remains if none of them is known.
+    **styling_kwargs
+        Passed to :class:`~kika.plotting.MultigroupCrossSectionPlotData`.
 
-    :param pert_energies: Energy bin boundaries (n+1 values, ascending, MeV).
-    :param sensitivity: Per-group sensitivity coefficients (n values).
-    :param error: Per-group absolute standard deviations (n values). If ``None`` (or
-        *uncertainty* is False) no uncertainty band is returned.
-    :param zaid: ZAID, used for the plot metadata and the default label.
-    :param mt: MT reaction number, used for metadata and the default label.
-    :param nuclide: Nuclide symbol for the default label (e.g. ``"Fe-56"``).
-    :param reaction_name: Reaction label for the default label (e.g. ``"(n,el)"``).
-    :param per_lethargy: Normalise by the lethargy width of each bin (default True).
-    :param uncertainty: Return an ``UncertaintyBand`` when error data is present.
-    :param sigma: Sigma multiplier for the uncertainty band.
-    :param uncertainty_style: ``'errorbar'`` (default) or ``'band'``.
-    :param label: Legend label; auto-generated from nuclide/reaction when None.
-    :param styling_kwargs: Forwarded to ``MultigroupCrossSectionPlotData``.
-    :returns: ``MultigroupCrossSectionPlotData`` alone when no uncertainty band is
-        produced, otherwise ``(MultigroupCrossSectionPlotData, UncertaintyBand)``.
+    Returns
+    -------
+    ~kika.plotting.MultigroupCrossSectionPlotData or tuple
+        The data alone when *uncertainty* is False or *error* is None; otherwise
+        ``(data, band)`` with an :class:`~kika.plotting.UncertaintyBand`, whose own
+        label is ``"<label> (<sigma>σ)"`` when *sigma* is not 1 and None otherwise.
+
+    Raises
+    ------
+    ValueError
+        If *uncertainty* is True and *error* is given with another shape than
+        *sensitivity* (the check is skipped otherwise).
     """
     energies = np.asarray(pert_energies, dtype=float)
     sens = np.asarray(sensitivity, dtype=float)
@@ -110,21 +142,49 @@ def sensitivity_to_plot_data(
 
 @dataclass
 class SDFReactionData:
-    """Container for sensitivity data for a specific nuclide and reaction.
+    """The sensitivity profile of one nuclide and reaction on the SDF energy grid.
 
-    :ivar zaid: ZAID of the nuclide
-    :type zaid: int
-    :ivar mt: MT reaction number
-    :type mt: int
-    :ivar sensitivity: List of sensitivity coefficients
-    :type sensitivity: List[float]
-    :ivar error: List of absolute one-sigma standard deviations (zeros, with
-        ``error_known=False``, when the source states none)
-    :type error: List[float]
-    :ivar nuclide: Nuclide symbol (calculated from ZAID)
-    :type nuclide: str
-    :ivar reaction_name: Reaction name (calculated from MT)
-    :type reaction_name: str
+    Built by hand, or found in :attr:`SDFData.data` after
+    :func:`~kika.sensitivities.sdf_parser.read_sdf` or
+    :func:`~kika.sensitivities.sensitivity_processing.create_sdf_data`. The values are
+    the groupwise
+    sensitivities, as stored in an SDF: per group, not per unit lethargy. Their sum is
+    the integrated coefficient that :meth:`SDFData.write_file` writes. Construction
+    makes the two lists floats and checks them.
+
+    Attributes
+    ----------
+    zaid : int
+        ZAID of the nuclide.
+    mt : int
+        MT reaction number.
+    sensitivity : list of float
+        One finite value per energy group, in the order of ``SDFData.pert_energies``.
+    error : list of float
+        **Absolute** one-sigma standard deviation of each value, non-negative, with the
+        units of *sensitivity*. All zeros, with ``error_known`` False, when the source
+        gives none.
+    nuclide : str
+        Symbol of *zaid*, such as ``"Fe-56"``. Set on construction.
+    reaction_name : str, optional
+        Name of the reaction. None gives the name of *mt* in kika's reaction table,
+        or ``"MT<mt>"`` when it has none. A reader keeps the name written in the file.
+    unit, region : int, optional
+        Unit and region indices of the profile's first metadata line in an SDF;
+        ``(0, 0)`` is a region-integrated (system-total) profile. None when the
+        source states none; they count as 0 in :meth:`SDFData.write_file` and in
+        :meth:`SDFData.to_sensitivity_profile`, which keeps only the ``(0, 0)`` profiles.
+    error_known : bool
+        False when the source states no uncertainty for the profile (the compact
+        TSUNAMI-1D dialect has no error block).
+
+    Raises
+    ------
+    ValueError
+        If *sensitivity* or *error* is not one-dimensional, they differ in length,
+        either has a non-finite value, or *error* has a negative value.
+    KeyError
+        If the atomic number of *zaid* is not in kika's table of elements.
     """
     zaid: int
     mt: int
@@ -202,7 +262,34 @@ class SDFReactionData:
         unit: int | None = None,
         region: int | None = None,
     ) -> "SDFReactionData":
-        """Build reaction data from relative one-sigma errors."""
+        """Build a profile from relative one-sigma errors, stored as absolute ones.
+
+        The stored error of each group is ``|sensitivity| * relative_error``, so a group
+        with sensitivity 0 gets error 0 whatever its relative error.
+
+        Parameters
+        ----------
+        zaid, mt
+            Nuclide and reaction.
+        sensitivity
+            The groupwise sensitivities, per group.
+        relative_error
+            Relative one-sigma error of each value (a fraction of it), non-negative,
+            of the shape of *sensitivity*.
+        reaction_name, unit, region
+            As the attributes of :class:`SDFReactionData`.
+
+        Returns
+        -------
+        SDFReactionData
+            With ``error_known`` True.
+
+        Raises
+        ------
+        ValueError
+            If the shapes differ, *relative_error* has a non-finite or negative value,
+            or the checks of :class:`SDFReactionData` fail.
+        """
         sensitivity_array = np.asarray(sensitivity, dtype=float)
         relative_array = np.asarray(relative_error, dtype=float)
         if sensitivity_array.shape != relative_array.shape:
@@ -288,33 +375,38 @@ class SDFReactionData:
         label: str = None,
         **styling_kwargs
     ) -> Union['MultigroupCrossSectionPlotData', Tuple['MultigroupCrossSectionPlotData', 'UncertaintyBand']]:
-        """Convert sensitivity data for this reaction into PlotData objects.
+        """Step-plot data of this profile, with an optional absolute uncertainty band.
 
-        Returns a :class:`~kika.plotting.MultigroupCrossSectionPlotData` (step plot) and,
-        optionally, an :class:`~kika.plotting.UncertaintyBand` suitable for
-        :class:`~kika.plotting.PlotBuilder`.
+        Calls :func:`~kika.sensitivities.sdf.sensitivity_to_plot_data` with the profile's
+        ``sensitivity`` and ``error``. The band is built from ``error`` whatever
+        ``error_known`` says, so a profile read from the compact SDF dialect gets a
+        band of zero width.
 
-        :param pert_energies: Energy bin boundaries (n+1 values, ascending order in MeV).
-        :type pert_energies: array-like
-        :param per_lethargy: If True, normalise sensitivity values by the lethargy
-            width of each bin (matches ``Coefficients.plot()`` behaviour).
-        :type per_lethargy: bool
-        :param uncertainty: If True, return an ``UncertaintyBand`` alongside the
-            nominal data.
-        :type uncertainty: bool
-        :param sigma: Sigma multiplier for the uncertainty band.
-        :type sigma: float
-        :param uncertainty_style: Rendering style for the uncertainty band:
-            ``'errorbar'`` (default for sensitivity data) or ``'band'``.
-        :type uncertainty_style: str
-        :param label: Legend label. Auto-generated as ``"<nuclide> <reaction_name>"``
-            (e.g. ``"Fe-56 (n,el)"``) when *None*.
-        :type label: str, optional
-        :param styling_kwargs: Forwarded to ``MultigroupCrossSectionPlotData``
-            (``color``, ``linestyle``, ``linewidth``, etc.).
-        :returns: ``MultigroupCrossSectionPlotData`` when *uncertainty=False*,
-            or ``(MultigroupCrossSectionPlotData, UncertaintyBand)`` when *uncertainty=True*.
-        :rtype: MultigroupCrossSectionPlotData or Tuple[MultigroupCrossSectionPlotData, UncertaintyBand]
+        Parameters
+        ----------
+        pert_energies
+            Group boundaries, ``len(sensitivity) + 1`` values in ascending order, in
+            MeV (the SDF's own grid is ``SDFData.pert_energies``).
+        per_lethargy
+            If True the values and errors are divided by the lethargy width of each
+            group.
+        uncertainty
+            If True the band is returned with the data.
+        sigma
+            Number of standard deviations of the band.
+        uncertainty_style : {"errorbar", "band"}
+            How the band is drawn.
+        label : str, optional
+            Legend label. None gives ``"<nuclide> <reaction_name>"``, for example
+            ``"Fe-56 (n,el)"``.
+        **styling_kwargs
+            Passed to :class:`~kika.plotting.MultigroupCrossSectionPlotData`.
+
+        Returns
+        -------
+        ~kika.plotting.MultigroupCrossSectionPlotData or tuple
+            The data alone when *uncertainty* is False; otherwise ``(data, band)``
+            with an :class:`~kika.plotting.UncertaintyBand`.
         """
         return sensitivity_to_plot_data(
             pert_energies,
@@ -335,20 +427,45 @@ class SDFReactionData:
 
 @dataclass
 class SDFData:
-    """Container for SDF data.
+    """The sensitivity profiles of one response (an SDF), on one energy grid in MeV.
 
-    :ivar title: Title of the SDF dataset
-    :type title: str
-    :ivar energy: Energy value or label
-    :type energy: str
-    :ivar pert_energies: List of perturbation energy boundaries
-    :type pert_energies: List[float]
-    :ivar r0: Unperturbed tally result (reference response value)
-    :type r0: float
-    :ivar e0: Absolute one-sigma uncertainty of the unperturbed tally result
-    :type e0: float
-    :ivar data: List of reaction-specific sensitivity data
-    :type data: List[SDFReactionData]
+    A user gets one from
+    :func:`~kika.sensitivities.sensitivity_processing.create_sdf_data`,
+    :func:`~kika.sensitivities.sdf_parser.read_sdf` or :meth:`merge`, or builds one by
+    hand. Sensitivities are per group and their uncertainties absolute one-sigma
+    values, as in the SCALE convention. :meth:`write_file` writes the SCALE layout,
+    with energies in eV and descending, and the response as ``r0 +/- e0`` in the line
+    that SCALE labels k-eff; :func:`~kika.sensitivities.sdf_parser.read_sdf`
+    reads it back. Construction checks the grid and the profiles.
+
+    Attributes
+    ----------
+    title : str
+        Title, the first line of the file.
+    energy : str
+        Label of the detector energy bin (``"lower_upper"`` in MeV or ``"integral"``
+        when made by
+        :func:`~kika.sensitivities.sensitivity_processing.create_sdf_data`). It is
+        part of the file name :meth:`write_file` makes.
+    pert_energies : list of float
+        Group boundaries in MeV, ``n + 1`` values, finite, non-negative and strictly
+        monotonic. :func:`~kika.sensitivities.sdf_parser.read_sdf` and
+        :func:`~kika.sensitivities.sensitivity_processing.create_sdf_data` give them
+        ascending.
+    r0 : float, optional
+        The response (for criticality, k-eff).
+    e0 : float, optional
+        **Absolute** one-sigma uncertainty of *r0*, finite and non-negative. None
+        is written as 0.
+    data : list of SDFReactionData
+        The profiles. Each has ``n`` values.
+
+    Raises
+    ------
+    ValueError
+        If *pert_energies* is not a one-dimensional grid of at least two finite,
+        non-negative, strictly monotonic values; a profile does not have ``n``
+        values; *r0* or *e0* is not finite; or *e0* is negative.
     """
     title: str
     energy: str
@@ -546,34 +663,33 @@ class SDFData:
         label: str = None,
         **styling_kwargs
     ) -> Union['MultigroupCrossSectionPlotData', Tuple['MultigroupCrossSectionPlotData', 'UncertaintyBand']]:
-        """Convert a reaction's sensitivity data into PlotData objects.
+        """Step-plot data of one profile, chosen by position or by ZAID and MT.
 
-        Look up a reaction either by *index* into :attr:`data` or by
-        *(zaid, mt)* pair, then delegate to
-        :meth:`SDFReactionData.to_plot_data`.
+        Passes the profile and this object's ``pert_energies`` (MeV) to
+        :meth:`SDFReactionData.to_plot_data`, which describes the data and the band.
 
-        :param index: Direct index into ``self.data``.
-        :type index: int, optional
-        :param zaid: ZAID of the nuclide (requires *mt* as well).
-        :type zaid: int, optional
-        :param mt: MT reaction number (requires *zaid* as well).
-        :type mt: int, optional
-        :param per_lethargy: Normalise by lethargy width (default ``True``).
-        :type per_lethargy: bool
-        :param uncertainty: Include an ``UncertaintyBand`` (default ``True``).
-        :type uncertainty: bool
-        :param sigma: Sigma multiplier for the uncertainty band.
-        :type sigma: float
-        :param uncertainty_style: Rendering style for the uncertainty band:
-            ``'errorbar'`` (default for sensitivity data) or ``'band'``.
-        :type uncertainty_style: str
-        :param label: Legend label (auto-generated if *None*).
-        :type label: str, optional
-        :param styling_kwargs: Forwarded to ``MultigroupCrossSectionPlotData``.
-        :returns: See :meth:`SDFReactionData.to_plot_data`.
-        :rtype: MultigroupCrossSectionPlotData or Tuple[MultigroupCrossSectionPlotData, UncertaintyBand]
-        :raises ValueError: If neither *index* nor *(zaid, mt)* is given, or if
-            the requested reaction is not found.
+        Parameters
+        ----------
+        index : int, optional
+            Position in ``data``. When given, *zaid* and *mt* are ignored.
+        zaid, mt : int, optional
+            Both are needed to select the first profile of ``data`` with that ZAID and
+            MT.
+        per_lethargy, uncertainty, sigma, uncertainty_style, label
+            As in :meth:`SDFReactionData.to_plot_data`.
+        **styling_kwargs
+            Passed to :class:`~kika.plotting.MultigroupCrossSectionPlotData`.
+
+        Returns
+        -------
+        ~kika.plotting.MultigroupCrossSectionPlotData or tuple
+            The data alone when *uncertainty* is False; otherwise ``(data, band)``.
+
+        Raises
+        ------
+        ValueError
+            If *index* is out of range, no profile has the given *zaid* and *mt*, or
+            neither *index* nor both *zaid* and *mt* are given.
         """
         if index is not None:
             if index < 0 or index >= len(self.data):
@@ -612,31 +728,39 @@ class SDFData:
               energy: Optional[str] = None,
               r0: Optional[float] = None,
               e0: Optional[float] = None) -> 'SDFData':
-        """Merge multiple SDFData objects into a single one.
+        """Merge several SDFs on the same energy grid into one.
 
-        All SDFs must share the same perturbation energy grid.  The merged
-        object contains every ``SDFReactionData`` entry from the inputs;
-        duplicate ``(zaid, mt)`` pairs are not allowed.
+        The result holds every profile of the inputs (the same
+        :class:`SDFReactionData` objects, not copies). The grids are compared as lists,
+        so they must be equal value for value. ``r0`` and ``e0`` that the inputs state
+        (not None) must be equal, unless given here.
 
-        :param sdf_list: List of SDFData objects to combine.
-        :type sdf_list: List[SDFData]
-        :param title: Override title. If *None*, uses the common title when all
-            inputs match, otherwise joins distinct titles with ``" + "``.
-        :type title: Optional[str]
-        :param energy: Override energy label. If *None*, uses the common label
-            when all inputs match, otherwise raises ``ValueError``.
-        :type energy: Optional[str]
-        :param r0: Override response value. If *None*, uses the common value
-            when all inputs agree, otherwise raises ``ValueError``.
-        :type r0: Optional[float]
-        :param e0: Override absolute response uncertainty. If *None*, uses the common value
-            when all inputs agree, otherwise raises ``ValueError``.
-        :type e0: Optional[float]
-        :returns: A new merged SDFData instance.
-        :rtype: SDFData
-        :raises ValueError: If *sdf_list* is empty, energy grids differ,
-            r0/e0 values conflict (and none was given), energy labels differ
-            (and none was given), or duplicate (zaid, mt) pairs are found.
+        Parameters
+        ----------
+        sdf_list
+            The SDFs to combine.
+        title : str, optional
+            Title of the result. None keeps the title the inputs share, or joins their
+            distinct titles with ``" + "``.
+        energy : str, optional
+            Energy label of the result. None takes the label the inputs share.
+        r0 : float, optional
+            Response of the result. None takes the common value of the inputs that
+            have one (None when none has).
+        e0 : float, optional
+            **Absolute** one-sigma error of the response, as *r0*.
+
+        Returns
+        -------
+        SDFData
+            A new object.
+
+        Raises
+        ------
+        ValueError
+            If *sdf_list* is empty; the grids differ; the inputs state different
+            ``r0`` (or ``e0``) and none is given; the energy labels differ and none is
+            given; or the same ``(zaid, mt)`` appears in two profiles.
         """
         if not sdf_list:
             raise ValueError("Cannot merge an empty list of SDFData objects")
@@ -715,23 +839,23 @@ class SDFData:
                   energy: Optional[str] = None,
                   r0: Optional[float] = None,
                   e0: Optional[float] = None) -> Tuple[bool, str]:
-        """Check whether a list of SDFData objects can be merged.
+        """Whether :meth:`merge` would succeed, with the reason when it would not.
 
-        Runs the same validation as :meth:`merge` but never raises.
-        Pass the same override parameters you would pass to :meth:`merge`
-        to check whether the merge would succeed with those overrides.
+        Runs :meth:`merge` and catches its ``ValueError``; the title does not matter
+        to the outcome.
 
-        :param sdf_list: List of SDFData objects to check.
-        :type sdf_list: List[SDFData]
-        :param energy: Override energy label (same as in :meth:`merge`).
-        :type energy: Optional[str]
-        :param r0: Override response value (same as in :meth:`merge`).
-        :type r0: Optional[float]
-        :param e0: Override absolute response uncertainty (same as in :meth:`merge`).
-        :type e0: Optional[float]
-        :returns: ``(True, "")`` if the merge would succeed, or
-            ``(False, reason)`` with a human-readable explanation otherwise.
-        :rtype: Tuple[bool, str]
+        Parameters
+        ----------
+        sdf_list
+            The SDFs to check.
+        energy, r0, e0
+            The overrides you would give to :meth:`merge`.
+
+        Returns
+        -------
+        tuple of (bool, str)
+            ``(True, "")`` when the merge succeeds, otherwise ``(False, message)`` with
+            the message of the ``ValueError``.
         """
         try:
             cls.merge(sdf_list, energy=energy, r0=r0, e0=e0)
@@ -752,11 +876,37 @@ class SDFData:
         return SDFData.merge([self, other])
 
     def write_file(self, output_dir: Optional[str] = None):
-        """
-        Write the SDF data using the standard SCALE uncertainty convention.
+        r"""Write ``<title>_<energy>.sdf`` in the SCALE layout and print its path.
 
-        :param output_dir: Directory where the SDF file will be written. If None, uses current directory.
-        :type output_dir: Optional[str]
+        The name has spaces, ``/`` and ``\`` replaced by ``_``. An existing file of that
+        name is overwritten. The file holds, in this order:
+
+        - the title, the number of groups and of profiles (with the number of
+          region-integrated ones, those with ``unit`` and ``region`` both 0);
+        - the line ``r0 +/- e0`` (``e0`` absolute; None is written as 0), with no
+          label after it;
+        - the energy boundaries in **eV**, **descending**: the MeV grid times
+          ``1e6``, reversed, so it assumes ``pert_energies`` is ascending;
+        - for each profile, sorted by ZAID and then MT: a header line, the unit and
+          region, a fixed line of zeros, five scalars, the group sensitivities and
+          their absolute standard deviations, both in descending-energy order.
+
+        The five scalars are the sum of the sensitivities; its standard deviation (the
+        absolute errors added in quadrature); the sum of the absolute values; the sum of
+        the sensitivities whose sign is opposite to the total (for a total of exactly
+        0, the negative ones if any is negative, otherwise the positive ones); and the
+        standard deviation of that subset in quadrature. Numbers are written with six
+        decimals in scientific notation.
+
+        Parameters
+        ----------
+        output_dir : str, optional
+            Directory of the file, created if missing. None is the current directory.
+
+        Raises
+        ------
+        ValueError
+            If the object fails the checks of :class:`SDFData`.
         """
         self._validate()
         # Use current directory if output_dir is not provided
@@ -897,18 +1047,27 @@ class SDFData:
         return block
 
     def group_inelastic_reactions(self, replace: bool = False, remove_originals: bool = True) -> None:
-        """Group inelastic reactions (MT 51-91) into MT 4 for each nuclide.
+        """Sum the profiles of MT 51 to 91 of each nuclide into its MT 4, in place.
 
-        This method combines all inelastic scattering reactions (MT 51-91) into
-        the total inelastic scattering reaction (MT 4) for each nuclide.
+        The group sensitivities are added, and the absolute errors are added in
+        quadrature, which assumes the profiles are independent. Profiles are matched by
+        ZAID and MT only, so ``unit`` and ``region`` are ignored; a new MT 4 has none.
+        A nuclide with no MT 51 to 91 is left alone. Messages are printed, and nothing is
+        returned.
 
-        :param replace: If True, replace existing MT 4 data if present.
-                        If False, raise an error when MT 4 is already present.
-        :type replace: bool, optional
-        :param remove_originals: If True, remove the original MT 51-91 reactions
-                                after combining them.
-        :type remove_originals: bool, optional
-        :raises ValueError: If MT 4 already exists for a nuclide and replace=False
+        Parameters
+        ----------
+        replace
+            If True an existing MT 4 of the nuclide is overwritten with the sum (its
+            own values are not added in). If False an existing MT 4 is an error.
+        remove_originals
+            If True the profiles of MT 51 to 91 of the nuclide are removed afterwards.
+
+        Raises
+        ------
+        ValueError
+            If a nuclide that has MT 51 to 91 already has an MT 4 and *replace* is
+            False. Nuclides processed before it have been changed by then.
         """
         # Group data by ZAID
         nuclide_reactions = {}

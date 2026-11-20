@@ -175,7 +175,55 @@ class ApplicationData:
 
 @dataclass
 class ReactionSuite:
-    """§14.1.1. One evaluation, of one projectile on one target."""
+    """§14.1.1. One evaluation, of one projectile on one target.
+
+    The root of the model. It is returned by the decoders (``kika.read`` on an
+    ENDF, ACE or GNDS file) or built by hand from its fields. Every child is
+    present as an empty container, never None, except ``resonances``, which is None
+    when the evaluation states no resonance data. Energies are in eV and cross
+    sections in b as the evaluations state them; kika does not rescale on read.
+
+    Attributes
+    ----------
+    evaluation : str
+        The evaluation identifier (library and version).
+    projectile, target : str
+        The projectile and the target, as the evaluation names them.
+    projectileFrame : Frame
+        The frame of the projectile's energy; a string is converted.
+    interaction : {"nuclear", "atomic", "thermalNeutronScatteringLaw"}
+        The kind of evaluation. Any other value raises ``ValueError`` on
+        construction.
+    format : str
+        The GNDS version of the structure, ``"2.1"`` by default.
+    externalFiles : ExternalFiles
+        Files the evaluation refers to, usually its covariance suite.
+    styles : Styles
+        The styles of the data; the form labels of a cross section (``'eval'``,
+        ``'recon'``) refer to them. ``styleLabels`` lists their labels.
+    PoPs : PoPs
+        The particle properties.
+    resonances : Resonances, optional
+        The resolved and unresolved resonance data, or None.
+    reactions : Reactions
+        The exclusive reactions, indexed by ENDF MT (``reactions[102]``) or by label.
+    orphanProducts, sums, fissionComponents, productions, incompleteReactions
+        The other reaction containers of GNDS, with the same access as *reactions*:
+        products without a parent reaction, cross-section and multiplicity sums
+        (MT 1, MT 4, and so on), the fission chances, production reactions and
+        incomplete reactions.
+    applicationData : ApplicationData
+        Application-specific data that GNDS does not interpret.
+    covarianceSuite : CovarianceSuite, optional
+        The covariances read beside the evaluation (a separate root in GNDS), or
+        None.
+    provenance
+        The ENDF header (MF 1 / MT 451) kept so that the encoder can write it back,
+        or None.
+    report : ConversionReport, optional
+        What the decoder lost, approximated or refused; None for a suite built by
+        hand.
+    """
 
     evaluation: str
     projectile: str
@@ -224,14 +272,46 @@ class ReactionSuite:
     # ------------------------------------------------------------------
 
     def reactionByLabel(self, label: str) -> Reaction:
+        """The exclusive reaction with this label.
+
+        Parameters
+        ----------
+        label
+            The reaction label, searched in ``reactions`` only.
+
+        Returns
+        -------
+        Reaction
+
+        Raises
+        ------
+        KeyError
+            If no reaction of ``reactions`` has the label.
+        """
         return self.reactions.byLabel(label)
 
     def reactionByENDF_MT(self, mt: int) -> Reaction:
         """Look-up by MT, for the ENDF adapters.
 
-        Searches ``reactions`` first and then ``sums``, because MT1 and MT4 are
-        summed quantities rather than exclusive reactions and a caller asking
-        for "MT1" means the sum.
+        Searches ``reactions``, ``sums``, ``fissionComponents``, ``productions`` and
+        ``incompleteReactions``, in that order, and returns the first match.
+        MT 1 and MT 4 are summed quantities and not exclusive reactions, and a
+        caller asking for "MT 1" means the sum.
+
+        Parameters
+        ----------
+        mt
+            The ENDF MT number.
+
+        Returns
+        -------
+        Reaction
+            The first reaction with that ``ENDF_MT``.
+
+        Raises
+        ------
+        KeyError
+            If no container holds the MT.
         """
         for container in (self.reactions, self.sums, self.fissionComponents,
                           self.productions, self.incompleteReactions):
@@ -242,13 +322,21 @@ class ReactionSuite:
         raise KeyError(f"no reaction with ENDF_MT {mt} anywhere in this suite")
 
     def findReactionByENDF_MT(self, mt: int) -> Optional[Reaction]:
-        """The same look-up, returning ``None`` instead of raising.
+        """The same look-up as :meth:`reactionByENDF_MT`, returning ``None`` if absent.
 
-        Two callers, two meanings. An encoder asking for the MT it is about
-        wants :meth:`reactionByENDF_MT`, because its absence is a bug. A decoder
-        asking "is there a reaction to hang this MF4 section on?" is asking a
-        question with a legitimate *no* — an ENDF file may carry an MF4/MT with
-        no MF3/MT — and should not have to catch ``KeyError`` to find out.
+        An encoder asking for the MT it is about wants :meth:`reactionByENDF_MT`,
+        because its absence is a bug. A decoder asking whether there is a reaction
+        to hang an MF 4 section on has a legitimate "no": an ENDF file may carry an
+        MF 4 / MT section with no MF 3 / MT.
+
+        Parameters
+        ----------
+        mt
+            The ENDF MT number.
+
+        Returns
+        -------
+        Reaction or None
         """
         try:
             return self.reactionByENDF_MT(mt)
@@ -257,40 +345,58 @@ class ReactionSuite:
 
     @property
     def hasResonances(self) -> bool:
+        """True when the evaluation states resonance data (``resonances`` is not None)."""
         return self.resonances is not None
 
     def styleLabels(self) -> List[str]:
+        """The labels of ``styles``."""
         return self.styles.labels
 
     def cross_section(
         self, mt: int, form: str = EVAL_LABEL
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """``(E, sigma)`` for one MT, as two arrays. The 90 % journey, in one call.
+        """``(E, sigma)`` for one MT, as two arrays: the shortcut to a cross section.
 
-        The long road — ``suite.reactions[102].crossSection.evaluated.xs`` — stays
-        exactly as it is and remains the honest one, because it says which *form*
-        it is reading. This is the shortcut, and it goes through
-        :meth:`reactionByENDF_MT`, so summed quantities such as MT1 and MT4 work
-        here even though they are not in ``reactions``.
+        The long road, ``suite.reactions[102].crossSection.evaluated.xs``, says
+        which *form* it is reading. This goes through :meth:`reactionByENDF_MT`,
+        so summed quantities such as MT 1 and MT 4 work here even though they are
+        not in ``reactions``.
 
-        **The name.** kika's convention is GNDS nouns and Python verbs, so a
-        method may be ``snake_case`` where an attribute may not. It is registered
-        in ``tests/test_gnds_naming.py::DIVERGENCES`` so that the next reader does
-        not mistake it for a snake_case twin of ``Reaction.crossSection`` and
-        "fix" it.
+        A ``Regions1d`` form is flattened onto one grid by its ``toEndfRegions``,
+        which drops the boundary point the regions share. **The regions' differing
+        interpolation rules do not survive that flattening**: the returned pair is
+        faithful at its own nodes and nowhere else, so a value between two nodes
+        must come from ``form.evaluate(E)``, which interpolates each region by its
+        own rule.
 
-        A ``Regions1d`` form is flattened onto one grid by
-        :meth:`~kika.nuclear_data.model.functions.regions1d.Regions1d.toEndfRegions`,
-        which already drops the boundary point the regions share. **The regions'
-        differing interpolation rules do not survive that flattening** — the
-        returned pair is faithful at its own nodes and nowhere else, so anything
-        that needs a value *between* two nodes must call ``form.evaluate(E)``
-        instead, which interpolates each region by its own rule.
+        **The arrays are in eV and b**, and that is checked: a form whose axes
+        state another unit raises instead of being rescaled. An unstated unit
+        (no axes, or an empty unit) is not an error.
 
-        **The arrays are in barns and eV, and that is now checked rather than
-        assumed** — see :func:`_checkUnits`. A form whose axes state anything
-        else raises here instead of being silently rescaled by whatever reads
-        the result.
+        Parameters
+        ----------
+        mt
+            The ENDF MT number, searched as in :meth:`reactionByENDF_MT`.
+        form
+            The label of the cross-section form to read: ``'eval'`` by default, or
+            for instance ``'recon'`` for a reconstructed one.
+
+        Returns
+        -------
+        tuple of numpy.ndarray
+            ``(E, sigma)``: the energies in eV and the cross sections in b, copies
+            that may be edited without touching the evaluation.
+
+        Raises
+        ------
+        KeyError
+            If the MT is absent, or the reaction has no form with that label (the
+            message lists the available labels).
+        ValueError
+            If the axes of the form state a unit other than eV and b.
+        TypeError
+            If the form is not a tabulated function (for instance a resonance
+            form or a reference): reconstruct or dereference it first.
         """
         reaction = self.reactionByENDF_MT(mt)
         # Raises with the available labels listed -- CrossSection.__getitem__
@@ -308,6 +414,26 @@ class ReactionSuite:
         the form (a one-region ``regions1d`` is written as its ``XYs1d``), and
         the model holds the form whatever it is spelt as. Searches ``reactions``,
         ``sums``, ``fissionComponents``, ``productions`` and ``orphanProducts``.
+
+        Parameters
+        ----------
+        reference
+            A ``Reference`` form, whose ``href`` names a container label and a form
+            label (``[@label='...']`` twice or more; the first and the last are used).
+
+        Returns
+        -------
+        object
+            The form itself (not a copy) of the first reaction whose label is the
+            container label.
+
+        Raises
+        ------
+        ValueError
+            If the ``href`` names fewer than two labels.
+        KeyError
+            If no reaction of the containers above has the container label, or it
+            has no form with the form label.
         """
         import re
 
@@ -348,6 +474,35 @@ class ReactionSuite:
         production a ``recon`` form that follows the reaction's, so ask for that.
         A table that starts above the resonance range, or a tape whose MF3
         already holds the resonances (LRP=2), is read as it is.
+
+        Parameters
+        ----------
+        production
+            A production reaction of ``productions`` or its label.
+        form
+            The label of the cross-section form (and of the multiplicity form,
+            when the multiplicity has one of that label; else its default form).
+            ``'eval'`` by default.
+
+        Returns
+        -------
+        tuple of numpy.ndarray
+            ``(E, sigma)``: energies in eV and the production cross sections in b.
+            The energies are the union of the nodes of both tables inside their
+            common domain; the cross section and the multiplicity are each
+            evaluated by their own interpolation rule.
+
+        Raises
+        ------
+        ValueError
+            If the reaction does not have exactly one product other than the
+            photon, or that product has no multiplicity; if the cross section
+            states units other than eV and b; if it refers to a reaction form that
+            lacks the resonance contribution (see above).
+        KeyError
+            If the production label or the form label is not found.
+        TypeError
+            If the cross-section form is not a tabulated function.
         """
         if isinstance(production, str):
             production = self.productions.byLabel(production)

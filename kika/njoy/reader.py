@@ -25,7 +25,23 @@ NJOY_MODULE_NAMES: set[str] = {
 
 @dataclass
 class ParsedModule:
-    """A single parsed NJOY module from an input deck."""
+    """One module of a deck read by ``read_deck``: its original text and its values.
+
+    Attributes
+    ----------
+    name
+        Module name in lower case (``"moder"``).
+    raw_lines
+        The module's lines exactly as they were in the deck: the ``--`` comment
+        lines above the module name, the name line and every card after it up to
+        the next module (or the ``stop`` line).
+    params
+        The values of the cards, keyed by NJOY's field names (``nin``, ``err``),
+        with a ``_line_map`` entry that gives, for each field, the indices of its
+        card among the module's cards (comment lines and the name line not
+        counted). None when no values could be extracted: the module has no
+        parser (``mixr``) or its parser failed.
+    """
 
     name: str              # Lowercase module name (e.g. "moder")
     raw_lines: list[str]   # Original lines (comments + name + cards)
@@ -34,7 +50,24 @@ class ParsedModule:
 
 @dataclass
 class ParsedDeck:
-    """Complete parsed NJOY input deck."""
+    """An NJOY deck split into modules, as returned by ``read_deck``.
+
+    Only the cards of the modules with a parser are turned into values; all the
+    text is kept, so ``render`` returns the deck as it was read, up to the
+    ``stop`` line.
+
+    Attributes
+    ----------
+    preamble
+        The lines before the first module (and before the ``--`` comment lines
+        that belong to it). With no module, the lines before the ``stop`` line,
+        or the whole text when there is none.
+    modules
+        The modules in deck order.
+    stop_line
+        The last line whose first word is ``stop``, or None when there is none.
+        The lines after it are dropped.
+    """
 
     preamble: list[str] = field(default_factory=list)
     modules: list[ParsedModule] = field(default_factory=list)
@@ -58,16 +91,42 @@ class ParsedDeck:
         raise KeyError(f"No module named {name!r}")
 
     def get_all(self, name: str) -> list[ParsedModule]:
-        """Get all modules matching name (case-insensitive)."""
+        """Return every module called *name*, in deck order.
+
+        Parameters
+        ----------
+        name
+            Module name; the case is ignored.
+
+        Returns
+        -------
+        list[ParsedModule]
+            The matching modules, an empty list when there are none.
+        """
         name_lower = name.lower()
         return [mod for mod in self.modules if mod.name == name_lower]
 
 
 def read_deck(text: str) -> ParsedDeck:
-    """Parse an NJOY input deck string into structured data.
+    """Split an NJOY deck into modules and parse the cards of each one.
 
-    Unknown/unimplemented modules are preserved (with ``params=None``)
-    and a warning is emitted.
+    A module starts at a line whose first word is the name of an NJOY module
+    (``moder``, ``reconr``, ``mixr`` ...), in any case, and runs to the next one;
+    the ``--`` comment lines directly above it belong to it. Every line is kept
+    as text in ``ParsedModule.raw_lines``. The cards are parsed into
+    ``ParsedModule.params`` for the modules kika has a parser for.
+
+    Parameters
+    ----------
+    text
+        The deck, one card per line.
+
+    Returns
+    -------
+    ParsedDeck
+        The preamble, the modules and the ``stop`` line. A module with no parser,
+        or whose cards the parser rejects, keeps ``params=None`` and a warning is
+        emitted.
     """
     from .modules import parse_module
 
@@ -136,5 +195,16 @@ def read_deck(text: str) -> ParsedDeck:
 
 
 def read_deck_file(path: str | Path) -> ParsedDeck:
-    """Read and parse an NJOY input deck from a file."""
+    """Read an NJOY deck from a UTF-8 file and parse it with ``read_deck``.
+
+    Parameters
+    ----------
+    path
+        Path of the deck file.
+
+    Returns
+    -------
+    ParsedDeck
+        As ``read_deck`` returns it.
+    """
     return read_deck(Path(path).read_text(encoding="utf-8"))

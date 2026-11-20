@@ -79,7 +79,28 @@ class InputDeck:
     # ------------------------------------------------------------------
 
     def moder(self, *, nin: int = 20, nout: int | None = None) -> InputDeck:
-        """Add a MODER step."""
+        """Add a MODER step, which converts a tape between ASCII and binary.
+
+        Parameters
+        ----------
+        nin
+            Input unit, an NJOY unit number (negative for a binary tape, positive
+            for an ASCII one).
+        nout
+            Output unit. None allocates the next free unit counting down from
+            -21, skipping the units the deck already names through the tape
+            parameters of earlier steps (``nin``, ``nout``, ``nendf``, ``npend``,
+            ``ngout``, ``ngout1``, ``ngout2``, ``ngend``, ``ngendf``, ``nace``,
+            ``ndir``, ``nplot`` and ``nmatx``). Units given as ``ngam1``,
+            ``ngam2``, ``ngen1`` to ``ngen8``, ``nplt``, ``nplt0``, ``infile``
+            or ``nps`` are not recorded, so an allocated unit can coincide with
+            one of them. Later steps take this tape as their ENDF tape.
+
+        Returns
+        -------
+        InputDeck
+            The deck itself, so that calls chain.
+        """
         nout = nout if nout is not None else self._alloc_tape()
         self._append("MODER", {"nin": nin, "nout": nout})
         self._endf_tape = nout
@@ -96,7 +117,41 @@ class InputDeck:
         errmax: float | None = None,
         errint: float | None = None,
     ) -> InputDeck:
-        """Add a RECONR step."""
+        """Add a RECONR step, which reconstructs the pointwise cross sections.
+
+        Writes one material. A tolerance left out is not written, so NJOY applies
+        its own default.
+
+        Parameters
+        ----------
+        nendf
+            Input ENDF tape. None takes the output of the last ``moder`` step.
+        npend
+            Output PENDF tape. None allocates the next free unit (see ``moder``).
+            Later steps take it as their PENDF tape.
+        isotope
+            Isotope name as ``load_isotopes`` spells it (``"U235"``), turned into
+            its MAT number. An unknown name gives the MAT of U-235 without an
+            error.
+        err
+            Reconstruction tolerance, as a fraction.
+        tempr
+            Reconstruction temperature in K. None writes 0 when ``errmax`` or
+            ``errint`` is given and nothing otherwise.
+        errmax, errint
+            NJOY's ``errmax`` and ``errint`` (fractions). ``errint`` given alone
+            writes ``errmax`` as 10 times ``err``.
+
+        Returns
+        -------
+        InputDeck
+            The deck itself, so that calls chain.
+
+        Raises
+        ------
+        ValueError
+            If *nendf* is None and no ``moder`` step comes before.
+        """
         nendf = self._resolve_input(nendf, '_endf_tape', 'ENDF')
         npend = npend if npend is not None else self._alloc_tape()
         p: dict[str, Any] = {
@@ -131,7 +186,52 @@ class InputDeck:
         istrap: str | None = None,
         temp1: float | None = None,
     ) -> InputDeck:
-        """Add a BROADR step."""
+        """Add a BROADR step, which Doppler-broadens the cross sections.
+
+        An optional value left out is not written, so NJOY applies its own default.
+        The optional fields of the cards are written in NJOY's order, so giving a
+        later one also writes the earlier ones (with the values below).
+
+        Parameters
+        ----------
+        nendf
+            Input ENDF tape. None takes the output of the last ``moder`` step.
+        nin
+            Input PENDF tape. None takes the output of the last step that wrote one.
+        nout
+            Output PENDF tape. None allocates the next free unit (see ``moder``).
+            Later steps take it as their PENDF tape.
+        isotope
+            Isotope name as ``load_isotopes`` spells it, turned into its MAT number
+            (an unknown name gives the MAT of U-235).
+        temperatures
+            Final temperatures in K: a list, or a string of values separated by
+            spaces. They are written as ``str`` gives them.
+        errthn
+            Thinning tolerance, as a fraction.
+        thnmax
+            Upper energy limit of the thinning, in eV. Written when given, or as 1
+            when ``errmax`` or ``errint`` is given without it.
+        errmax, errint
+            NJOY's ``errmax`` and ``errint`` (fractions). ``errint`` given alone
+            writes ``errmax`` as 10 times ``errthn``.
+        istart, istrap
+            NJOY's ``istart`` and ``istrap`` options, ``"no"`` or ``"yes"``, written
+            as 0 or 1. Giving ``temp1`` writes both (0 for the one left out) and
+            giving ``istrap`` writes ``istart`` too.
+        temp1
+            NJOY's ``temp1``, in K.
+
+        Returns
+        -------
+        InputDeck
+            The deck itself, so that calls chain.
+
+        Raises
+        ------
+        ValueError
+            If *nendf* or *nin* is None and no earlier step provides that tape.
+        """
         nendf = self._resolve_input(nendf, '_endf_tape', 'ENDF')
         nin = self._resolve_input(nin, '_pendf_tape', 'PENDF')
         nout = nout if nout is not None else self._alloc_tape()
@@ -177,7 +277,54 @@ class InputDeck:
         iprint: str | None = None,
         ed: float | None = None,
     ) -> InputDeck:
-        """Add a HEATR step."""
+        """Add a HEATR step, which computes heating (KERMA) and damage energies.
+
+        An optional value left out is not written, so NJOY applies its own default.
+        The optional fields of the card are written in NJOY's order, so giving a
+        later one also writes the earlier ones: ``ed``, ``iprint`` or ``local``
+        writes ``nqa`` as 0 and ``ntemp`` (0 if not given), and ``ed`` or
+        ``iprint`` also writes ``local`` (0 if not given); ``ed`` also writes
+        ``iprint`` (0 if not given).
+
+        Parameters
+        ----------
+        nendf
+            Input ENDF tape. None takes the output of the last ``moder`` step.
+        nin
+            Input PENDF tape. None takes the output of the last step that wrote one.
+        nout
+            Output PENDF tape. None allocates the next free unit (see ``moder``).
+            Later steps take it as their PENDF tape.
+        nplot
+            Plot tape unit, always written (0 for none).
+        isotope
+            Isotope name as ``load_isotopes`` spells it, turned into its MAT number
+            (an unknown name gives the MAT of U-235).
+        mtk
+            MT numbers of the partial heating reactions: a list, or a string of
+            numbers separated by spaces. Their count is written as ``npk``.
+        ntemp
+            NJOY's ``ntemp``. Written when it is not 0, and as 0 when ``ed``,
+            ``iprint`` or ``local`` is given.
+        local
+            ``"Transported"`` (written as 0) or ``"Deposited"`` (1), NJOY's
+            ``local`` option. Any other value is not written, except that 0 is
+            written when ``ed`` or ``iprint`` is given.
+        iprint
+            ``"min"``, ``"max"`` or ``"check"`` (0, 1, 2), or an integer.
+        ed
+            NJOY's ``ed``, the displacement energy.
+
+        Returns
+        -------
+        InputDeck
+            The deck itself, so that calls chain.
+
+        Raises
+        ------
+        ValueError
+            If *nendf* or *nin* is None and no earlier step provides that tape.
+        """
         nendf = self._resolve_input(nendf, '_endf_tape', 'ENDF')
         nin = self._resolve_input(nin, '_pendf_tape', 'PENDF')
         nout = nout if nout is not None else self._alloc_tape()
@@ -224,7 +371,56 @@ class InputDeck:
         emax: float = 4.0,
         iprint: str | None = None,
     ) -> InputDeck:
-        """Add a THERMR step (thermal scattering cross sections)."""
+        """Add a THERMR step, which adds thermal scattering cross sections.
+
+        ``nbin``, ``iin``, ``icoh``, ``tol`` and ``emax`` are always written, with
+        the defaults below (which are kika's). The other optional fields are
+        written in NJOY's order, so giving a later one writes the earlier ones
+        (``iform`` as 0, ``natom`` as 1, ``mtref`` as 222).
+
+        Parameters
+        ----------
+        nendf
+            Tape holding the thermal scattering law. None writes 0 (free gas) when
+            ``matde`` is 0, and otherwise takes the output of the last ``leapr``
+            step.
+        nin
+            Input PENDF tape. None takes the output of the last step that wrote one.
+        nout
+            Output PENDF tape. None allocates the next free unit (see ``moder``).
+            Later steps take it as their PENDF tape.
+        matde
+            MAT number of the scatterer on *nendf*; 0 for a free gas.
+        isotope
+            Isotope name as ``load_isotopes`` spells it, turned into the MAT number
+            of the material on the PENDF tape (an unknown name gives the MAT of
+            U-235).
+        nbin
+            Number of equiprobable angles.
+        iin, icoh
+            NJOY's inelastic and elastic options.
+        iform, natom, mtref
+            NJOY's ``iform``, ``natom`` and ``mtref``.
+        temperatures
+            Temperatures in K: a list, or a string of values separated by spaces.
+        tol
+            Tolerance, as a fraction.
+        emax
+            Upper energy limit of the thermal treatment, in eV.
+        iprint
+            ``"min"``, ``"max"`` or ``"check"`` (0, 1, 2), or an integer.
+
+        Returns
+        -------
+        InputDeck
+            The deck itself, so that calls chain.
+
+        Raises
+        ------
+        ValueError
+            If *nin* is None and no earlier step provides a PENDF tape, or if
+            *nendf* is None, ``matde`` is not 0 and no ``leapr`` step comes before.
+        """
         # nendf is the thermal/LEAPR tape; 0 means free-gas
         if nendf is None:
             if matde == 0:
@@ -276,7 +472,44 @@ class InputDeck:
         iprint: str | None = None,
         nunx: int | None = None,
     ) -> InputDeck:
-        """Add a PURR step."""
+        """Add a PURR step, which computes unresolved-resonance probability tables.
+
+        Parameters
+        ----------
+        nendf
+            Input ENDF tape. None takes the output of the last ``moder`` step.
+        nin
+            Input PENDF tape. None takes the output of the last step that wrote one.
+        nout
+            Output PENDF tape. None allocates the next free unit (see ``moder``).
+            Later steps take it as their PENDF tape.
+        isotope
+            Isotope name as ``load_isotopes`` spells it, turned into its MAT number
+            (an unknown name gives the MAT of U-235).
+        temperatures
+            Temperatures in K: a list, or a string of values separated by spaces.
+        sigz
+            Sigma-zero values in barns: a list, or a string of values separated by
+            spaces.
+        nbin, nladr
+            NJOY's number of probability bins and of resonance ladders, always
+            written.
+        iprint
+            ``"min"``, ``"max"`` or ``"check"`` (0, 1, 2), or an integer. Written
+            when given, or as 1 when ``nunx`` is given without it.
+        nunx
+            NJOY's ``nunx``; written when given.
+
+        Returns
+        -------
+        InputDeck
+            The deck itself, so that calls chain.
+
+        Raises
+        ------
+        ValueError
+            If *nendf* or *nin* is None and no earlier step provides that tape.
+        """
         nendf = self._resolve_input(nendf, '_endf_tape', 'ENDF')
         nin = self._resolve_input(nin, '_pendf_tape', 'PENDF')
         nout = nout if nout is not None else self._alloc_tape()
@@ -317,7 +550,39 @@ class InputDeck:
         sigz: list[float] | str = "1e10",
         iprint: str | None = None,
     ) -> InputDeck:
-        """Add an UNRESR step."""
+        """Add an UNRESR step, which computes effective self-shielded cross sections.
+
+        Parameters
+        ----------
+        nendf
+            Input ENDF tape. None takes the output of the last ``moder`` step.
+        nin
+            Input PENDF tape. None takes the output of the last step that wrote one.
+        nout
+            Output PENDF tape. None allocates the next free unit (see ``moder``).
+            Later steps take it as their PENDF tape.
+        isotope
+            Isotope name as ``load_isotopes`` spells it, turned into its MAT number
+            (an unknown name gives the MAT of U-235).
+        temperatures
+            Temperatures in K: a list, or a string of values separated by spaces.
+        sigz
+            Sigma-zero values in barns: a list, or a string of values separated by
+            spaces.
+        iprint
+            ``"min"``, ``"max"`` or ``"check"`` (0, 1, 2), or an integer. Not
+            written when None.
+
+        Returns
+        -------
+        InputDeck
+            The deck itself, so that calls chain.
+
+        Raises
+        ------
+        ValueError
+            If *nendf* or *nin* is None and no earlier step provides that tape.
+        """
         nendf = self._resolve_input(nendf, '_endf_tape', 'ENDF')
         nin = self._resolve_input(nin, '_pendf_tape', 'PENDF')
         nout = nout if nout is not None else self._alloc_tape()
@@ -350,7 +615,28 @@ class InputDeck:
         nin: int | None = None,
         nout: int | None = None,
     ) -> InputDeck:
-        """Add a GASPR step."""
+        """Add a GASPR step, which adds gas-production cross sections.
+
+        Parameters
+        ----------
+        nendf
+            Input ENDF tape. None takes the output of the last ``moder`` step.
+        nin
+            Input PENDF tape. None takes the output of the last step that wrote one.
+        nout
+            Output PENDF tape. None allocates the next free unit (see ``moder``).
+            Later steps take it as their PENDF tape.
+
+        Returns
+        -------
+        InputDeck
+            The deck itself, so that calls chain.
+
+        Raises
+        ------
+        ValueError
+            If *nendf* or *nin* is None and no earlier step provides that tape.
+        """
         nendf = self._resolve_input(nendf, '_endf_tape', 'ENDF')
         nin = self._resolve_input(nin, '_pendf_tape', 'PENDF')
         nout = nout if nout is not None else self._alloc_tape()
@@ -383,7 +669,67 @@ class InputDeck:
         iprint: str | None = None,
         ismooth: int | None = None,
     ) -> InputDeck:
-        """Add a GROUPR step."""
+        """Add a GROUPR step, which computes multigroup cross sections.
+
+        Parameters
+        ----------
+        nendf
+            Input ENDF tape. None takes the output of the last ``moder`` step.
+        npend
+            Input PENDF tape. None takes the output of the last step that wrote one.
+        ngout1
+            Input GENDF tape, 0 for none.
+        ngout2
+            Output GENDF tape. None allocates the next free unit (see ``moder``).
+            ``ccccr``, ``matxsr``, ``wimsr``, ``dtfr`` and ``powr`` steps take it
+            as their input.
+        isotope
+            Isotope name as ``load_isotopes`` spells it, turned into its MAT number
+            (an unknown name gives the MAT of U-235).
+        ign, igg
+            NJOY's neutron and photon group structures. With ``ign`` 1 the
+            boundaries come from ``egn``, and with ``igg`` 1 from ``egg``.
+        iwt
+            NJOY's weight function option. 0, 1 and negative values are refused;
+            4 needs ``eb``, ``tb``, ``ec`` and ``tc``.
+        lord
+            Legendre order.
+        temperatures
+            Temperatures in K: a list, or a string of values separated by spaces.
+        sigz
+            Sigma-zero values in barns: a list, or a string of values separated by
+            spaces.
+        title
+            Title card. None writes ``multigroup data for <isotope>``.
+        reactions
+            Reaction cards, written once for each temperature: a list of tuples
+            ``(mfd,)``, ``(mfd, mtd)`` or ``(mfd, mtd, name)``. None writes the
+            single card ``3 /``.
+        egn, egg
+            Neutron and photon group boundaries in eV, as NJOY reads them (a list,
+            or for ``egn`` a string of values separated by spaces). ``egn`` is written
+            only when ``ign`` is 1, and when it is None the placeholders ``{NGN} /``
+            and ``{EGN} /`` are written for the user to fill in. ``egg`` is written
+            only when ``igg`` is 1, and is then required.
+        eb, tb, ec, tc
+            Parameters of the analytic flux of ``iwt`` 4, in the units NJOY reads.
+        iprint
+            ``"min"``, ``"max"`` or ``"check"`` (0, 1, 2), or an integer.
+        ismooth
+            NJOY's ``ismooth``. Giving it writes ``iprint`` too (1 if None).
+
+        Returns
+        -------
+        InputDeck
+            The deck itself, so that calls chain.
+
+        Raises
+        ------
+        ValueError
+            If *nendf* or *npend* is None and no earlier step provides that tape;
+            if ``iwt`` is 0, 1 or negative; if ``iwt`` is 4 and one of ``eb``,
+            ``tb``, ``ec``, ``tc`` is None; or if ``igg`` is 1 and ``egg`` is None.
+        """
         nendf = self._resolve_input(nendf, '_endf_tape', 'ENDF')
         npend = self._resolve_input(npend, '_pendf_tape', 'PENDF')
         ngout2 = ngout2 if ngout2 is not None else self._alloc_tape()
@@ -448,7 +794,52 @@ class InputDeck:
         egg: list[float] | None = None,
         iprint: str | None = None,
     ) -> InputDeck:
-        """Add a GAMINR step (multigroup photoatomic cross sections)."""
+        """Add a GAMINR step, which computes multigroup photoatomic cross sections.
+
+        Parameters
+        ----------
+        nendf
+            Input ENDF tape. None takes the output of the last ``moder`` step.
+        npend
+            Input PENDF tape. None takes the output of the last step that wrote one.
+        ngam1
+            Input GENDF tape, 0 for none.
+        ngam2
+            Output GENDF tape. None allocates the next free unit (see ``moder``).
+            Later ``ccccr``, ``matxsr``, ``wimsr``, ``dtfr`` and ``powr`` steps take
+            it as their input.
+        isotope
+            Isotope name as ``load_isotopes`` spells it, turned into its MAT number
+            (an unknown name gives the MAT of U-235).
+        igg
+            NJOY's photon group structure. With 1 the boundaries come from ``egg``.
+        iwt
+            NJOY's weight function option. 1 is refused.
+        lord
+            Legendre order.
+        title
+            Title card. None writes ``photoatomic data for <isotope>``.
+        reactions
+            Reaction cards: a list of tuples ``(mfd,)``, ``(mfd, mtd)`` or
+            ``(mfd, mtd, name)``. None writes the single card ``-1 /``.
+        egg
+            Photon group boundaries in eV, as NJOY reads them; required, and written,
+            only when ``igg`` is 1.
+        iprint
+            ``"min"``, ``"max"`` or ``"check"`` (0, 1, 2), or an integer. Not
+            written when None.
+
+        Returns
+        -------
+        InputDeck
+            The deck itself, so that calls chain.
+
+        Raises
+        ------
+        ValueError
+            If *nendf* or *npend* is None and no earlier step provides that tape;
+            if ``iwt`` is 1; or if ``igg`` is 1 and ``egg`` is None.
+        """
         nendf = self._resolve_input(nendf, '_endf_tape', 'ENDF')
         npend = self._resolve_input(npend, '_pendf_tape', 'PENDF')
         ngam2 = ngam2 if ngam2 is not None else self._alloc_tape()
@@ -493,7 +884,58 @@ class InputDeck:
         dap: float | None = None,
         egn: list[float] | None = None,
     ) -> InputDeck:
-        """Add an ERRORR step."""
+        """Add an ERRORR step, which processes covariance data into multigroup form.
+
+        The step does not update the tapes later steps take by default.
+
+        Parameters
+        ----------
+        nendf
+            Input ENDF tape. None takes the output of the last ``moder`` step.
+        npend
+            Input PENDF tape. None takes the output of the last step that wrote one.
+        ngout
+            Input GENDF tape, 0 for none.
+        nout
+            Output tape. None allocates the next free unit (see ``moder``).
+        isotope
+            Isotope name as ``load_isotopes`` spells it, turned into its MAT number
+            (an unknown name gives the MAT of U-235).
+        ign
+            NJOY's neutron group structure. With 1 or 19 the boundaries come from
+            ``egn``.
+        iwt
+            NJOY's weight function option. 4 is refused: the analytic flux
+            parameters it needs cannot be passed here.
+        iprint
+            ``"min"``, ``"max"`` or ``"check"`` (0, 1, 2), or an integer. None
+            writes 1.
+        irelco, mprint
+            NJOY's ``irelco`` and ``mprint`` options.
+        tempin
+            NJOY's ``tempin``, in K.
+        mfcov
+            NJOY's ``mfcov``: the MF number of the covariance file to process.
+        irespr, dap
+            NJOY's ``irespr`` and ``dap``, written only when given. Giving ``dap``
+            writes ``irespr`` as 1 if it is None, and ``legord``, ``ifissp`` and
+            ``efmean`` as 0.
+        egn
+            Group boundaries in eV, as NJOY reads them. Giving them forces ``ign``
+            to 1. With ``ign`` 1 or 19 and no ``egn``, the placeholders ``{NGN} /``
+            and ``{EGN} /`` are written for the user to fill in.
+
+        Returns
+        -------
+        InputDeck
+            The deck itself, so that calls chain.
+
+        Raises
+        ------
+        ValueError
+            If *nendf* or *npend* is None and no earlier step provides that tape,
+            or if ``iwt`` is 4.
+        """
         nendf = self._resolve_input(nendf, '_endf_tape', 'ENDF')
         npend = self._resolve_input(npend, '_pendf_tape', 'PENDF')
         nout = nout if nout is not None else self._alloc_tape()
@@ -555,7 +997,78 @@ class InputDeck:
         # Extra iz,aw pairs:
         nxtra: list[tuple[int, float]] | None = None,
     ) -> InputDeck:
-        """Add an ACER step."""
+        """Add an ACER step, which writes an ACE file.
+
+        ``iopt`` selects the cards written after the title: 1 fast data, 2 thermal
+        data, 3 a material and a temperature card, 4 and 5 a material card, and 7
+        and 8 none (NJOY's options for an existing ACE file). The branch is chosen
+        by the absolute value of ``iopt``; the signed value is written.
+
+        Parameters
+        ----------
+        nendf
+            Input ENDF tape. For ``iopt`` 7 and 8, 0 when None; otherwise None
+            takes the output of the last ``moder`` step.
+        npend
+            Input PENDF tape. For ``iopt`` 7 and 8, 0 when None; otherwise None
+            takes the output of the last step that wrote one.
+        ngend
+            Input GENDF tape, 0 for none.
+        nace, ndir
+            Output ACE tape and output xsdir tape (units 40 and 41 by default).
+        isotope
+            Isotope name as ``load_isotopes`` spells it, turned into its MAT number
+            (an unknown name gives the MAT of U-235). Not used for ``iopt`` 7 and 8.
+        tempd
+            Temperature in K, written as it is. Not used for ``iopt`` 7 and 8.
+        suff
+            ACE suffix, as a number: 0.03 is written ``.03``. A positive value is
+            truncated to two decimals, a negative one is written as it is and 0
+            is written ``.00``.
+        iopt
+            NJOY's ACER option (see above). Another value raises ``ValueError``.
+        itype
+            NJOY's ``itype``: the ACE file type.
+        iprint
+            ``"min"``, ``"max"`` or ``"check"`` (0, 1, 2), or an integer. None
+            writes 1.
+        newfor, iopp, ismooth
+            Fast data (``iopt`` 1) only: NJOY's ``newfor``, ``iopp`` and ``ismooth``,
+            written as 1 when None.
+        thin1, thin2, thin3
+            Fast data only: the three thinning values of NJOY. With ``thin1`` None the
+            card is written empty and NJOY applies its defaults.
+        tname
+            Thermal data (``iopt`` 2) only: the ZAID name of the thermal table.
+            Required for ``iopt`` 2.
+        iza
+            Thermal data only: the ZA values of the moderator, as a list, a string
+            of values separated by spaces, or one value. Required for ``iopt`` 2.
+        mti
+            Thermal data only: the MT of the inelastic reaction. Required for
+            ``iopt`` 2.
+        nbint, mte, ielas, nmix, emax, iwt
+            Thermal data only: the fields of NJOY's thermal card after ``mti``
+            (``emax`` in eV). They are written only when one of them differs from
+            its default (16, 0, 0, 1, 1000.0, 2), and then every field up to the last
+            one that differs is written.
+        nxtra
+            Pairs ``(iz, aw)`` of extra nuclides. Their count goes on the option
+            card and the pairs on a card after the title.
+
+        Returns
+        -------
+        InputDeck
+            The deck itself, so that calls chain.
+
+        Raises
+        ------
+        ValueError
+            If ``iopt`` is not 7 or 8 and *nendf* or *npend* is None with no earlier
+            step to take it from; if ``iopt`` is not 1, 2, 3, 4, 5, 7 or 8 in
+            absolute value; or if ``iopt`` is 2 and ``tname``, ``iza`` or ``mti``
+            is None.
+        """
         abs_iopt = abs(iopt)
         # iopt 7/8 read existing ACE files — no ENDF/PENDF needed
         if abs_iopt in (7, 8):
@@ -638,7 +1151,46 @@ class InputDeck:
         hlibid: str = "",
         hdescr: str = "",
     ) -> InputDeck:
-        """Add a COVR step (post-process ERRORR covariance data)."""
+        """Add a COVR step, which plots or formats the covariance data of ERRORR.
+
+        ``nout`` selects the mode: a positive value writes a covariance library
+        (library mode, with ``matype``, ``hlibid`` and ``hdescr``); 0 or a negative
+        value writes plots (plot mode, with ``nplot`` and the options after it). The
+        options of the other mode are ignored.
+
+        Parameters
+        ----------
+        nin
+            Input ERRORR tape. There is no default.
+        nout
+            Output library tape (library mode), or 0 for plot mode.
+        nplot
+            Plot mode only: the plot tape unit.
+        cases
+            One card per entry, each a list of numbers written as given. None
+            writes one card holding the placeholder ``{MAT}`` for the user to
+            fill in.
+        icolor
+            Plot mode only: NJOY's colour option. With 2, ``tlev`` gives the
+            colour levels.
+        tlev
+            Plot mode only: the levels, used when ``icolor`` is 2.
+        epmin
+            Plot mode only: NJOY's ``epmin``, written unchanged (NJOY reads it in
+            eV); ``0.0`` is written when None.
+        irelco, noleg, nstart, ndiv
+            Plot mode only: NJOY's options of the same name.
+        matype
+            Library mode only: NJOY's library type.
+        hlibid, hdescr
+            Library mode only: the library identifier and description, written
+            between quotes. Empty by default.
+
+        Returns
+        -------
+        InputDeck
+            The deck itself, so that calls chain.
+        """
         p: dict[str, Any] = {"nin": nin, "nout": nout}
         if cases is not None:
             p["cases"] = cases
@@ -692,7 +1244,60 @@ class InputDeck:
         secondary_temperatures: list[dict] | None = None,
         comments: list[str] | None = None,
     ) -> InputDeck:
-        """Add a LEAPR step (thermal scattering law)."""
+        """Add a LEAPR step, which builds a thermal scattering law from a spectrum.
+
+        The fields of the cards from ``npr`` on follow NJOY's order and an optional
+        one is written only when it or a later one differs from its default
+        (written as the signature shows), so NJOY applies the same default
+        otherwise. The material, ZA and grids have no default.
+
+        Parameters
+        ----------
+        mat
+            MAT number (an integer, not a name) of the thermal material.
+        za
+            ZA of the principal scatterer.
+        awr
+            Atomic weight ratio of the principal scatterer.
+        spr
+            Free-atom cross section of the principal scatterer, in barns.
+        alphas, betas
+            The alpha and beta grids, in NJOY's dimensionless units. Their lengths
+            are written as ``nalpha`` and ``nbeta``.
+        temperatures
+            One dict per temperature of the principal scatterer, in order. The
+            keys are ``temp`` (K; a negative value reuses the previous spectrum and
+            ends the dict), ``delta``, ``ni``, ``rho`` (a list), ``twt``, ``c``,
+            ``tbeta``; optionally ``nd`` with ``energies`` and ``weights`` when
+            ``nd`` is above 0; and, when ``nsk`` is not 0, ``nka``, ``dka``,
+            ``kappas`` (when ``nka`` is above 0) and, for ``nsk`` 2, ``cfrac``.
+        nout
+            Output tape. None allocates the next free unit (see ``moder``). A later
+            ``thermr`` step takes it as its thermal tape.
+        title
+            Title card.
+        npr, iel, ncold, nsk
+            NJOY's fields of those names.
+        nss, b7, aws, sps, mss
+            NJOY's secondary-scatterer fields.
+        lat, isabt, ilog, smin
+            NJOY's fields of those names. ``smin`` is written when given.
+        nphon
+            NJOY's number of phonon terms.
+        iprint
+            ``"min"``, ``"max"`` or ``"check"`` (0, 1, 2), or an integer. None
+            writes 0.
+        secondary_temperatures
+            Same dicts as *temperatures*, for the secondary scatterer. Written
+            only when ``nss`` is above 0 and ``b7`` is 0.
+        comments
+            Accepted and not written.
+
+        Returns
+        -------
+        InputDeck
+            The deck itself, so that calls chain.
+        """
         nout = nout if nout is not None else self._alloc_tape()
         p: dict[str, Any] = {
             "nout": nout,
@@ -743,11 +1348,37 @@ class InputDeck:
         ivers: int = 0,
         comments: list[str] | None = None,
     ) -> InputDeck:
-        """Add a RESXSR step (resonance cross section file).
+        """Add a RESXSR step, which writes a resonance cross-section file.
 
-        Each entry in *materials* is a dict with keys ``isotope`` (resolved
-        to both the hollerith name and MAT number) and ``unit`` (PENDF tape
-        number for that material).
+        Parameters
+        ----------
+        nout
+            Output tape. None allocates the next free unit (see ``moder``).
+        materials
+            One dict per material, with the keys ``isotope`` (a name as
+            ``load_isotopes`` spells it, used as the name on the card and turned
+            into the MAT number; an unknown name gives the MAT of U-235) and
+            ``unit`` (the PENDF tape of that material, written as given).
+        maxt
+            NJOY's maximum number of temperatures per material.
+        efirst, elast
+            NJOY's ``efirst`` and ``elast`` fields, written unchanged. NJOY reads
+            them as the lower and upper energy limits in eV.
+        eps
+            NJOY's ``eps`` field, written unchanged. NJOY reads it as the thinning
+            tolerance, a fraction.
+        huse
+            User identification text, written between quotes.
+        ivers
+            NJOY's version number of the file.
+        comments
+            Lines of text written between quotes; their count is written on the
+            card.
+
+        Returns
+        -------
+        InputDeck
+            The deck itself, so that calls chain.
         """
         nout = nout if nout is not None else self._alloc_tape()
         mat_list: list[dict] = []
@@ -803,7 +1434,49 @@ class InputDeck:
         atem: list[float] | None = None,
         asig: list[float] | None = None,
     ) -> InputDeck:
-        """Add a CCCCR step (CCCC interface files from GENDF)."""
+        """Add a CCCCR step, which writes CCCC interface files from a GENDF tape.
+
+        Parameters
+        ----------
+        nin
+            Input GENDF tape. None takes the output of the last ``groupr`` or
+            ``gaminr`` step.
+        nisot, nbrks, ndlay
+            Output units of the ISOTXS, BRKOXS and DLAYXS files, 0 for none. The
+            ISOTXS cards are written when ``nisot`` is above 0 and the BRKOXS
+            cards when ``nbrks`` is above 0.
+        isotopes
+            One dict per isotope, with the keys ``hisnm``, ``habsid``, ``hident``,
+            ``hmat`` (texts), ``imat`` (an integer) and ``xspo``.
+        ngroup
+            Number of energy groups.
+        maxord, ifopt, lprint, ivers, huse, hsetid, nggrup
+            NJOY's fields of those names; ``huse`` and ``hsetid`` are text.
+        nsblok, maxup, maxdn, ichix
+            ISOTXS only: NJOY's fields. ``maxdn`` is ``ngroup`` when None.
+        spec
+            ISOTXS only: the ``ngroup`` values of the spectrum card, written when
+            ``ichix`` is 1 or more.
+        isotxs_params
+            ISOTXS only: one dict per isotope with the keys ``kbr``, ``amass``,
+            ``efiss``, ``ecapt``, ``temp``, ``sigpot`` and ``adens``. None writes
+            none.
+        nti, nzi
+            BRKOXS only: the numbers of temperatures and of sigma-zero values.
+        atem, asig
+            BRKOXS only: the temperatures and the sigma-zero values, written when
+            ``nti`` or ``nzi`` is above 0.
+
+        Returns
+        -------
+        InputDeck
+            The deck itself, so that calls chain.
+
+        Raises
+        ------
+        ValueError
+            If *nin* is None and no ``groupr`` or ``gaminr`` step comes before.
+        """
         nin = self._resolve_input(nin, '_gendf_tape', 'GENDF')
         p: dict[str, Any] = {
             "nin": nin,
@@ -856,7 +1529,47 @@ class InputDeck:
         ngen3: int = 0, ngen4: int = 0, ngen5: int = 0,
         ngen6: int = 0, ngen7: int = 0, ngen8: int = 0,
     ) -> InputDeck:
-        """Add a MATXSR step (MATXS library from GENDF tapes)."""
+        """Add a MATXSR step, which writes a MATXS library from GENDF tapes.
+
+        Parameters
+        ----------
+        ngen1
+            First input GENDF tape. None takes the output of the last ``groupr``
+            or ``gaminr`` step.
+        ngen2, ngen3, ngen4, ngen5, ngen6, ngen7, ngen8
+            Further input GENDF tapes, 0 for none. Zeros at the end of ``ngen3`` to
+            ``ngen8`` are left off the card.
+        nmatx
+            Output MATXS tape. None allocates the next free unit (see ``moder``).
+        ivers
+            NJOY's version number of the file.
+        huse
+            User identification text, written between quotes.
+        hsetid
+            Lines of the set identification, written between quotes. None writes
+            ``matxs library``.
+        particles
+            One dict per particle, with the keys ``name`` and ``ngrp`` (its number
+            of groups). Required.
+        data_types
+            One dict per data type, with the keys ``name``, ``jinp`` and
+            ``joutp``. Required.
+        materials
+            One dict per material, with the keys ``hmat``, ``matno`` (a MAT number,
+            or an isotope name as ``load_isotopes`` spells it; an unknown name gives
+            the MAT of U-235) and, optionally, ``matgg``. Required.
+
+        Returns
+        -------
+        InputDeck
+            The deck itself, so that calls chain.
+
+        Raises
+        ------
+        ValueError
+            If *particles*, *data_types* or *materials* is None, or if *ngen1* is
+            None and no ``groupr`` or ``gaminr`` step comes before.
+        """
         ngen1 = self._resolve_input(ngen1, '_gendf_tape', 'GENDF')
         nmatx = nmatx if nmatx is not None else self._alloc_tape()
         if particles is None:
@@ -921,7 +1634,54 @@ class InputDeck:
         nrg: int | None = None,
         igref: int | None = None,
     ) -> InputDeck:
-        """Add a WIMSR step (WIMS library from GENDF tape)."""
+        """Add a WIMSR step, which writes WIMS library data from a GENDF tape.
+
+        Parameters
+        ----------
+        ngendf
+            Input GENDF tape. None takes the output of the last ``groupr`` or
+            ``gaminr`` step.
+        nout
+            Output tape. None allocates the next free unit (see ``moder``).
+        isotope
+            Isotope name as ``load_isotopes`` spells it, turned into its MAT number
+            (an unknown name gives the MAT of U-235).
+        rdfid
+            NJOY's ``rdfid``. None writes the MAT number.
+        iverw, igroup
+            NJOY's fields. ``igroup`` 9 selects custom groups and needs ``ngnd``,
+            ``nfg`` and ``nrg``.
+        ntemp, nsigz, sgref, ires, sigp, mti, mtc, ip1opt, inorf, isof, ifprod, jp1
+            NJOY's fields of the material card, always written.
+        lambdas
+            The Goldstein lambdas: a list, or a string of values separated by
+            spaces. None writes 13 zeros.
+        iprint
+            ``"min"``, ``"max"`` or ``"check"`` (0, 1, 2), or an integer. None
+            writes 0.
+        burnup
+            A dict that turns on the burnup cards (NJOY's ``iburn`` is written
+            as 1). Keys: ``ntis``, ``efiss``, and optionally ``capture`` and
+            ``decay`` (each a pair of numbers) and ``fission_products`` (a list of
+            such pairs).
+        p1flx
+            The current spectrum values: a list, or a string of values separated
+            by spaces. Required when ``jp1`` is above 0.
+        ngnd, nfg, nrg, igref
+            Custom groups, used only when ``igroup`` is 9. ``igref`` is optional.
+
+        Returns
+        -------
+        InputDeck
+            The deck itself, so that calls chain.
+
+        Raises
+        ------
+        ValueError
+            If *ngendf* is None and no ``groupr`` or ``gaminr`` step comes before;
+            if ``igroup`` is 9 and ``ngnd``, ``nfg`` or ``nrg`` is None; or if
+            ``jp1`` is above 0 and ``p1flx`` is None.
+        """
         ngendf = self._resolve_input(ngendf, '_gendf_tape', 'GENDF')
         nout = nout if nout is not None else self._alloc_tape()
         p: dict[str, Any] = {
@@ -995,7 +1755,62 @@ class InputDeck:
         iprint: str | None = None,
         ifilm: int = 0,
     ) -> InputDeck:
-        """Add a DTFR step (DTF-IV transport tables from GENDF data)."""
+        """Add a DTFR step, which writes DTF-IV transport tables from GENDF data.
+
+        Parameters
+        ----------
+        nin
+            Input GENDF tape. None takes the output of the last ``groupr`` or
+            ``gaminr`` step.
+        nout
+            Output tape, an ASCII (positive) unit. None allocates the next free
+            unit (see ``moder``) and takes its absolute value.
+        npend
+            PENDF tape for point-data plots. None takes the output of the last step
+            that wrote one, or 0 if there is none.
+        nplot
+            Plot tape unit, 0 for none.
+        iedit
+            0 writes the DTF-table cards; 1 (CLAW) writes only ``nlmax ng /`` in
+            their place. Either way the ``nptabl ngp /`` card and the material
+            cards follow.
+        nlmax, ng
+            NJOY's Legendre order and number of groups.
+        iptotl, ipingp, itabl
+            DTF-table cards (``iedit`` 0 only). None writes ``len(edit_names) +
+            3``, ``iptotl + 1`` and ``iptotl + nlmax * ng``.
+        edit_names
+            The names of the edits (``iedit`` 0 only), written between quotes. Their
+            count must be ``iptotl - 3``.
+        edits
+            One ``[jpos, mt, mult]`` list per edit (``iedit`` 0 only).
+        ntherm, mti, mtc, nlc
+            Thermal fields (``iedit`` 0 only). ``mti`` is required when ``ntherm``
+            is above 0; ``mtc`` and ``nlc`` are then written too.
+        nptabl, ngp
+            NJOY's gamma-table fields.
+        materials
+            One dict per material, with the keys ``name``, ``isotope`` (or ``mat``;
+            a name as ``load_isotopes`` spells it, or a MAT number), ``jsigz``
+            (default 1) and ``dtemp`` (K, default 293.6).
+        iprint
+            ``"min"``, ``"max"`` or ``"check"`` (0, 1, 2), or an integer. None
+            writes 0.
+        ifilm
+            NJOY's ``ifilm``.
+
+        Returns
+        -------
+        InputDeck
+            The deck itself, so that calls chain.
+
+        Raises
+        ------
+        ValueError
+            If *nin* is None and no ``groupr`` or ``gaminr`` step comes before; if
+            ``ntherm`` is above 0 and ``mti`` is None; or if the number of
+            ``edit_names`` is not ``iptotl - 3``.
+        """
         nin = self._resolve_input(nin, '_gendf_tape', 'GENDF')
         # DTF output is coded (ASCII) text — use positive tape number
         if nout is None:
@@ -1061,7 +1876,53 @@ class InputDeck:
         nuclides: list[dict] | None = None,
         burnup_data: list | None = None,
     ) -> InputDeck:
-        """Add a POWR step (EPRI-CELL / EPRI-CPM library from GENDF)."""
+        """Add a POWR step, which writes an EPRI-CELL or EPRI-CPM library.
+
+        Parameters
+        ----------
+        ngendf
+            Input GENDF tape. None takes the output of the last ``groupr`` or
+            ``gaminr`` step.
+        nout
+            Output tape. None allocates the next free unit (see ``moder``).
+        lib
+            1 fast library, 2 thermal library, 3 CPM library.
+        iprint
+            ``"min"``, ``"max"`` or ``"check"`` (0, 1, 2), or an integer. None
+            writes 0.
+        iclaps
+            NJOY's ``iclaps``.
+        materials
+            ``lib`` 1 and 2 only: one dict per material. Both need ``matd`` (an
+            isotope name as ``load_isotopes`` spells it). Fast (1): optionally
+            ``rtemp``, ``iff``, ``nsgz``, ``izref``, and ``word`` and ``fsn``
+            (texts). Thermal (2): optionally ``idtemp``, ``name``, ``itrc``,
+            ``mti``, ``mtc``, ``xi``, ``alpha``, ``mubar``, ``nu``, ``kf``, ``kc``,
+            ``lambda`` and ``sigma_s``.
+        nlib, idat, iopt, mode, if5, if4
+            ``lib`` 3 only: NJOY's fields of those names.
+        mat_list
+            ``lib`` 3 only: isotope names, written when ``iopt`` is 0.
+        nuclides
+            ``lib`` 3 only: one dict per nuclide, with the optional keys ``nina``,
+            ``ntemp``, ``nsigz``, ``sgref``, ``ires``, ``sigp``, ``mti``, ``mtc``,
+            ``ip1opt``, ``inorf``, ``pos``, ``posr`` and ``lambdas``.
+        burnup_data
+            ``lib`` 3 only: the lines of the burnup cards, written when ``if5`` is
+            above 0.
+
+        Returns
+        -------
+        InputDeck
+            The deck itself, so that calls chain.
+
+        Raises
+        ------
+        ValueError
+            If *ngendf* is None and no ``groupr`` or ``gaminr`` step comes before;
+            if ``lib`` is not 1, 2 or 3; or if a material of ``lib`` 1 or 2 has no
+            ``matd``.
+        """
         ngendf = self._resolve_input(ngendf, '_gendf_tape', 'GENDF')
         nout = nout if nout is not None else self._alloc_tape()
         p: dict[str, Any] = {
@@ -1098,11 +1959,24 @@ class InputDeck:
         nplt0: int = 0,
         plot_def: PlotrJob | None = None,
     ) -> InputDeck:
-        """Add a PLOTR step (plot commands from ENDF/PENDF/GENDF tape data).
+        """Add a PLOTR step, which writes plot commands from ENDF, PENDF or GENDF data.
 
-        Auto-allocates a positive output tape for the plot-command file.
-        When *plot_def* is provided the generator emits inline plot
-        definition cards after Card 0.
+        Parameters
+        ----------
+        nplt
+            Output plot-command tape, an ASCII (positive) unit. None allocates the
+            next free unit (see ``moder``) and takes its absolute value. A later
+            ``viewr`` step without ``infile`` reads it.
+        nplt0
+            Input plot-command tape, 0 for none.
+        plot_def
+            Plot commands written after the module card. Its own ``nplt`` and
+            ``nplt0`` fields are not read. None writes only the module card.
+
+        Returns
+        -------
+        InputDeck
+            The deck itself, so that calls chain.
         """
         if nplt is None:
             nplt = abs(self._alloc_tape())
@@ -1120,12 +1994,24 @@ class InputDeck:
         nps: int,
         plot_def: ViewrPlot | None = None,
     ) -> InputDeck:
-        """Add a VIEWR step.
+        """Add a VIEWR step, which turns plot commands into a PostScript file.
 
-        When *plot_def* is provided the generator emits inline plot
-        commands and forces ``infile=5`` (stdin).  When *infile* is not
-        specified and a preceding PLOTR step exists, the PLOTR output
-        tape is used automatically.  Otherwise defaults to 5 (stdin).
+        Parameters
+        ----------
+        infile
+            Input plot-command unit. With *plot_def* the value is replaced by 5
+            (standard input, where the commands are written). Otherwise None takes
+            the output tape of the last ``plotr`` step, or 5 when there is none.
+        nps
+            Output PostScript unit. There is no default.
+        plot_def
+            Plot commands written after the module card. None writes only the
+            module card.
+
+        Returns
+        -------
+        InputDeck
+            The deck itself, so that calls chain.
         """
         if infile is None:
             if plot_def is not None:
@@ -1158,7 +2044,15 @@ class InputDeck:
         return "\n".join(self._lines + ["stop"])
 
     def save(self, path: str | Path) -> None:
-        """Write the input deck to *path*."""
+        """Write the rendered deck to *path* as UTF-8 text, replacing the file.
+
+        Parameters
+        ----------
+        path
+            Destination file. Its folder must exist. The text is that of
+            ``render``: with no trailing newline, and empty for a deck with no
+            module.
+        """
         Path(path).write_text(self.render(), encoding="utf-8")
 
     def __str__(self) -> str:

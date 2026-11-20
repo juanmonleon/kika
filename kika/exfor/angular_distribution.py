@@ -33,25 +33,35 @@ from kika.plotting import AngularDistributionPlotData, UncertaintyBand
 @dataclass
 class ExforAngularDistribution(ExforEntry):
     """
-    EXFOR angular distribution data with frame conversion support.
+    EXFOR differential cross-sections dσ/dΩ against angle, at one or more energies.
 
-    This class represents experimental angular distribution data from EXFOR,
-    with built-in support for:
-    - Frame conversions (LAB <-> CM)
-    - Unit conversions (energy, angle, cross section)
-    - Energy resolution calculations (for TOF experiments)
-    - Plotting and comparison with theoretical data
+    An instance is returned by :func:`~kika.exfor.read_exfor`, by
+    :func:`~kika.exfor.read_all_exfor` and by the queries of
+    :class:`~kika.exfor.X4ProDatabase`, or built by hand from the fields below.
+    It converts between the LAB and CM frames and between units, and plots against
+    an evaluation. The data are plain dicts and lists, as in the JSON file.
 
-    All data is stored as simple Python structures (dicts and lists) for
-    easy serialization and direct mapping to JSON.
+    Attributes
+    ----------
+    entry, subentry, quantity, citation, reaction, facility, method, detector, sample
+        As in :class:`~kika.exfor.ExforEntry`.
+    angle_frame : str
+        ``"LAB"`` or ``"CM"``: the frame of every angle and cross-section in the
+        object.
+    units : dict of str
+        Units of the stored values, with the keys ``"energy"`` (``"eV"``,
+        ``"keV"`` or ``"MeV"``), ``"angle"`` (``"deg"`` for degrees or ``"cos"``
+        for the cosine of the scattering angle) and ``"cross_section"``
+        (``"b/sr"``, ``"mb/sr"`` or ``"ub/sr"``). The conversion methods update it.
 
-    Attributes:
-        angle_frame: Reference frame ('LAB' or 'CM')
-        units: Dict with keys 'energy', 'angle', 'cross_section'
-        _data_blocks: List of energy blocks, each containing:
-            - value: Energy value
-            - uncertainty: Optional energy uncertainty
-            - data: List of data points with angle, cross_section, uncertainties
+    Notes
+    -----
+    Each energy block is a dict with ``value`` (the incident energy, in
+    ``units["energy"]``), an optional ``uncertainty`` on that energy and ``data``,
+    a list of points. A point has ``angle``, ``cross_section`` and the absolute
+    uncertainties ``uncertainty_stat`` and ``uncertainty_sys``, in the units of
+    the cross-section. Older files use ``E``, ``result``, ``error_stat`` and
+    ``error_sys``; they are read as well.
 
     Example:
         >>> from kika.exfor import read_exfor
@@ -78,22 +88,26 @@ class ExforAngularDistribution(ExforEntry):
     @staticmethod
     def cos_cm_from_cos_lab(mu_lab: np.ndarray, alpha: float) -> np.ndarray:
         """
-        Convert cos(theta) from LAB to CM frame (forward branch).
+        Cosine of the CM scattering angle from that of the LAB angle (forward branch).
 
-        This is the inverse of mu_L = (mu_c + alpha) / sqrt(1 + 2*alpha*mu_c + alpha^2).
-        Valid and monotonic for alpha = m_proj/m_targ < 1 (e.g., n on Fe-56).
+        The kinematics are non-relativistic two-body elastic scattering (no energy
+        released), with the target at rest in the LAB frame. The angle is that of
+        the scattered projectile. It inverts
+        ``mu_lab = (mu_cm + alpha) / sqrt(1 + 2*alpha*mu_cm + alpha**2)``, which is
+        one-to-one only for ``alpha < 1``. For ``alpha > 1`` the result is NaN
+        where the root is undefined, and the forward branch is not the only one.
 
         Parameters
         ----------
-        mu_lab : np.ndarray
-            Cosines in LAB frame (array or scalar)
+        mu_lab : array_like
+            Cosines of the LAB scattering angle, in [-1, 1].
         alpha : float
-            Mass ratio m_projectile/m_target
+            Mass ratio ``m_projectile / m_target``, both in the same unit.
 
         Returns
         -------
-        np.ndarray
-            Cosines in CM frame
+        numpy.ndarray
+            Cosines of the CM scattering angle, with the shape of *mu_lab*.
         """
         mu_lab = np.asarray(mu_lab)
         return -alpha * (1 - mu_lab**2) + mu_lab * np.sqrt(1 - alpha**2 * (1 - mu_lab**2))
@@ -101,21 +115,24 @@ class ExforAngularDistribution(ExforEntry):
     @staticmethod
     def cos_lab_from_cos_cm(mu_cm: np.ndarray, alpha: float) -> np.ndarray:
         """
-        Convert cos(theta) from CM to LAB frame.
+        Cosine of the LAB scattering angle from the cosine of the CM angle.
 
-        Forward transformation: mu_L = (mu_c + alpha) / sqrt(1 + 2*alpha*mu_c + alpha^2)
+        The kinematics are non-relativistic two-body elastic scattering (no energy
+        released), with the target at rest in the LAB frame. The angle is that of
+        the scattered projectile:
+        ``mu_lab = (mu_cm + alpha) / sqrt(1 + 2*alpha*mu_cm + alpha**2)``.
 
         Parameters
         ----------
-        mu_cm : np.ndarray
-            Cosines in CM frame (array or scalar)
+        mu_cm : array_like
+            Cosines of the CM scattering angle, in [-1, 1].
         alpha : float
-            Mass ratio m_projectile/m_target
+            Mass ratio ``m_projectile / m_target``, both in the same unit.
 
         Returns
         -------
-        np.ndarray
-            Cosines in LAB frame
+        numpy.ndarray
+            Cosines of the LAB scattering angle, with the shape of *mu_cm*.
         """
         mu_cm = np.asarray(mu_cm)
         denominator = np.sqrt(1 + 2 * alpha * mu_cm + alpha**2)
@@ -124,24 +141,27 @@ class ExforAngularDistribution(ExforEntry):
     @staticmethod
     def jacobian_cm_to_lab(mu_cm: np.ndarray, alpha: float) -> np.ndarray:
         """
-        Calculate the Jacobian dOmega_CM/dOmega_LAB.
+        Solid-angle ratio ``dOmega_CM / dOmega_LAB`` at a given CM cosine.
 
-        Returns (1 + alpha^2 + 2*alpha*mu_c)^(3/2) / |1 + alpha*mu_c|
-
-        To convert LAB -> CM cross section:
-            (dsigma/dOmega)_CM = (dsigma/dOmega)_LAB / jacobian_cm_to_lab
+        The value is ``(1 + alpha**2 + 2*alpha*mu_cm)**1.5 / abs(1 + alpha*mu_cm)``,
+        for non-relativistic two-body elastic scattering with the target at rest.
+        It is the factor between the differential cross-sections of the two
+        frames at the same scattering event:
+        ``(dsigma/dOmega)_LAB = (dsigma/dOmega)_CM * J`` and
+        ``(dsigma/dOmega)_CM = (dsigma/dOmega)_LAB / J``. It diverges at
+        ``alpha * mu_cm = -1``, which can happen only for ``alpha >= 1``.
 
         Parameters
         ----------
-        mu_cm : np.ndarray
-            Cosines in CM frame
+        mu_cm : array_like
+            Cosines of the CM scattering angle.
         alpha : float
-            Mass ratio m_projectile/m_target
+            Mass ratio ``m_projectile / m_target``, both in the same unit.
 
         Returns
         -------
-        np.ndarray
-            Jacobian values (array matching input shape)
+        numpy.ndarray
+            Dimensionless ``J``, with the shape of *mu_cm*.
         """
         mu_cm = np.asarray(mu_cm)
         return (1 + alpha**2 + 2 * alpha * mu_cm) ** 1.5 / np.abs(1 + alpha * mu_cm)
@@ -149,22 +169,26 @@ class ExforAngularDistribution(ExforEntry):
     @staticmethod
     def jacobian_lab_to_cm(mu_lab: np.ndarray, alpha: float) -> np.ndarray:
         """
-        Calculate the Jacobian dOmega_LAB/dOmega_CM = 1/jacobian_cm_to_lab.
+        Solid-angle ratio ``dOmega_LAB / dOmega_CM`` at a given LAB cosine.
 
-        To convert CM -> LAB cross section:
-            (dsigma/dOmega)_LAB = (dsigma/dOmega)_CM * jacobian_lab_to_cm
+        It is ``1 / jacobian_cm_to_lab`` evaluated at the CM cosine that
+        :meth:`cos_cm_from_cos_lab` gives for *mu_lab*, with the same kinematics
+        (non-relativistic two-body elastic scattering, target at rest, forward
+        branch, ``alpha < 1``). With ``K`` the returned value,
+        ``(dsigma/dOmega)_CM = (dsigma/dOmega)_LAB * K`` and
+        ``(dsigma/dOmega)_LAB = (dsigma/dOmega)_CM / K``.
 
         Parameters
         ----------
-        mu_lab : np.ndarray
-            Cosines in LAB frame
+        mu_lab : array_like
+            Cosines of the LAB scattering angle.
         alpha : float
-            Mass ratio m_projectile/m_target
+            Mass ratio ``m_projectile / m_target``, both in the same unit.
 
         Returns
         -------
-        np.ndarray
-            Jacobian values (array matching input shape)
+        numpy.ndarray
+            Dimensionless ``K``, with the shape of *mu_lab*.
         """
         mu_cm = ExforAngularDistribution.cos_cm_from_cos_lab(mu_lab, alpha)
         return 1.0 / ExforAngularDistribution.jacobian_cm_to_lab(mu_cm, alpha)
@@ -178,27 +202,35 @@ class ExforAngularDistribution(ExforEntry):
         m_targ: float,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
-        Transform angular distribution from LAB to CM frame.
+        Transform cosines, dσ/dΩ and uncertainties from the LAB to the CM frame.
+
+        The kinematics are non-relativistic two-body elastic scattering with the
+        target at rest, and ``alpha = m_proj / m_targ``. The cosines go through
+        :meth:`cos_cm_from_cos_lab`. The cross-sections and the uncertainties are
+        divided by ``jacobian_cm_to_lab`` (``dOmega_CM / dOmega_LAB``) at the CM
+        cosine. The uncertainties are taken as absolute, in the unit of the
+        cross-section, and scale like it. The energy is not changed.
 
         Parameters
         ----------
-        mu_lab : np.ndarray
-            LAB frame cosines
-        dsdo_lab : np.ndarray
-            LAB frame differential cross sections
-        err_lab : np.ndarray
-            LAB frame uncertainties
-        m_proj : float
-            Projectile mass in atomic mass units
-        m_targ : float
-            Target mass in atomic mass units
+        mu_lab : array_like
+            Cosines of the LAB scattering angle.
+        dsdo_lab : array_like
+            LAB differential cross-sections per steradian, in any unit.
+        err_lab : array_like
+            Absolute uncertainties of *dsdo_lab*, in the same unit.
+        m_proj, m_targ : float
+            Projectile and target masses in atomic mass units. Only their ratio
+            is used, and it must be below 1.
 
         Returns
         -------
-        Tuple[np.ndarray, np.ndarray, np.ndarray]
-            - mu_cm: CM frame cosines
-            - dsdo_cm: CM frame differential cross sections
-            - err_cm: CM frame uncertainties
+        mu_cm : numpy.ndarray
+            Cosines of the CM scattering angle.
+        dsdo_cm : numpy.ndarray
+            CM differential cross-sections per steradian, in the unit of *dsdo_lab*.
+        err_cm : numpy.ndarray
+            Absolute uncertainties of *dsdo_cm*, in the same unit.
         """
         mu_lab = np.asarray(mu_lab)
         dsdo_lab = np.asarray(dsdo_lab)
@@ -225,27 +257,35 @@ class ExforAngularDistribution(ExforEntry):
         m_targ: float,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
-        Transform angular distribution from CM to LAB frame.
+        Transform cosines, dσ/dΩ and uncertainties from the CM to the LAB frame.
+
+        The kinematics are non-relativistic two-body elastic scattering with the
+        target at rest, and ``alpha = m_proj / m_targ``. The cosines go through
+        :meth:`cos_lab_from_cos_cm`. The cross-sections and the uncertainties are
+        multiplied by ``jacobian_cm_to_lab`` (``dOmega_CM / dOmega_LAB``) at the CM
+        cosine. The uncertainties are taken as absolute, in the unit of the
+        cross-section, and scale like it. The energy is not changed.
 
         Parameters
         ----------
-        mu_cm : np.ndarray
-            CM frame cosines
-        dsdo_cm : np.ndarray
-            CM frame differential cross sections
-        err_cm : np.ndarray
-            CM frame uncertainties
-        m_proj : float
-            Projectile mass in atomic mass units
-        m_targ : float
-            Target mass in atomic mass units
+        mu_cm : array_like
+            Cosines of the CM scattering angle.
+        dsdo_cm : array_like
+            CM differential cross-sections per steradian, in any unit.
+        err_cm : array_like
+            Absolute uncertainties of *dsdo_cm*, in the same unit.
+        m_proj, m_targ : float
+            Projectile and target masses in atomic mass units. Only their ratio
+            is used.
 
         Returns
         -------
-        Tuple[np.ndarray, np.ndarray, np.ndarray]
-            - mu_lab: LAB frame cosines
-            - dsdo_lab: LAB frame differential cross sections
-            - err_lab: LAB frame uncertainties
+        mu_lab : numpy.ndarray
+            Cosines of the LAB scattering angle.
+        dsdo_lab : numpy.ndarray
+            LAB differential cross-sections per steradian, in the unit of *dsdo_cm*.
+        err_lab : numpy.ndarray
+            Absolute uncertainties of *dsdo_lab*, in the same unit.
         """
         mu_cm = np.asarray(mu_cm)
         dsdo_cm = np.asarray(dsdo_cm)
@@ -548,14 +588,29 @@ class ExforAngularDistribution(ExforEntry):
         self, m_proj: float = None, inplace: bool = False
     ) -> Optional["ExforAngularDistribution"]:
         """
-        Convert to CM frame.
+        Convert every angle and cross-section from the LAB frame to the CM frame.
 
-        Parameters:
-            m_proj: Projectile mass in amu (default: neutron mass)
-            inplace: If True, modify this object; if False, return new object
+        Uses :meth:`transform_lab_to_cm`: non-relativistic two-body elastic
+        scattering, ``alpha = m_proj / m_targ``, the target mass being
+        :attr:`~kika.exfor.ExforEntry.target_mass`. Angles go to the CM angle
+        in the unit they have (degrees, or cosines if ``units["angle"]`` is
+        not ``"deg"``). Cross-sections and ``uncertainty_stat`` are divided by
+        ``dOmega_CM / dOmega_LAB``. ``uncertainty_sys`` is not converted and keeps
+        its LAB value. Energies and units are unchanged, and the points keep their
+        order. The projectile must be lighter than the target.
 
-        Returns:
-            ExforAngularDistribution in CM frame (if inplace=False) or None
+        Parameters
+        ----------
+        m_proj : float, optional
+            Projectile mass in atomic mass units. None is the neutron mass.
+        inplace : bool
+            If True, modify this object and return None.
+
+        Returns
+        -------
+        ExforAngularDistribution or None
+            A converted copy, or None when *inplace* is True. An object already in
+            the CM frame is returned as an unchanged copy (or left as it is).
         """
         if self.angle_frame == FRAME_CM:
             if inplace:
@@ -611,14 +666,29 @@ class ExforAngularDistribution(ExforEntry):
         self, m_proj: float = None, inplace: bool = False
     ) -> Optional["ExforAngularDistribution"]:
         """
-        Convert to LAB frame.
+        Convert every angle and cross-section from the CM frame to the LAB frame.
 
-        Parameters:
-            m_proj: Projectile mass in amu (default: neutron mass)
-            inplace: If True, modify this object; if False, return new object
+        Uses :meth:`transform_cm_to_lab`: non-relativistic two-body elastic
+        scattering, ``alpha = m_proj / m_targ``, the target mass being
+        :attr:`~kika.exfor.ExforEntry.target_mass`. Angles go to the LAB angle
+        in the unit they have (degrees, or cosines if ``units["angle"]`` is
+        not ``"deg"``). Cross-sections and ``uncertainty_stat`` are multiplied by
+        ``dOmega_CM / dOmega_LAB``. ``uncertainty_sys`` is not converted and keeps
+        its CM value. Energies and units are unchanged, and the points keep their
+        order.
 
-        Returns:
-            ExforAngularDistribution in LAB frame (if inplace=False) or None
+        Parameters
+        ----------
+        m_proj : float, optional
+            Projectile mass in atomic mass units. None is the neutron mass.
+        inplace : bool
+            If True, modify this object and return None.
+
+        Returns
+        -------
+        ExforAngularDistribution or None
+            A converted copy, or None when *inplace* is True. An object already in
+            the LAB frame is returned as an unchanged copy (or left as it is).
         """
         if self.angle_frame == FRAME_LAB:
             if inplace:
@@ -678,14 +748,27 @@ class ExforAngularDistribution(ExforEntry):
         self, to: str, inplace: bool = False
     ) -> Optional["ExforAngularDistribution"]:
         """
-        Convert energy units.
+        Express the incident energies, and their uncertainties, in another unit.
 
-        Parameters:
-            to: Target unit ('eV', 'keV', or 'MeV')
-            inplace: If True, modify this object; if False, return new object
+        Angles, cross-sections and the frame are not changed.
 
-        Returns:
-            ExforAngularDistribution with converted units (if inplace=False) or None
+        Parameters
+        ----------
+        to : {"eV", "keV", "MeV"}
+            Target energy unit. It is stored in ``units["energy"]``.
+        inplace : bool
+            If True, modify this object and return None.
+
+        Returns
+        -------
+        ExforAngularDistribution or None
+            A converted copy, or None when *inplace* is True. When the unit is
+            already *to*, an unchanged copy (or the object left as it is).
+
+        Raises
+        ------
+        KeyError
+            If *to*, or the current energy unit, is not one of the three above.
         """
         from_unit = self.units["energy"]
         if from_unit == to:
@@ -715,14 +798,30 @@ class ExforAngularDistribution(ExforEntry):
         self, to: str, inplace: bool = False
     ) -> Optional["ExforAngularDistribution"]:
         """
-        Convert cross section units.
+        Express the cross-sections and their uncertainties in another unit.
 
-        Parameters:
-            to: Target unit ('b/sr', 'mb/sr', or 'ub/sr')
-            inplace: If True, modify this object; if False, return new object
+        Every point's cross-section, ``uncertainty_stat`` and ``uncertainty_sys``
+        are multiplied by the same factor. Angles, energies and the frame are not
+        changed.
 
-        Returns:
-            ExforAngularDistribution with converted units (if inplace=False) or None
+        Parameters
+        ----------
+        to : {"b/sr", "mb/sr", "ub/sr"}
+            Target unit, per steradian. It is stored in ``units["cross_section"]``.
+        inplace : bool
+            If True, modify this object and return None.
+
+        Returns
+        -------
+        ExforAngularDistribution or None
+            A converted copy, or None when *inplace* is True. When the unit is
+            already *to*, an unchanged copy (or the object left as it is).
+
+        Raises
+        ------
+        KeyError
+            If *to*, or the current cross-section unit, is not one of the three
+            above.
         """
         from_unit = self.units["cross_section"]
         if from_unit == to:
@@ -758,14 +857,25 @@ class ExforAngularDistribution(ExforEntry):
         self, to: str, inplace: bool = False
     ) -> Optional["ExforAngularDistribution"]:
         """
-        Convert angle units.
+        Express the scattering angles in degrees or as cosines.
 
-        Parameters:
-            to: Target unit ('deg' or 'cos')
-            inplace: If True, modify this object; if False, return new object
+        The frame is not changed (use :meth:`convert_to_cm` or
+        :meth:`convert_to_lab` for that), nor are the cross-sections. A cosine
+        becomes ``degrees(arccos(mu))`` with *mu* clipped to [-1, 1].
 
-        Returns:
-            ExforAngularDistribution with converted units (if inplace=False) or None
+        Parameters
+        ----------
+        to : {"deg", "cos"}
+            Target unit, stored in ``units["angle"]``. Any other string is stored
+            as the unit and leaves the values as they were.
+        inplace : bool
+            If True, modify this object and return None.
+
+        Returns
+        -------
+        ExforAngularDistribution or None
+            A converted copy, or None when *inplace* is True. When the unit is
+            already *to*, an unchanged copy (or the object left as it is).
         """
         from_unit = self.units["angle"]
         if from_unit == to:
@@ -795,16 +905,29 @@ class ExforAngularDistribution(ExforEntry):
 
     def compute_energy_resolution(self, energy_mev: float) -> Optional[float]:
         """
-        Compute TOF energy resolution sigma_E at given energy.
+        Time-of-flight energy resolution ``sigma_E`` of the beam at one energy, in MeV.
 
-        For TOF experiments: sigma_E/E = 2 * sigma_t / t = 2 * sigma_t * v / L
-        This translates to: sigma_E = 2 * E * sigma_t / t
+        The flight path ``L`` and the time resolution ``sigma_t`` come from
+        ``method["energy_resolution_input"]`` (or ``"energy_resolution_inputs"``):
+        ``distance.value`` is read as metres and ``time_resolution.value`` as
+        nanoseconds, whatever their ``unit`` entries say. The neutron speed is
+        non-relativistic, ``t = L / v`` is the time of flight, and
+        ``sigma_E = 2 * E * sigma_t / t``. The time resolution is used as given, so
+        ``sigma_E`` is a standard deviation or a full width as ``sigma_t`` is.
+        Objects read from the X4Pro database always carry a geometry: the curated
+        one of the experiment, or a default flight path of 27.037 m and a time
+        resolution of 10 ns.
 
-        Parameters:
-            energy_mev: Energy in MeV
+        Parameters
+        ----------
+        energy_mev : float
+            Incident neutron energy in MeV, positive.
 
-        Returns:
-            Energy resolution sigma_E in MeV, or None if cannot compute
+        Returns
+        -------
+        float or None
+            ``sigma_E`` in MeV. None if the object has no flight path or no time
+            resolution.
         """
         eri = self.method.get("energy_resolution_input") or self.method.get("energy_resolution_inputs")
         if eri is None:
@@ -876,7 +999,28 @@ class ExforAngularDistribution(ExforEntry):
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ExforAngularDistribution":
-        """Create from dictionary."""
+        """
+        Build a distribution from a dict with the layout of the JSON files.
+
+        The keys are those of :meth:`to_dict`. A missing ``angle_frame`` is
+        ``"LAB"`` and it is upper-cased. The unit strings are normalised to the
+        spellings of the ``units`` attribute (``"ADEG"`` to ``"deg"``, ``"MEV"`` to
+        ``"MeV"``, ``"MUB/SR"`` to ``"ub/sr"``), a missing entry meaning MeV,
+        degrees and b/sr. The list under
+        ``energies`` becomes the energy blocks without being copied. ``reaction``
+        may be a dict or an EXFOR string such as ``"26-FE-56(N,EL)26-FE-56"``.
+
+        Parameters
+        ----------
+        data : dict
+            The values, as in a JSON file.
+
+        Returns
+        -------
+        ExforAngularDistribution
+            The distribution, in the frame and units *data* declares. Nothing is
+            converted.
+        """
         base_fields = cls._parse_base_fields(data)
 
         # Parse angle frame
@@ -899,13 +1043,27 @@ class ExforAngularDistribution(ExforEntry):
     @classmethod
     def from_json(cls, filepath: str) -> "ExforAngularDistribution":
         """
-        Load from JSON file.
+        Read a distribution from a JSON file, through :meth:`from_dict`.
 
-        Parameters:
-            filepath: Path to JSON file
+        Unlike :func:`~kika.exfor.read_exfor`, it does not set the
+        systematic-uncertainty attributes.
 
-        Returns:
-            ExforAngularDistribution instance
+        Parameters
+        ----------
+        filepath : str
+            Path to the JSON file.
+
+        Returns
+        -------
+        ExforAngularDistribution
+            The distribution, in the frame and units of the file.
+
+        Raises
+        ------
+        FileNotFoundError
+            If *filepath* does not exist.
+        ValueError
+            If the file is not valid JSON.
         """
         with open(filepath, "r") as f:
             data = json.load(f)
@@ -917,15 +1075,32 @@ class ExforAngularDistribution(ExforEntry):
 
     def plot(self, energy: float, ax: "plt.Axes" = None, **kwargs) -> "plt.Axes":
         """
-        Quick plot method for single energy.
+        Plot dσ/dΩ in b/sr against the scattering angle at one incident energy.
 
-        Parameters:
-            energy: Energy value (in original units)
-            ax: Matplotlib axes (created if None)
-            **kwargs: Additional arguments passed to errorbar
+        This calls :func:`~kika.exfor.plot_exfor_angular`. The data stay in the
+        frame of the object (``angle_frame``, written on the x-axis) and are not
+        converted. The x-axis is the cosine and the y-axis is logarithmic, unless
+        *kwargs* says otherwise. A warning is printed and the axes are returned
+        empty when no energy matches.
 
-        Returns:
-            Matplotlib axes
+        Parameters
+        ----------
+        energy : float
+            Incident energy in MeV, matched to the energy blocks with the
+            tolerance of :func:`~kika.exfor.plot_exfor_angular`.
+        ax : matplotlib.axes.Axes, optional
+            Axes to draw on. None creates a new figure.
+        **kwargs
+            The other arguments of :func:`~kika.exfor.plot_exfor_angular`
+            (``tolerance``, ``use_mev``, ``label``, ``color``, ``marker``,
+            ``use_cos``, ``use_log``). Anything else goes to
+            ``matplotlib.axes.Axes.errorbar``. With ``use_mev=False``, *energy* is
+            in the unit of ``units["energy"]``.
+
+        Returns
+        -------
+        matplotlib.axes.Axes
+            The axes drawn on.
         """
         from kika.exfor.plotting import plot_exfor_angular
 
@@ -935,17 +1110,35 @@ class ExforAngularDistribution(ExforEntry):
         self, ace_data, energy: float, mt: int = 2, ax: "plt.Axes" = None, **kwargs
     ) -> "plt.Axes":
         """
-        Overlay comparison with ACE data.
+        Plot the data over the ACE angular distribution of the same reaction.
 
-        Parameters:
-            ace_data: ACE object with angular distribution data
-            energy: Energy value in MeV
-            mt: MT number (2 for elastic scattering)
-            ax: Matplotlib axes (created if None)
-            **kwargs: Additional plotting arguments
+        This calls :func:`~kika.exfor.plot_exfor_ace_comparison`. Both curves are
+        dσ/dΩ in b/sr. By default LAB data are converted to the CM frame first,
+        because the ACE curve is drawn as stored, with
+        ``dσ/dΩ = σ(E) f(mu) / (2π)``, and is not converted. The ACE curve is
+        evaluated at *energy*, not at the EXFOR energy that matched it.
 
-        Returns:
-            Matplotlib axes
+        Parameters
+        ----------
+        ace_data
+            ACE object whose angular distribution and cross-section of reaction
+            *mt* are read.
+        energy : float
+            Incident energy in MeV, for the EXFOR data and the ACE curve.
+        mt : int
+            ENDF MT number of the ACE reaction (2 for elastic scattering).
+        ax : matplotlib.axes.Axes, optional
+            Axes to draw on. None creates a new figure.
+        **kwargs
+            The other arguments of :func:`~kika.exfor.plot_exfor_ace_comparison`:
+            ``convert_to_cm`` (False plots the data in their own frame), ``m_proj``
+            (projectile mass in atomic mass units, default neutron), ``tolerance``,
+            ``use_cos``, ``use_log``, ``exfor_kwargs`` and ``ace_kwargs``.
+
+        Returns
+        -------
+        matplotlib.axes.Axes
+            The axes drawn on.
         """
         from kika.exfor.plotting import plot_exfor_ace_comparison
 
@@ -1202,19 +1395,30 @@ class ExforAngularDistribution(ExforEntry):
 
         Returns
         -------
-        PlotData, tuple, list, or None
-            - None if no data found within tolerance (allows graceful skipping in loops)
-            - Single energy with uncertainty=True:
-              Tuple[AngularDistributionPlotData, None]
-            - Single energy with uncertainty=False:
-              AngularDistributionPlotData
-            - Multiple energies (range or None):
-              List of the above, one per energy
+        ~kika.plotting.AngularDistributionPlotData, tuple, list or None
+            The points are sorted by angle, in *angle_unit* and *cross_section_unit*,
+            and the frame is on ``metadata["frame"]``. With ``uncertainty=True``
+            and at least one positive error, the error bars are in
+            ``metadata["yerr"]``, absolute and in the cross-section unit. They
+            combine ``uncertainty_stat`` and ``uncertainty_sys`` in quadrature, and
+            after a frame conversion ``uncertainty_sys`` is the unconverted one.
+            Otherwise the plot data are plain points.
+
+            - None if a single *energy* has no energy block within *tolerance*.
+            - One energy with ``uncertainty=True``: the tuple
+              ``(plot_data, None)``. The second item is always None.
+            - One energy with ``uncertainty=False``: the plot data alone.
+            - A range or no *energy*, or a single *energy* with
+              ``select_all_in_range=True``: a list of the above, one per energy,
+              except that when the selection holds exactly one energy the item
+              itself is returned, not a list of one.
 
         Raises
         ------
         ValueError
-            If invalid parameters provided (invalid frame, units, etc.).
+            If *angle_unit*, *cross_section_unit* or *frame* is not one of the
+            values above, if the object has no energies, or if the *energy* range
+            contains none.
 
         Examples
         --------

@@ -19,7 +19,7 @@ Layers, bottom up:
 - the neutron and thermal decoders and encoders, reached through
   ``kika.read(path, format="hdf5")`` and ``kika.write(suite, dir, format="hdf5")``.
 
-Nothing here imports h5py or :mod:`kika.nuclear_data.model` at module scope:
+Nothing here imports h5py or ``kika.nuclear_data.model`` at module scope:
 ``import kika.hdf5`` must not wake either (``kika/hdf5/tests/test_dormancy.py``).
 """
 from __future__ import annotations

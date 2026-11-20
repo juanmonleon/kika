@@ -480,6 +480,28 @@ def _external_check(forms,energies,reference,uncertainty,options):
 
 @dataclass(frozen=True)
 class DopplerResult:
+    """A broadened cross section tabulated on an adaptive grid.
+
+    Returned by :func:`broaden_curve`. The table is linear-linear in eV and barn.
+
+    Attributes
+    ----------
+    form
+        An ``XYs1d`` (one region) or a ``Regions1d``, labelled with the label
+        given to :func:`broaden_curve`.
+    report
+        Read-only mapping that describes the run: ``points``, ``regions`` (the
+        diagnostics of each region's refinement), source and final temperature
+        (K), ``units`` (eV, b, K), ``options``, the threshold convention if any,
+        ``thinning`` (False: no node is removed), ``verification_ratio`` and
+        ``empirical_verification`` (False) and ``global_error_bound`` (False).
+    prepared : PreparedDopplerCurve
+        The source.
+    temperature : float
+        Final temperature in K.
+    options : DopplerOptions
+        The options the run used.
+    """
     form: object
     report: object
     prepared: PreparedDopplerCurve
@@ -488,9 +510,51 @@ class DopplerResult:
     _tables: tuple
 
     def evaluate(self, energies):
+        """Evaluate the broadening directly at *energies* (eV), not the table.
+
+        Same as :func:`evaluate_broadened` with this result's source, temperature
+        and options.
+
+        Parameters
+        ----------
+        energies
+            Non-empty one-dimensional array of energies in eV, finite and positive.
+
+        Returns
+        -------
+        DopplerEvaluation
+            Values in barn.
+        """
         return evaluate_broadened(self.prepared, energies, temperature=self.temperature, options=self.options)
 
     def verify_table(self, form=None, *, total_budget=False):
+        """Check a table against the source evaluated afresh; return the worst ratio.
+
+        Each interval of the table is probed at its nodes and at four fractions of
+        its width. The ratio is the error (interpolation plus the kernel's error
+        estimate) over the allowed ``atol + rtol * |sigma|``.
+
+        Parameters
+        ----------
+        form
+            The table to check: a reloaded or edited copy of ``form``, with the
+            same regions, in eV and barn. None checks the result's own.
+        total_budget
+            If True the allowed error is the whole tolerance; if False (default)
+            only ``options.table_share`` of it, the share the table was built to.
+
+        Returns
+        -------
+        float
+            The largest ratio found; at most 1 when the table passes.
+
+        Raises
+        ------
+        DopplerConvergenceError
+            If a ratio exceeds 1.
+        DopplerInputError
+            If the table's regions, boundaries or units differ from the result's.
+        """
         def evaluate(q,left_boundary=None):
             v,e=_evaluate_curve(self.prepared,q,self.temperature,self.options,left_boundary)
             return {0:v},{0:e}
@@ -498,11 +562,77 @@ class DopplerResult:
         return _verify({0:self.form if form is None else form},self._tables,evaluate,self.options,share=share)[0]
 
     def verify_reference(self,energies,values,*,uncertainty=None):
+        """Check the table against reference values supplied by the caller.
+
+        The whole tolerance is allowed here, not only the table's share.
+
+        Parameters
+        ----------
+        energies
+            One-dimensional array of energies in eV, finite and positive, inside the
+            table.
+        values
+            Reference cross sections in barn at *energies*.
+        uncertainty
+            Their uncertainties in barn, not negative, same shape. None is zero.
+
+        Returns
+        -------
+        dict
+            ``maximum_ratios`` (``{0: largest ratio}``), ``probes`` (the number of
+            energies), ``method`` (``"external-reference"``) and
+            ``global_error_bound`` (False).
+
+        Raises
+        ------
+        DopplerConvergenceError
+            If the ratio exceeds 1.
+        DopplerInputError
+            If the energies, values or uncertainties are invalid or of the wrong
+            shape, or an energy lies outside the table.
+        """
         uncertainty=np.zeros(len(energies)) if uncertainty is None else uncertainty
         return _external_check({0:self.form},energies,{0:values},{0:uncertainty},self.options)
 
 
 def broaden_curve(prepared, *, temperature, options=None, output_domain=None, label='heated', progress=None):
+    """Tabulate the free-gas broadened source on an adaptive linear grid.
+
+    Nodes are added until the table's interpolation error is within
+    ``options.table_share`` of ``atol + rtol * |sigma|``, checked at separate
+    probes. No node is removed afterwards. At the source temperature the table is
+    the source's own nodes.
+
+    Parameters
+    ----------
+    prepared : PreparedDopplerCurve
+        The source, from :func:`prepare_curve`.
+    temperature
+        Final temperature in K, not below the source's.
+    options : DopplerOptions, optional
+        None gives ``DopplerOptions()``.
+    output_domain
+        ``(low, high)`` in eV, inside the source's range. None uses the whole
+        source range, which then must start above zero.
+    label
+        Non-empty label of the output form.
+    progress
+        ``progress(fraction)`` is called after each region of the output.
+
+    Returns
+    -------
+    DopplerResult
+        The table and its report.
+
+    Raises
+    ------
+    DopplerInputError
+        If *prepared* or *options* is of the wrong type, *label* is empty, the
+        domain is missing or invalid, or the temperature is below the source's.
+    DopplerConvergenceError
+        If a point, iteration or memory limit is exhausted, the kernel cannot meet
+        its budget, or the final verification of the table exceeds the budget.
+    """
     if not isinstance(prepared, PreparedDopplerCurve):
         raise DopplerInputError('invalid-prepared', 'prepare_curve required')
     options=_options(options)
