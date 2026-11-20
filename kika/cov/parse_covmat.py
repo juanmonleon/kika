@@ -1,3 +1,10 @@
+"""Readers and writers of multigroup covariance files: COVERX, BOXER and COVFIL.
+
+COVERX and BOXER (SCALE and NJOY COVR) and COVFIL (NJOY GENDF covariance
+tapes) are read into a covariance object and written back from one. The
+readers and writers do not convert covariance values between relative and
+absolute.
+"""
 import struct
 import warnings
 from typing import Dict, Tuple, List, Optional, Union
@@ -200,26 +207,44 @@ def read_coverx(file_path: str, ascending: bool = True, energy_unit: str = 'eV')
     file is treated as text; otherwise it is parsed as a Fortran unformatted
     binary COVERX file.
 
+    COVERX holds its group boundaries in eV, in descending order. Each matrix
+    is stored under ``(isotope_row, mt_row, isotope_col, mt_col)``, with the
+    vertical parameter of the file as the row and the horizontal one as the
+    column. The reader leaves ``is_relative`` empty (no per-matrix flag) and
+    keeps only the first Legendre block (P0) of a binary matrix. A matrix whose
+    MT is not a known reaction is skipped, in both formats. A matrix whose
+    values are all zero is skipped by the binary reader only; the text reader
+    keeps it.
+
     Parameters
     ----------
     file_path : str
         Path to the COVERX covariance file
     ascending : bool, optional
-        If True, energies are reordered in ascending order (default True)
+        If True (default) and the file's grid is descending, the grid, the
+        cross-section vectors and both axes of every matrix are reversed, so
+        group 0 is the lowest energy. If False the file's order is kept.
     energy_unit : str, optional
-        Energy unit for the energy grid: ``'eV'`` (default) or ``'MeV'``
+        ``'eV'`` (default) or ``'MeV'``. The file holds eV: ``'MeV'`` converts
+        the grid values and sets ``energy_unit`` of the result. Matrix values
+        and cross sections are not touched.
 
     Returns
     -------
     CrossSectionCovariance
-        Parsed covariance data
+        The grid is in ``energy_grid`` (``num_groups + 1`` boundaries).
+        ``cross_sections`` is filled from a binary file only (a vector that is
+        all zero is dropped) and stays empty for a text file.
 
     Raises
     ------
     EmptyParsingError
         If no valid covariance matrices were found in the file
     InvalidDataFormatError
-        If the binary structure is corrupted
+        If the binary structure is corrupted, or the energy grid of a text
+        file does not hold ``num_groups + 1`` numbers
+    ValueError
+        If *energy_unit* is not ``'eV'`` or ``'MeV'``
     """
     fmt = _detect_coverx_format(file_path)
     if fmt == 'binary':
@@ -715,6 +740,13 @@ def write_coverx(
     """
     Write a :class:`CrossSectionCovariance` to a COVERX covariance file (text or binary).
 
+    The file holds its group boundaries in eV, descending: an ascending grid is
+    reversed on output, together with both axes of every matrix and the
+    cross-section vectors, and an ``energy_unit`` of ``'MeV'`` is converted to
+    eV. Matrix values are written as stored. ``is_relative`` is neither read nor
+    converted, so the caller is responsible for the matrices being the kind
+    (relative or absolute) the reading code expects.
+
     Parameters
     ----------
     data : CrossSectionCovariance
@@ -722,11 +754,21 @@ def write_coverx(
     file_path : str
         Output file path.
     fmt : str, optional
-        ``'binary'`` (default) or ``'text'``.
+        ``'text'`` writes a text file, which keeps no cross-section vectors (a
+        warning says how many are lost). Any other value, ``'binary'`` by
+        default, writes a binary file, which stores values as float32 (about
+        seven significant figures; a warning is issued) and a zero cross-section
+        vector for a reaction that has none.
     title : str, optional
-        File title / description.
+        File title / description. A binary file requires ASCII.
     endian : str, optional
-        Endianness for binary format: ``'>'`` big-endian (default).
+        Byte order of a binary file: ``'>'`` big-endian (default) or ``'<'``
+        little-endian. A text file ignores it.
+
+    Raises
+    ------
+    TypeError
+        If *data* is a :class:`LegendreCovariance`.
     """
     if isinstance(data, LegendreCovariance):
         raise TypeError(
@@ -1079,6 +1121,13 @@ def read_boxer(file_path: str, energy_unit: str = 'eV') -> CrossSectionCovarianc
     cross-section vectors, standard-deviation vectors, and covariance or
     correlation matrices in a compressed card-image format.
 
+    The energy grid is kept in the order of the file (no reordering). A
+    covariance matrix (ITYPE 3) is stored as read; a correlation matrix
+    (ITYPE 4) is multiplied by the outer product of the standard-deviation
+    vectors (ITYPE 2) of its row and column reactions, so it comes back as a
+    covariance in the units of those vectors. The reader leaves ``is_relative``
+    empty (no per-matrix flag). A block that is exactly zero is skipped.
+
     Parameters
     ----------
     file_path : str
@@ -1086,11 +1135,13 @@ def read_boxer(file_path: str, energy_unit: str = 'eV') -> CrossSectionCovarianc
     energy_unit : str, optional
         Energy unit for the energy grid: ``'eV'`` (default) or ``'MeV'``.
         BOXER holds eV; ``'MeV'`` converts the values, not just the label.
+        Matrix values, standard deviations and cross sections are not touched.
 
     Returns
     -------
     CrossSectionCovariance
-        Parsed covariance data.
+        The grid is in ``energy_grid``, and ``num_groups`` is one less than its
+        length. ``cross_sections`` holds the ITYPE 1 vectors, as stored.
 
     Raises
     ------
@@ -1099,6 +1150,8 @@ def read_boxer(file_path: str, energy_unit: str = 'eV') -> CrossSectionCovarianc
     InvalidDataFormatError
         If a correlation matrix (ITYPE 4) comes without the standard
         deviations (ITYPE 2) of both its reactions.
+    ValueError
+        If *energy_unit* is not ``'eV'`` or ``'MeV'``.
     """
     _ev_grid_in([], energy_unit)  # validates the unit before reading anything
     with open(file_path, 'r') as f:
@@ -1230,6 +1283,14 @@ def write_boxer(
     """
     Write a :class:`CrossSectionCovariance` to a BOXER card-image (ASCII) file.
 
+    The energy grid is written in the order held (no reordering), in eV (an
+    ``energy_unit`` of ``'MeV'`` is converted, with a warning). Each matrix is
+    written as a covariance (ITYPE 3) with its values as stored; ``is_relative``
+    is neither read nor converted. For every diagonal block (same isotope and
+    MT on both axes) the file also gets a standard-deviation vector, the square
+    root of the diagonal with negative entries taken as zero, and every
+    cross-section vector found for a reaction of a matrix is written once.
+
     Parameters
     ----------
     data : CrossSectionCovariance
@@ -1242,7 +1303,14 @@ def write_boxer(
         Description (32 chars max). Default ``''``.
     nvf : int, optional
         Value format code (7–14). Default 10 (``1P8E10.3``, four significant
-        figures).
+        figures). A code of 10 or less issues a warning about the precision.
+
+    Raises
+    ------
+    TypeError
+        If *data* is a :class:`LegendreCovariance`.
+    ValueError
+        If an isotope maps to a MAT above 99999 (the field has five characters).
     """
     if isinstance(data, LegendreCovariance):
         raise TypeError(
@@ -1656,6 +1724,16 @@ def read_covfil(file_path: str, energy_unit: str = 'eV') -> Union[CrossSectionCo
 
     MF3 cross sections are stored in ``CrossSectionCovariance.cross_sections`` (MF33 case only).
 
+    The file is one material and holds its group boundaries in eV; the grid is
+    kept in the order of the file (no reordering). Every matrix is flagged
+    ``is_relative=True``: NJOY writes relative covariances, and the reader does
+    not check it. A block that is exactly zero is skipped. In an MF34 file the
+    rows and columns of a block index the groups of the file's grid, and the
+    block belongs to the Legendre orders ``l_row`` and ``l_col`` of its
+    section; the frame is ``"unknown"`` (the file does not say). The grouped
+    Legendre coefficients (MF3 sections with MT = 250 + L, L of 1 or more) go to
+    ``legendre_coefficients`` of the result.
+
     Parameters
     ----------
     file_path : str
@@ -1663,16 +1741,23 @@ def read_covfil(file_path: str, energy_unit: str = 'eV') -> Union[CrossSectionCo
     energy_unit : str, optional
         Energy unit for the energy grid: ``'eV'`` (default) or ``'MeV'``.
         The file holds eV; ``'MeV'`` converts the values, not just the label.
+        Matrix values and cross sections are not touched.
 
     Returns
     -------
     CrossSectionCovariance or LegendreCovariance
-        Parsed covariance data.
+        :class:`CrossSectionCovariance` if the covariance data is MF33 (grid in
+        ``energy_grid``; ``metadata`` holds ``'awr'`` and ``'temperature'``), or
+        :class:`LegendreCovariance` if it is MF34 (grid in every entry of
+        ``energy_grids``; same ``metadata``).
 
     Raises
     ------
     EmptyParsingError
-        If no valid covariance matrices were found.
+        If no valid covariance matrices were found, or the covariance section
+        of the file is neither MF33 nor MF34.
+    ValueError
+        If *energy_unit* is not ``'eV'`` or ``'MeV'``.
     """
     with open(file_path, 'r') as f:
         lines = f.readlines()
@@ -1992,6 +2077,23 @@ def write_covfil(
         Atomic weight ratio written into MF1 MT451 HEAD and each MF33/MF34
         section HEAD. If ``None`` (default), uses ``data.metadata['awr']``
         (set by :func:`read_covfil`), falling back to ``0.0``.
+
+    Raises
+    ------
+    ValueError
+        If an isotope maps to a MAT above 9999 (the field has four
+        characters), if the rows span more than one isotope (a COVFIL holds one
+        material), or if an MF34 object has columns of another isotope.
+
+    Notes
+    -----
+    The grid is written in the order held, in eV (an ``energy_unit`` of
+    ``'MeV'`` is converted, with a warning): for an MF34 object it is the grid
+    of its first matrix. Matrix values are written as stored and ``is_relative``
+    is neither read nor converted; NJOY covariance tapes hold relative
+    covariances. Each section is filed under the MAT of the first row isotope.
+    Cross-section vectors are written only for that isotope and only for an MF33
+    object. The ``legendre_coefficients`` of an MF34 object are not written.
     """
     is_mf33 = isinstance(data, CrossSectionCovariance)
     meta = getattr(data, 'metadata', None) or {}

@@ -65,46 +65,64 @@ class LegendreCovariance:
     dictionaries so that round-trips back to the same format produce
     a compatible (and where possible identical) section.
 
-    Canonical fields
-    ----------------
-    isotope_rows, reaction_rows, l_rows : List[int]
-        Row tags (ZA, MT, Legendre order) per matrix.
-    isotope_cols, reaction_cols, l_cols : List[int]
-        Column tags per matrix.
-    energy_grids : List[List[float]]
-        Energy boundaries for each matrix (NE points → matrix is (NE-1)x(NE-1)
-        or rectangular for cross-L blocks).
-    matrices : List[np.ndarray]
-        Covariance matrix per (isotope, reaction, L) row/col tuple.
-    is_relative : List[bool]
-        ``True`` when the matrix stores relative covariance, ``False`` for
-        absolute (LB=0).
-    frame : List[str]
-        Reference frame: ``"same-as-MF4"`` (LCT=0), ``"LAB"`` (LCT=1),
-        ``"CM"`` (LCT=2), or ``"unknown LCT=…"``.
-    energy_unit : str
-        ``"eV"`` (default) or ``"MeV"``.
-    legendre_coefficients : Dict[(isotope, mt, l), np.ndarray]
-        Optional cell-averaged nominal coefficients on the matrix grids.
+    Block ``k`` is ``matrices[k]``: its rows are the energy groups of the
+    coefficient ``a_L`` of the reaction ``(isotope_rows[k], reaction_rows[k])`` with
+    ``L = l_rows[k]``, and its columns those of ``a_L'`` of
+    ``(isotope_cols[k], reaction_cols[k])`` with ``L' = l_cols[k]``. A block with the
+    same reaction and ``L = L'`` is a diagonal block; with the same reaction and
+    ``L != L'`` it is a cross-L block; with another reaction it is a cross-reaction
+    block. Only one orientation of a cross block is stored, and
+    :attr:`covariance_matrix` fills the other with its transpose. Each block has
+    its own grid, so blocks of one object may differ in size. An instance comes
+    from :meth:`from_endf`, :meth:`from_covfil`, :meth:`from_covariance_suite`,
+    :func:`~kika.cov.read_covfil`, or :meth:`add_matrix`; ``MF34CovMat`` is
+    another name for this class.
 
-    Format-specific metadata
-    ------------------------
-    metadata : Dict[str, Any]
+    Attributes
+    ----------
+    isotope_rows, reaction_rows, l_rows : list of int
+        Row tags (ZA, MT, Legendre order) per matrix.
+    isotope_cols, reaction_cols, l_cols : list of int
+        Column tags per matrix.
+    energy_grids : list of list of float
+        Energy boundaries of each matrix, in ``energy_unit`` (NE points: the
+        matrix is (NE-1)x(NE-1), or rectangular for cross-L blocks).
+    matrices : list of np.ndarray
+        Covariance matrix per (isotope, reaction, L) row/col tuple.
+    is_relative : list of bool
+        ``True`` when the matrix stores relative covariance (relative to the
+        coefficients; a fraction squared, not a percentage), ``False`` for
+        absolute (LB=0), in the square of the unit of the coefficient.
+    frame : list of str
+        Reference frame: ``"same-as-MF4"`` (LCT=0), ``"LAB"`` (LCT=1),
+        ``"CM"`` (LCT=2), or ``"unknown LCT=…"``. The COVFIL reader sets
+        ``"unknown"``.
+    energy_unit : str
+        Unit of the grids: ``"eV"`` (default) or ``"MeV"``.
+    legendre_coefficients : dict
+        ``(isotope, mt, l)`` to the nominal coefficients ``a_l``, on the grid of
+        the matrices (optional). With ``to_ang_covmat(mf4_data=...)`` ``mt`` is
+        the reaction MT. :func:`~kika.cov.read_covfil` stores the MF3 sections of
+        the file under ``(zaid, 250 + L, L)``: the middle element is the NJOY
+        section number 250 + L, not the reaction, so a lookup by reaction MT
+        (as :meth:`to_plot_data` does) finds nothing in such an object.
+    metadata : dict
         Whole-object extras.  Conventional keys:
 
         - ``"source_format"``: ``"endf"``, ``"covfil"``, ``"gendf"``, …
         - ``"source_path"``: original file path (string)
+        - ``"awr"`` and ``"temperature"`` (K), set by the COVFIL reader
         - any other format-specific defaults the user wants to round-trip.
 
-    mt_metadata : Dict[(isotope, mt), Dict[str, Any]]
-        Per-section header data.  ENDF MF34 keys:
+    mt_metadata : dict
+        ``(isotope, mt)`` to a dict of the section header. ENDF MF34 keys:
 
         - ``"za"``: ZA = 1000*Z + A (float)
         - ``"awr"``: atomic-weight ratio
         - ``"mat"``: ENDF MAT number
         - ``"ltt"``: Legendre representation flag (1 = a_1…, 2 = a_0…).
 
-        Populated by :meth:`from_endf` / :meth:`MF34MT.to_ang_covmat` and
+        Populated by :meth:`from_endf` (through ``MF34MT.to_ang_covmat``) and
         consulted by :meth:`to_mf34` to fill the MF34 header.  Caller
         overrides on :meth:`to_mf34` always win.
     """
@@ -196,28 +214,16 @@ class LegendreCovariance:
                               energy_unit: str = 'eV') -> "LegendreCovariance":
         """Every MF34 section of a GNDS ``covarianceSuite``, as one carrier.
 
-        The covariance half of driving the collapse from the model: the multigroup
-        collapse can be driven from a ``reactionSuite`` on both sides now — a_l
-        through :func:`~kika.cov.multigroup.collapse.legendre_source_from_model`,
-        and the covariance through here.
-
-        The model is treated as one more source format, on the same footing as
-        GENDF, COVFIL, BOXER and COVERX, exactly as
-        :meth:`~kika.cov.cross_section_covariance.CrossSectionCovariance.from_covariance_section`
-        already does. **Duck-typed rather than imported**, and for the same
-        reason: ``kika.cov`` does not depend on the model, and it no longer has
-        any import-time reason to.
-
-        A *suite* rather than a section, unlike the cross-section twin, because
-        the two are keyed differently. There, several MF35 bands share one MT and
-        would be indistinguishable inside one object. Here the key is
-        ``(isotope, MT, l)`` and every MF34 section carries a distinct one, so a
-        whole file assembles without collision — which is what the collapse
-        needs, since it walks the blocks looking for ``(l_row, l_col)`` pairs.
+        The covariance half of driving the multigroup collapse from the model
+        (the coefficients ``a_l`` come from ``legendre_source_from_model``). It takes
+        a whole suite, where
+        :meth:`CrossSectionCovariance.from_covariance_section` takes one section: the
+        key here is ``(isotope, MT, l)``, and every MF34 section carries a distinct
+        one, so a whole file assembles without collision.
 
         Sections whose ``rowData.ENDF_MFMT`` is not ``34/…`` are skipped, so an
-        MF31 or MF33 section living in the same suite is left alone rather than
-        swept in as an angular block.
+        MF31 or MF33 section in the same suite is left alone. The suite is read by
+        attribute, not imported.
 
         Parameters
         ----------
@@ -228,26 +234,32 @@ class LegendreCovariance:
             with ``rowData.legendreOrder`` giving l.
         nuclide : int, optional
             ZAID to file the matrices under, used when
-            ``section.provenance.za`` is absent. The model identifies a
-            covariance by href rather than by a material header.
+            ``section.provenance.za`` is absent. A section carries no material
+            header, so the caller supplies it.
         energy_unit : str, optional
-            Unit of ``form.rowGrid``. The model keeps ENDF's native eV.
+            Unit of ``form.rowGrid``. The model keeps ENDF's native eV. The grid
+            is not converted; this only sets ``energy_unit`` of the result.
 
-        Notes
+        Returns
+        -------
+        LegendreCovariance
+            One block per MF34 section: row and column tags from the section
+            (``l`` from ``legendreOrder``), the row grid as its grid,
+            ``is_relative`` from ``form.isRelative`` and the frame from
+            ``form.productFrame`` (``"same-as-MF4"`` if absent). An empty
+            instance if the suite has no MF34 section.
+
+        Raises
+        ------
+        ValueError
+            If an MF34 section has no form, or its form states no single matrix
+            (a GNDS ``mixed`` form): the components are not merged.
+
+        Warns
         -----
-        ⚠ **The model states two grids and this carrier stores one.** Where a
-        section's row and column grids differ, the model is the one telling the
-        truth and this conversion loses the distinction — the same asymmetry
-        ``kika.sampling.model_blocks._mf34_entries`` documents from the sampling
-        side. A warning is raised rather than the difference being absorbed
-        silently. No MF34 seen so far states two.
-
-        ⚠ **A section that states no single matrix raises.** It used to be
-        ``continue``, which dropped the section and returned a smaller carrier
-        that looked complete — the one place in the library where meeting a
-        §25.2 ``mixed`` was silent rather than loud. What raises now, and why
-        kika will not merge the components for you, is
-        :func:`kika._covariance_forms.require_single_matrix`.
+        UserWarning
+            If a section states a column grid different from its row grid. The
+            carrier stores one grid per matrix, so the column grid is dropped.
         """
         result = cls()
         result.energy_unit = energy_unit
@@ -447,6 +459,13 @@ class LegendreCovariance:
         Returns
         -------
         MF34MT
+            The section. The grid of each matrix is written as stored, with no
+            conversion between eV and MeV; ENDF holds eV.
+
+        Raises
+        ------
+        ValueError
+            If no matrix has ``(isotope, mt)`` as its row reaction.
 
         Notes
         -----
@@ -552,9 +571,36 @@ class LegendreCovariance:
         """Write a single (isotope, MT) MF34 section into an ENDF file.
 
         Convenience wrapper that calls :meth:`to_mf34` to build the section
-        and :func:`kika.endf.writers.write_mf34_to_file` to splice it into
+        and ``kika.endf.writers.write_mf34_to_file`` to splice it into
         a template file.  Extra keyword arguments are forwarded to
         :meth:`to_mf34` (``za``, ``awr``, ``mat``, ``ltt``, ``frame``).
+
+        Parameters
+        ----------
+        source_endf : str or Path
+            ENDF file used as the template.
+        output_path : str or Path
+            File to write.
+        isotope, mt : int
+            Section to write, as in :meth:`to_mf34`.
+        replace_existing : bool
+            If True, an MF34 section already in the template is replaced; if
+            False it is an error (``FileExistsError``) when one is present.
+            Otherwise the section is inserted before the MEND record.
+        update_directory : bool
+            Refresh the MF1/MT451 directory of the output.
+        **mf34_overrides
+            ``za``, ``awr``, ``mat``, ``ltt`` and ``frame``, as in :meth:`to_mf34`.
+
+        Returns
+        -------
+        str
+            What ``write_mf34_to_file`` returns.
+
+        Raises
+        ------
+        ValueError
+            If no matrix has ``(isotope, mt)`` as its row reaction.
         """
         from kika.endf.writers.mf34_writer import write_mf34_to_file
 
@@ -841,6 +887,13 @@ class LegendreCovariance:
         return True
 
     def get_union_energy_grids(self):
+        """Union energy grid of each ``(isotope, reaction, L)`` triplet.
+
+        Returns the grids kept from the last :meth:`compute_union_energy_grids`
+        (computed now if there are none), as a dict from the triplet to an
+        ascending array in ``energy_unit``. A matrix added after that call is not
+        in them until it is recomputed.
+        """
         return getattr(self, "_union_grids", None) or self.compute_union_energy_grids()
 
 
@@ -891,7 +944,22 @@ class LegendreCovariance:
         
         This method handles the complex MF34 matrix structure including per-Legendre
         energy grids and prepares data for visualization.
-        
+
+        The matrix is cut from :attr:`covariance_matrix` of the ``(nuclide, mt)``
+        entries, on the union energy grid of each ``L``. For several ``L`` the
+        diagonal blocks are laid side by side in sorted order of ``L``; with a tuple
+        ``(row_l, col_l)`` the rows are the groups of ``a_row_l`` and the columns
+        those of ``a_col_l``. Groups with no data are NaN. A correlation is cut
+        from :attr:`clipped_correlation_matrix` (``|ρ|`` clipped to 1, NaN where
+        undefined). The grid of each ``L``, in ``energy_unit`` and not converted,
+        is in ``energy_grids`` of the result. The axes ``x_edges`` and ``y_edges``
+        are not energies: each block's edges are the grid (or its ``log10`` when
+        *scale* is log, a non-positive edge taken as 1e-300) minus its first value,
+        so the axis starts at 0, and successive blocks follow end to end. The
+        uncertainty above the heatmap is
+        ``100 * sqrt(variance)`` per group, in percent of the coefficient when the
+        blocks are relative.
+
         Parameters
         ----------
         nuclide : int or str
@@ -911,15 +979,25 @@ class LegendreCovariance:
         scale : str, default 'log'
             Energy axis scale: 'log'/'logarithmic' or 'lin'/'linear'
         energy_range : tuple of float, optional
-            Energy window (emin, emax). Only bins overlapping the window are kept.
+            Energy window (emin, emax), in the unit of ``energy_unit``. Only bins
+            overlapping the window are kept.
         **kwargs
-            Additional parameters (reserved for future use)
-            
+            Set as attributes of the returned object when it has them, else added
+            to its ``metadata``. ``mask_color`` is ignored.
+
         Returns
         -------
-        LegendreHeatmapData
+        ~kika.plotting.LegendreHeatmapData
             Heatmap data object ready for PlotBuilder.add_heatmap()
-            
+
+        Raises
+        ------
+        ValueError
+            If *matrix_type* or *scale* is not one of the strings above, if there
+            is no entry for ``(nuclide, mt)``, if a requested ``L`` is not
+            available for it, or if *energy_range* is not an increasing pair or
+            removes every group.
+
         Examples
         --------
         >>> # Simple usage with PlotBuilder
@@ -1397,7 +1475,10 @@ class LegendreCovariance:
         
         This is a convenience method to easily convert MF34 covariance data into
         a plottable format using the new plotting infrastructure.
-        
+
+        The energy axis is the grid of the diagonal block, in ``energy_unit`` (not
+        converted).
+
         Parameters
         ----------
         nuclide : int or str
@@ -1410,27 +1491,35 @@ class LegendreCovariance:
             Legendre polynomial order
         sigma : float, default 1.0
             Sigma level for uncertainty scaling (e.g., 1.0 for 1σ, 2.0 for 2σ)
-        uncertainty_type : str, default 'relative'
-            Type of uncertainty: 'relative' (%) or 'absolute'
+        uncertainty_type : {'relative', 'absolute'}
+            'relative' gives ``100 * sigma * sqrt(diagonal)`` in percent. A block
+            flagged absolute is first divided by ``|a_L|`` from
+            ``legendre_coefficients`` (0 where ``a_L`` is 0). Any other value
+            gives ``sigma * sqrt(diagonal)`` as stored, with no conversion
+            whatever ``is_relative`` says (a fraction, for a relative block).
         label : str, optional
             Custom label for the plot. If None, auto-generates from isotope and order.
-            Note: Energy values are returned in eV (native ENDF-6 format) to ensure
-            compatibility when combining with MF4 data.
         **styling_kwargs
             Additional styling kwargs (color, linestyle, linewidth, etc.)
-            
+
         Returns
         -------
-        tuple of (LegendreCoeffPlotData or None, LegendreUncertaintyPlotData)
-            Tuple containing:
-            - coeff_data: Legendre coefficient data if available in ``legendre_coefficients``, else None
-            - unc_data: Uncertainty data for the Legendre coefficients
-            
+        tuple
+            ``(coeff_data, unc_data)``:
+
+            - coeff_data: :class:`~kika.plotting.LegendreCoeffPlotData` with the nominal
+              ``a_L`` if ``legendre_coefficients`` holds it on the grid of the block,
+              else None
+            - unc_data: :class:`~kika.plotting.LegendreUncertaintyPlotData` with the
+              uncertainty of each group
+
         Raises
         ------
         ValueError
-            If uncertainty data is not available for the specified parameters
-            
+            If there is no diagonal block for ``(nuclide, mt, order)``, or the
+            relative uncertainty of an absolute block is asked and ``a_L`` is not
+            stored on the grid of the block.
+
         Examples
         --------
         >>> # Extract uncertainty data from LegendreCovariance - both notation styles work
@@ -1909,10 +1998,10 @@ class LegendreCovariance:
         Returns
         -------
         dict
-            ``present`` -- any (0, L1) or (L, 0) block exists.
+            ``present`` -- any (0, L1), (L, 0) or (0, 0) block exists.
             ``self_present`` -- the (0, 0) block exists.
             ``self_is_null`` -- (0, 0) is zero, i.e. MF33 still owes it.
-            ``cross_orders`` -- sorted L1 with a (0, L1) block, 0 excluded.
+            ``cross_orders`` -- sorted L with a cross block against a_0.
             ``cross_max_abs`` -- largest absolute cross-term value.
             ``cross_is_null`` -- every cross block is zero to within *atol*.
         """
@@ -1959,7 +2048,7 @@ class LegendreCovariance:
         """Fill the null (0, 0) block from MF33, so the L=0 row can be read.
 
         Returns a **copy**; the receiver is left alone because
-        :meth:`MF34MT.to_ang_covmat` caches the object it hands out and a
+        ``MF34MT.to_ang_covmat`` caches the object it hands out and a
         mutation here would leak into every later caller.
 
         The MF33 self-covariance is inserted **on its own energy grid**, not
@@ -1994,6 +2083,15 @@ class LegendreCovariance:
             adding MF33's would double count the magnitude variance), if MF33
             has no self-block for the reaction, or if that block is absolute
             while the a_0 family is relative.
+
+        Returns
+        -------
+        LegendreCovariance
+            A copy in which the null (0, 0) block of ``(isotope, mt)`` is replaced
+            by the MF33 self-block of ``magnitude_mt`` (kept with its own energy
+            grid and relative flag, and the frame of the section's L = 0 blocks,
+            ``"LAB"`` if none is stated). ``metadata["magnitude_block_source"]`` records where
+            it came from; the cached union grids and PSD matrix are cleared.
         """
         magnitude_mt = mt if magnitude_mt is None else int(magnitude_mt)
 
@@ -2146,7 +2244,14 @@ class LegendreCovariance:
                 - 'is_relative': bool - True if relative (δA_ℓ/A_ℓ), False if absolute (δA_ℓ)
 
             For list of ints: Dictionary mapping L coefficient to uncertainty data (or None if not found).
-            
+            The energies are in ``energy_unit``. A single int with no diagonal block
+            for ``(isotope, mt, L)`` gives None.
+
+        Raises
+        ------
+        TypeError
+            If *l_coefficient* is neither an int nor a list or tuple of ints.
+
         Notes
         -----
         - If is_relative=True, you must convert to absolute uncertainties by multiplying

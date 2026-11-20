@@ -1,3 +1,9 @@
+"""Collapse of MF34 angular-distribution covariances onto a multigroup structure.
+
+The collapse weights the Legendre-coefficient covariances of an evaluation with
+``sigma(E) * phi(E)`` and returns a :class:`MultigroupLegendreCovariance`, which
+holds each block on the group grid as a relative and an absolute matrix.
+"""
 # Multigroup covariance analysis package
 #
 # The four ``plot_mg_*`` functions used to be re-exported from here, through a

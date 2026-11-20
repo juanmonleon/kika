@@ -25,7 +25,12 @@ class MultigroupLegendreCovariance:
     
     This class stores multigroup covariance matrices derived from MF34 data,
     maintaining similar structure to LegendreCovariance but for multigroup data.
-    
+    Every block is ``(G, G)`` on the one group grid ``energy_grid``; the rows are
+    the groups of ``a_L`` of ``(isotope_rows, reaction_rows, l_rows)`` and the
+    columns those of ``(isotope_cols, reaction_cols, l_cols)``. It is returned by
+    :func:`~kika.cov.multigroup.MF34_to_MG`; ``MGMF34CovMat`` is another name for
+    this class. Each block is stored twice, as a relative and as an absolute matrix.
+
     Attributes
     ----------
     isotope_rows : List[int]
@@ -41,19 +46,21 @@ class MultigroupLegendreCovariance:
     l_cols : List[int]
         List of column Legendre coefficient indices
     energy_grid : np.ndarray
-        Energy group boundaries [G_0, G_1, ..., G_n] (n+1 edges for n groups)
+        Energy group boundaries [G_0, G_1, ..., G_n] (n+1 edges for n groups),
+        in the order and unit the collapse was given (ascending, eV for ENDF)
     relative_matrices : List[np.ndarray]
-        List of relative covariance matrices
+        Relative covariance of each block (dimensionless: relative to the group
+        means of ``a_L``, a fraction squared)
     absolute_matrices : List[np.ndarray]
-        List of absolute covariance matrices
-    _mg_means_row : List[np.ndarray]
-        Multigroup means for row Legendre coefficients (bar{a}_l,g) - private
-    _mg_means_col : List[np.ndarray]
-        Multigroup means for column Legendre coefficients (bar{a}_l',g') - private
+        Absolute covariance of each block (in the square of the unit of ``a_L``)
     frame : List[str]
         List of reference frames for each matrix
     weighting_function : str
         Description of weighting function used (e.g., "constant", "flux-weighted")
+    relative_normalization : str
+        ``"mf34_cell"`` or ``"mg_cell"``: which group means of ``a_L`` convert
+        the relative matrices to absolute ones (see
+        :func:`~kika.cov.multigroup.MF34_to_MG`).
     legendre_coefficients : Dict[Tuple[int, int, int], np.ndarray]
         Dictionary mapping (isotope, mt, l) to multigroup Legendre coefficients
     energy_unit : str
@@ -397,7 +404,21 @@ class MultigroupLegendreCovariance:
     ) -> CovarianceHeatmapData:
         """
         Prepare a heatmap data object for multigroup MF34 covariance/correlation plotting.
-        
+
+        The matrix is cut from the assembled matrix of the ``(nuclide, mt)`` entries:
+        ``G`` rows per ``L`` in sorted order, the correlation of the relative
+        covariance, or the covariance (relative or absolute, see *covariance_type*).
+        For several ``L`` the diagonal blocks are laid side by side; with a tuple
+        ``(row_l, col_l)`` the rows are the groups of ``a_row_l`` and the columns
+        those of ``a_col_l``. The grid, as stored and not converted, is
+        ``energy_grid`` of the result. The axes ``x_edges`` and ``y_edges`` are not
+        energies: each block's edges are the grid (or its ``log10`` when *scale*
+        is log, a non-positive edge taken as 1e-300) minus its first value, so the
+        axis starts at 0, and successive blocks follow end to end. The
+        uncertainty drawn above the heatmap is ``100 * sqrt(|variance|)`` per group, taken from the
+        absolute matrices when the object has them (it always does after
+        :func:`~kika.cov.multigroup.MF34_to_MG`), else from the relative ones.
+
         Parameters
         ----------
         nuclide : int or str
@@ -411,18 +432,30 @@ class MultigroupLegendreCovariance:
         matrix_type : str, default "corr"
             Type of matrix: "corr"/"correlation" or "cov"/"covariance"
         covariance_type : str, default "rel"
-            For covariance matrices: "rel" (relative) or "abs" (absolute)
+            For covariance matrices: "abs" selects the absolute matrices, any
+            other value the relative ones. Not used for a correlation.
         show_energy_ticks : bool, default True
-            Whether to enable energy tick marks
+            Not used.
         scale : str, default "log"
             Energy axis scale: "log"/"logarithmic" or "lin"/"linear"
         energy_range : tuple of float, optional
-            Energy range (min, max) for filtering
-        
+            Energy window (min, max) in the unit of ``energy_grid``. Only the
+            groups overlapping it are kept.
+        **kwargs
+            Set as attributes of the returned object when it has them, else added
+            to its ``metadata``.
+
         Returns
         -------
-        CovarianceHeatmapData
+        ~kika.plotting.CovarianceHeatmapData
             Heatmap data object ready for PlotBuilder
+
+        Raises
+        ------
+        ValueError
+            If *matrix_type* or *scale* is not one of the strings above, if there
+            is no entry for ``(nuclide, mt)`` or no energy grid, if a requested
+            ``L`` is not available, or if *energy_range* removes every group.
         """
         from kika._utils import symbol_to_zaid
         
@@ -674,15 +707,20 @@ class MultigroupLegendreCovariance:
             
         Returns
         -------
-        tuple of (LegendreCoeffPlotData, LegendreUncertaintyPlotData)
-            Tuple containing:
-            - legendre_data: PlotData for Legendre coefficients (None if not available)
-            - unc_data: Uncertainty plot data with relative uncertainties in % (None if not available)
-            
+        tuple
+            ``(legendre_data, unc_data)``:
+
+            - legendre_data: :class:`~kika.plotting.LegendreCoeffPlotData` with the
+              group means of ``a_L`` (``energy_grid`` as x, as stored)
+            - unc_data: :class:`~kika.plotting.LegendreUncertaintyPlotData` with
+              ``100 * sigma * sqrt(diagonal)`` of the relative matrix, in percent
+              (None if there is no diagonal block for ``(nuclide, mt, order)``)
+
         Raises
         ------
         ValueError
-            If neither Legendre coefficient nor covariance data is available
+            If ``legendre_coefficients`` has no ``(nuclide, mt, order)`` entry, or
+            its size differs from the number of groups
             
         Examples
         --------
@@ -924,9 +962,39 @@ class MultigroupLegendreCovariance:
     ) -> plt.Figure:
         """
         Plot multigroup Legendre coefficients for this covariance matrix object.
-        
-        This method now uses the modern PlotBuilder-based implementation from
-        kika.plotting.multigroup_covariance for cleaner, more maintainable code.
+
+        The curves are the group means of ``a_L``, with optional bands of
+        ``uncertainty_sigma`` standard deviations from the relative matrices.
+
+        Parameters
+        ----------
+        nuclide : int or str
+            ZAID or symbol such as ``'U235'``.
+        mt : int
+            Reaction MT number.
+        orders : int or list of int, optional
+            Legendre orders to draw. None draws every order stored for the
+            reaction.
+        style : str
+            Name of a :class:`~kika.plotting.PlotBuilder` style.
+        figsize : tuple of float
+            Figure size in inches, ``(width, height)``.
+        legend_loc : str
+            Matplotlib legend location.
+        marker : bool
+            Mark the points of each curve.
+        show_uncertainties : bool
+            Draw the bands.
+        uncertainty_sigma : float
+            Number of standard deviations of the bands.
+        **kwargs
+            Passed on to the plotting function (``dpi``, ``font_family``,
+            ``scale``, ``energy_range``, ``title`` or styling keywords).
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+            The figure.
         """
         from kika.plotting.multigroup_covariance import plot_mg_legendre_coefficients
         

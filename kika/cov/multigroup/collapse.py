@@ -969,26 +969,33 @@ def MF34_to_MG(endf_object,
     """
     Convert MF34 angular distribution covariance data to multigroup format.
 
-    This function implements the complete algorithm for converting continuous-energy
-    MF34 covariance matrices to multigroup format, following the mathematical
-    procedure outlined in the specifications.
+    Each block of the MF34 covariance is collapsed onto the groups with the weight
+    ``sigma(E) * phi(E)`` of its row reaction, as NJOY ERRORR does. A relative
+    block is collapsed as
+    ``R_MG[g, g'] = sum_ij w_ig A_li R_ij A_l'j w_jg' / (W_g a_lg W_g' a_l'g')``
+    on the union of the MF34 and group grids, where ``w_ig`` is the integral of
+    ``sigma * phi`` over the part of union cell ``i`` inside group ``g``, ``W_g``
+    is its sum over ``i``, ``A_li`` is the mean of the coefficient ``a_l`` in cell
+    ``i`` and ``a_lg`` its weighted mean in group ``g``. An absolute block is
+    collapsed as ``C' = M C Mᵀ`` with ``M[g, h]`` the ``sigma * phi`` fraction of
+    group ``g`` lying in MF34 cell ``h``. The other form is derived from the
+    collapsed one with the group means of ``a_l``.
 
-    Cross-section weighting (sigma(E)*phi(E)) is always applied, matching the
-    NJOY ERRORR methodology. ``endf_object.pendf`` must therefore be populated
-    before calling this — with the sigma(E) the groups should be weighted by::
+    ``endf_object.pendf`` must hold the sigma(E) to weight by, for example::
 
         endf.pendf = kika.processing.njoy_reconstruct(path, njoy_executable=...)
 
-    A ``ValueError`` is raised if it is not. It used to be filled in silently
-    by an in-Python reconstructor documented as producing incorrect cross
-    sections, which made the weight both wrong and invisible.
+    A ``ValueError`` is raised if it is not set. An MT with no entry in it is
+    weighted by ``phi`` alone, with a warning, and ``weighting_function`` of the
+    result says so.
 
     Parameters
     ----------
     endf_object : ENDF object
         ENDF object containing both MF4 and MF34 data
     energy_grid : str, list, or np.ndarray
-        Multigroup energy grid specification:
+        Group boundaries, strictly increasing, in the unit of the MF34 grid (the
+        grid is not converted; ENDF holds eV). At least two values.
 
         - str: Name of predefined grid (e.g., "VITAMINJ174")
         - list/array: Custom energy group boundaries
@@ -1017,7 +1024,7 @@ def MF34_to_MG(endf_object,
     output_frame : str, optional
         Reference frame for output Legendre coefficients:
 
-        - "same" (default): preserve the MF4 native frame (backward compatible)
+        - "same" (default): preserve the MF4 native frame
         - "lab": apply CM→lab kinematic transformation if MF4 is in CM frame
           (no-op if already in lab frame). Matches NJOY GROUPR convention.
           The kinematics are two-body, so this is done for MT2 and MT51-90
@@ -1025,18 +1032,34 @@ def MF34_to_MG(endf_object,
           reaction given in CM.
     project_to_psd : bool, optional
         Whether to project output matrices to positive semi-definite (default True).
-        Set to False to skip eigendecomposition for faster execution when PSD
-        guarantee is not needed.
+        Only a self block (same isotope, MT and L on both axes) is symmetrised and
+        projected, in the form the file states it (relative or absolute): an
+        eigenvalue clip at 0 if the most negative eigenvalue is below 1 % of the
+        largest in magnitude, else :func:`~kika.cov.nearest_psd_higham` with the
+        diagonal preserved. The other form is derived from it. A cross block is
+        stored as collapsed. Set to False to skip the projection (the self block
+        is still symmetrised).
 
     Returns
     -------
-    MultigroupLegendreCovariance
-        Multigroup covariance matrix object
+    ~kika.cov.multigroup.MultigroupLegendreCovariance
+        One block for each MF34 block kept (blocks without MF4 data for the row or
+        column reaction are skipped with a warning), with the relative and the
+        absolute matrix, the group means of ``a_l`` and the frame (``"LAB"`` for
+        a block converted by ``output_frame="lab"``). ``energy_grid`` is
+        *energy_grid* as an array.
 
     Raises
     ------
     ValueError
-        If input parameters are invalid or data is inconsistent
+        If *output_frame* is not 'same' or 'lab', *relative_normalization* is not
+        one of the two above, the object lacks MF4 or MF34, the grid name is
+        unknown or the grid has fewer than 2 points or is not strictly
+        increasing, *weighting_function* is an unknown name, ``endf_object.pendf``
+        is not set, or the frame of an MF34 block differs from that of its MF4
+        data (an MF34 frame of ``"same-as-MF4"`` always agrees).
+    NotImplementedError
+        If *weighting_function* is a callable.
     """
     # Validate output_frame
     output_frame = output_frame.lower()
