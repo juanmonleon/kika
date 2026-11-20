@@ -334,17 +334,25 @@ def reprocess_endf_to_ace(
 ):
     """
     Reprocess existing perturbed ENDF files to generate ACE files at new temperatures.
-    
-    This function constructs paths to perturbed ENDF files based on the standard naming
-    convention and processes them through NJOY to create ACE files at the specified
-    temperatures. It maintains the same directory structure as the original perturbation
-    workflow.
-    
+
+    The perturbed tapes of ``output_dir/endf/<zaid>/<NNNN>/`` are run through NJOY
+    again, from RECONR on, for each temperature; the tapes are not modified. It
+    carries only a perturbation that lives in the ENDF tape (MF4, MF1): a set whose
+    cross sections were perturbed on the PENDF keeps that perturbation in
+    ``output_dir/pendf/``, and reconstructing from its ENDF tapes would give
+    unperturbed cross sections. The function returns None; the counts of samples
+    and temperatures processed and skipped are written to the log.
+
     Parameters
     ----------
     output_dir : str
-        Base output directory containing the endf/ subdirectory with perturbed ENDF files.
-        Expected structure: output_dir/endf/{zaid}/{sample_num:04d}/{base_filename}_{sample_num:04d}.{ext}
+        Root of a perturbation run, holding ``endf/<zaid>/<NNNN>/``. A tape is the
+        first file in directory-listing order whose name starts with
+        ``<base_filename>_<NNNN>``, whatever its extension (``260560_0001.endf``,
+        ``jeff40_260560_0042.txt``). The summary file
+        ``<base_filename>_<NNNN>_summary.txt`` also starts with that prefix, so
+        when it is listed first it is taken as the tape. A sample with no such
+        file is skipped with a warning in the log.
     zaid : int
         ENDF ZAID of the isotope, Z*1000+A — 26056 for Fe-56. This is the key
         the endf/ and ace/ trees are built on; 260560 (Z*10000+A*10) is the
@@ -354,56 +362,56 @@ def reprocess_endf_to_ace(
     base_filename : str
         Base filename without extension and without the _NNNN suffix.
         Examples: "260560", "jeff40_260560"
-    temperatures : Union[float, List[float]]
-        Temperature(s) in Kelvin for ACE generation. Can be a single float or list of floats.
+    temperatures : float or list of float
+        Temperature(s) in Kelvin for ACE generation. A list must not be empty.
     njoy_exe : str
         Path to NJOY executable
     library_name : str
         Nuclear data library name (e.g., 'endfb81', 'jeff40')
-    njoy_version : str, default "NJOY 2016.78"
+    njoy_version : str
         NJOY version string for metadata and titles
-    nprocs : int, default 1
+    nprocs : int
         Number of parallel processes for sample processing
-    skip_existing : bool, default False
+    skip_existing : bool
         If True, skip samples whose ACE at the requested temperature is already
-        on disk — judged by the kT in the ACE header, not by the file name.
+        on disk — judged by the kT in the ACE header (to within 1 K), not by the
+        file name, in ``ace/<NNNN>/`` or in the layout ``ace/<temp>/<zaid>/<NNNN>/``.
         If False, always regenerate ACE files.
-    verbose : bool, default True
-        Enable verbose logging output
+    verbose : bool
+        Not used.
     extensions : list of str, optional
         ACE extension per temperature (e.g. ``['06c']``). When given, the ACE
-        is written as ``<ZAID>.<ext>`` in the per-sample directory, which is
-        the naming a set built with ``extensions=`` already uses — so a
-        reprocessing run overwrites in place and every xsdir line and MCNP
-        input stays valid. When None, the legacy
-        ``<ZAID*10>_<lib>_<NNNN>.<ext>`` naming is produced instead. Pass
-        whatever the set already carries.
-        
+        is written as ``<ZAID>.<ext>`` in ``ace/<NNNN>/``, which is the naming
+        a set built with ``extensions=`` already uses, so a reprocessing run
+        overwrites in place and every xsdir line stays valid. A list whose length
+        differs from the number of temperatures run (``skip_existing`` can shorten
+        it) is ignored with a warning. When None, NJOY's own naming is used, with
+        the sample number as suffix.
+
+    Raises
+    ------
+    FileNotFoundError
+        If *output_dir*, its ``endf`` subdirectory or *njoy_exe* does not exist.
+    ValueError
+        If *temperatures* is an empty list, or neither a number nor a list.
+
     Notes
     -----
     File naming convention:
     - ENDF files: {base_filename}_{sample_num:04d}.* (any extension)
     - Examples: "260560_0001.endf", "jeff40_260560_0042.txt"
-    
-    XSDIR file handling:
-    The function automatically detects and updates existing xsdir files:
-    1. Checks for existing xsdir files in output_dir/xsdir/
-       - If found: Updates them with new temperature entries for this isotope
-       - If not found: Creates only per-sample xsdir files (no master files)
-    2. Always creates per-sample xsdir files: output_dir/ace/temp/zaid/sample_num/{base}_{sample_num}.xsdir
-       - One file per ACE file, containing only that specific isotope/temperature
-       - Uses relative paths for portability
-    
-    This allows you to reprocess at new temperatures and automatically update
-    the xsdir files from previous perturbation runs.
-    
-    Output directory structure will include:
-    - output_dir/endf/zaid/sample_num/ : existing perturbed ENDF files (not modified)
-    - output_dir/ace/temp/zaid/sample_num/ : newly generated ACE files
-    - output_dir/njoy_files/temp/zaid/sample_num/ : NJOY auxiliary files
-    - output_dir/xsdir/ : xsdir files (updated if they exist from previous runs)
-    - output_dir/*.log : log files
-    
+
+    Where it writes, with ``NNNN`` the sample number from 1:
+
+    - ``ace/<NNNN>/``: the ACE files of the sample, with ``ace/<NNNN>/xsdir/`` for
+      their xsdir lines, and ``njoy_files/<NNNN>/`` for the NJOY input and output.
+    - ``xsdir/<stem>_<NNNN>``: when ``output_dir/xsdir`` already holds a file
+      whose name ends in ``_<NNNN>``, it is updated in place with the entry of
+      each new ACE table; otherwise no master xsdir is written.
+    - ``reprocess_endf_to_ace_<timestamp>.log``.
+
+    If no tape is found for any sample, the function logs the error and returns.
+
     Examples
     --------
     # Process Fe-56 samples at a single temperature

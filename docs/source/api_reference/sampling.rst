@@ -55,3 +55,23 @@ File-level ENDF sampler
 The sampler that reads and writes ENDF files directly, without the model.
 
 .. autofunction:: kika.sampling.endf_perturbation.perturb_ENDF_files
+
+Legacy file-level samplers
+--------------------------
+
+The samplers that work on PENDF, ACE and ENDF files by quantity, without the model.
+The user guide's page on the legacy samplers says when each one is used.
+
+.. autofunction:: kika.sampling.pendf_perturbation.perturb_PENDF_files
+
+.. autofunction:: kika.sampling.nubar_perturbation.perturb_nubar_files
+
+.. autofunction:: kika.sampling.pfns_perturbation.perturb_pfns_files
+
+.. autofunction:: kika.sampling.combined_perturbation.perturb_ENDF_PENDF_combined
+
+.. autofunction:: kika.sampling.joint_perturbation.perturb_joint_mf33_mf34
+
+.. autofunction:: kika.sampling.ace_perturbation.perturb_ACE_files
+
+.. autofunction:: kika.sampling.reprocess_endf_to_ace.reprocess_endf_to_ace

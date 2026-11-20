@@ -262,17 +262,147 @@ def perturb_joint_mf33_mf34(
 ) -> Dict[str, Any]:
     """One ensemble of *num_samples* replicas. Returns the run summary.
 
-    ``space`` must be ``"linear"``. MF34's Legendre coefficients change sign
-    routinely, so a multiplicative log-space factor is not meaningful for them
-    and ``perturb_ENDF_files`` refuses it — and a joint draw cannot use two
-    spaces. The consequence is deliberate and must be reported: the magnitude
-    half is drawn linear here, whereas ``perturb_PENDF_files`` alone defaults to
-    log. Run the ``mf33`` ensemble both ways if the difference matters.
+    The relative covariance of one reaction of one nuclide is read once from
+    *covariance_endf*: the MF33 cross-section block of MT *mt* (rows over its
+    energy bins), the MF34 shape blocks of the Legendre orders 1 to *l_max*, and
+    the cross blocks between them that MF34 states in its L=0 sub-subsections. It
+    is drawn as **one** block, in linear space (``factors = 1 + X``,
+    :func:`kika.sampling.core.draw_samples`), and each sample is split into the
+    factors of the cross-section bins and those of the Legendre coefficients. The
+    cross-section factors multiply the pointwise MT *mt* of the PENDF
+    reconstructed from *base_endf* (bin by bin, with a step at the bin edges), and
+    the Legendre factors multiply the MF4 coefficients of *base_endf* (as in
+    :func:`kika.sampling.endf_perturbation.perturb_ENDF_files`). The MT 1 total is
+    not perturbed. By default every direction of the matrix is
+    drawn (*null_tol* None), and a direction of negative variance gets zero
+    variance.
 
-    ``psd_method`` defaults to ``"none"``, matching ``perturb_ENDF_files``, so
-    that the ``mf34`` ensemble reproduces today's draw exactly when the same
-    seed is used. The spectrum is reported either way — see :func:`joint_report`
-    — so choosing something else is a measured decision rather than a default.
+    *which* chooses what is perturbed. ``"joint"`` draws the whole matrix and
+    writes both families. ``"mf34"`` draws the shape block alone and leaves MF3
+    nominal, and ``"mf33"`` draws the magnitude block alone and leaves MF4
+    nominal. The frozen family is not written once per sample: Stage B reads the
+    nominal PENDF (cached RECONR output) or *base_endf* itself for every pair.
+    ``"mf34"`` plus ``"mf33"`` is ``"joint"`` with the cross blocks set to zero.
+
+    Parameters
+    ----------
+    covariance_endf : str
+        ENDF tape that holds the covariance (MF33 and MF34). It is read, never
+        written.
+    base_endf : str
+        The tape the replicas are written onto: the MF3 and MF4 of the same
+        evaluation without covariance sections (MF31 to MF35).
+    num_samples : int
+        Number of replicas.
+    which : {"joint", "mf34", "mf33"}
+        The set drawn, see above.
+    mt : int
+        Reaction. MF33 and MF34 of this MT must be on *covariance_endf*.
+    isotope : int
+        ZAID of the nuclide whose MF34 blocks are read.
+    l_max : int
+        Highest Legendre order perturbed (orders 1 to *l_max*).
+    space : {"linear"}
+        Only ``"linear"`` is accepted: the Legendre coefficients change sign, and
+        one draw cannot be in two spaces. The magnitude half is therefore drawn
+        linear here, where ``perturb_PENDF_files`` alone draws in log by default.
+    decomposition_method : {"svd", "eigen"}
+        As in :func:`kika.sampling.core.draw_samples`.
+    sampling_method : {"sobol", "lhs", "random"}
+        As in :func:`kika.sampling.core.draw_samples`.
+    psd_method : {"none", "auto", "higham", "clip", "clip_rescale"}
+        Repair of the matrix before the decomposition, as in
+        :func:`kika.sampling.core.draw_samples`; ``"none"`` leaves it as stated.
+    null_tol : float, optional
+        Threshold of null directions; None keeps every direction in the draw
+        (see :func:`kika.sampling.core.draw_samples`).
+    seed : int, optional
+        Seed of the draw (42 by default); None draws a different ensemble at each
+        call.
+    joint_cache : str, optional
+        Path of an ``.npz`` cache of the assembled matrix, keyed on the SHA-256 of
+        *covariance_endf*; used when it matches and rewritten otherwise. None
+        assembles the matrix at each call.
+    enforce_positivity, positivity_check_points
+        As in ``perturb_ENDF_files``, for the MF4 half.
+    energy_ranges : list of tuple of float, optional
+        ``(emin, emax)`` windows in eV, as in ``perturb_ENDF_files`` for MF4 and
+        ``perturb_PENDF_files`` for MF3.
+    generate_ace : bool
+        Run NJOY on each (ENDF, PENDF) pair, for each temperature. Needs
+        *njoy_exe*.
+    pendf_cache_dir, pendf_tolerance, pendf_timeout_s
+        RECONR cache directory (None: the library default), tolerance and time
+        limit in seconds.
+    njoy_exe : str, optional
+        NJOY executable (also the RECONR executable when given).
+    ace_temperatures : sequence of float, optional
+        Temperatures in K; None gives 293.6 K.
+    ace_extensions : sequence of str, optional
+        ACE extension of each temperature.
+    ace_library_name : str, optional
+        Library name handed to NJOY.
+    ace_njoy_version : str
+        NJOY version string for the metadata and titles.
+    xsdir_file : str, optional
+        Baseline xsdir; for each sample a copy named ``<stem>_<NNNN>`` in
+        ``output_dir/xsdir`` has the entry of each ACE table replaced or added.
+    keep_njoy_io : bool
+        Keep the NJOY input and output files.
+    output_dir : str
+        Root of everything written (created if missing).
+    nprocs : int
+        Worker processes of the writing stages and of Stage B.
+    dry_run : bool
+        Draw and write the factors only: no tape, no perturbed PENDF and no
+        Stage B. For ``"joint"`` and ``"mf33"`` the MF3 stage still runs RECONR
+        (or reads its cache), so NJOY is still needed.
+    verbose_diagnostics : int
+        0 is quiet; any positive value prints summaries.
+    log_file : str, optional
+        Log file, opened for writing (an existing file is overwritten); the
+        stages append to it. None starts ``joint_<which>_<timestamp>.log`` in
+        *output_dir*.
+
+    Returns
+    -------
+    dict
+        ``which``, ``num_samples``, ``seed``, ``timestamp``, ``log_file``,
+        ``covariance_endf``, ``base_endf``, ``output_dir`` (absolute),
+        ``joint_report_full`` (symmetry, largest correlation and, for ``"joint"``
+        only, the spectrum of the assembled matrix; reported and never
+        repaired), ``joint_report_restricted``
+        (for ``"mf34"`` and ``"mf33"``), ``draw`` (the diagnostics of the draw),
+        ``pendf`` (what ``perturb_PENDF_files`` returned, when MF3 is written)
+        and, after Stage B, ``n_attempted``, ``n_ace_ok``, ``n_missing_inputs``,
+        ``zaid`` and ``nominal_pendf``.
+
+    Raises
+    ------
+    ValueError
+        If *which* is not one of the three sets; *space* is not ``"linear"``;
+        *generate_ace* is true and *njoy_exe* is None; the tape has no MF33 or
+        MF34 for *mt*, an MF34 that cannot be parsed, or MF33 that cannot be made
+        relative; no MF34 block of orders 1 to *l_max* is found; or, for
+        ``"joint"``, the tape states no L=0 cross blocks.
+    RuntimeError
+        If the MF3 stage wrote no perturbed PENDF (usually because NJOY RECONR
+        did not run), unless *dry_run*.
+
+    Notes
+    -----
+    Written under *output_dir*, with the sample number ``NNNN`` from 1 and
+    ``base`` the name of *base_endf* without extension:
+
+    - ``endf/<zaid>/<NNNN>/<base>_<NNNN><ext>``: the perturbed tapes (``"joint"``
+      and ``"mf34"``; an existing tape is reused), and
+      ``pendf/<zaid>/<NNNN>/<base>_<NNNN>.pendf``: the perturbed PENDF files
+      (``"joint"`` and ``"mf33"``).
+    - The factor parquet files of the two writing stages
+      (``endf_perturbation_factors_<ts>.parquet`` and
+      ``perturbation_matrix_<ts>_master.parquet``) and the log.
+    - With *generate_ace*: ``ace/<NNNN>/``, ``njoy_files/<NNNN>/`` and, with
+      *xsdir_file*, ``xsdir/<stem>_<NNNN>``.
     """
     if which not in JOINT_SETS:
         raise ValueError(f"which must be one of {JOINT_SETS}, got {which!r}")

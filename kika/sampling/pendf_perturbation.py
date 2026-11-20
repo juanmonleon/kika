@@ -177,13 +177,154 @@ def perturb_PENDF_files(
 ) -> Dict[str, Any]:
     """Perturb PENDF cross sections directly from MF33 covariance on the native grid.
 
-    See module docstring for the pipeline overview. Returns a per-ZAID summary
-    dict with sample counts, NJOY successes/failures, and threshold-pin/coverage
-    diagnostics.
+    Each ENDF tape is reconstructed with NJOY RECONR (cached), the relative MF33
+    covariance of the selected MTs is assembled on the union of its energy bins
+    (eV), and ``num_samples`` factor sets are drawn. The factor of a bin
+    multiplies the pointwise MF3 cross section of the PENDF at every energy in
+    the bin; a point is stored twice at each interior bin edge so that the factor
+    steps there, and energies outside the covariance's bins keep factor 1. A
+    composite MT (such as MT 4) absent from the PENDF is applied to every partial
+    the PENDF carries, except the partials perturbed on their own.
 
-    ``log_file`` defaults to a freshly-named ``pendf_perturbation_<ts>.log``
-    inside ``output_dir``. Pass an existing path (e.g. from the combined
-    orchestrator) to append this run's log block to that file instead.
+    Before the draw, in this order and by default, the covariance gets: a rescale
+    of the bins that straddle a reaction threshold (*pin_threshold_bins*), a
+    rescale of the bins whose variance exceeds 1000 times the median of their MT,
+    a cap on the relative standard deviation (*max_relative_std*), and then the
+    repair named by *psd_method*. Bins with no stated variance are left out of
+    the decomposition and get factor 1. The factors are ``float32``. Draws of
+    one call use the same *seed* for every ENDF file, and keep every direction
+    of the matrix, null ones included; with ``"svd"`` a direction of negative
+    variance is drawn with the magnitude of its eigenvalue.
+
+    Per-file failures (a failed RECONR, a covariance that cannot be drawn) are
+    logged and recorded in the returned summary under ``{"error": message}``; a
+    tape whose ZAID cannot be read is logged and skipped without an entry. The
+    run goes on with the next file.
+
+    Parameters
+    ----------
+    endf_files : str or list of str
+        ENDF tape(s) with an MF33.
+    mt_list : list of int or list of list of int
+        MTs to perturb: a flat list for every file, or one list per file. An
+        empty list means every MT with an MF33 section. Negative entries exclude
+        (a negative composite MT also excludes its partials); only negatives
+        select all the MTs except those.
+    num_samples : int
+        Number of samples per file.
+    output_formats : sequence of {"pendf", "ace"}
+        What to produce. ``"pendf"`` writes the perturbed PENDF of each sample;
+        ``"ace"`` also runs NJOY on the original ENDF and the perturbed PENDF
+        (RECONR skipped) for each sample and temperature. An empty sequence or an
+        unknown name raises.
+    keep_njoy_io : bool
+        Keep the NJOY input and output files of the RECONR run
+        (``njoy_files/recon/<zaid>``) and of each sample (``njoy_files/<NNNN>``).
+    pendf_cache_dir : str, optional
+        Directory of the RECONR cache; None takes the library default.
+    pendf_tolerance : float
+        RECONR tolerance (``err``) of the cached PENDF.
+    pendf_timeout_s : float
+        Time limit of the RECONR run, in seconds.
+    space : {"log", "linear"}
+        ``"log"`` draws lognormal factors that reproduce the relative covariance
+        (unit mean); ``"linear"`` draws ``1 + X``.
+    decomposition_method : {"svd", "eigen"}
+        As in :func:`kika.sampling.core.draw_samples`.
+    sampling_method : {"sobol", "lhs", "random"}
+        As in :func:`kika.sampling.core.draw_samples`.
+    psd_method : {"auto", "higham", "clip", "clip_rescale", "none"}
+        As in :func:`kika.sampling.core.draw_samples`.
+    autofix : {None, "soft", "medium", "hard"}
+        Level of the covariance's own ``fix_covariance`` repair, applied before
+        the draw. None applies none. A level that cannot bring the matrix to
+        *accept_tol* fails that file (``"soft"`` goes on to the decomposition
+        anyway).
+    high_val_thresh, accept_tol : float
+        Parameters of that repair; unused when *autofix* is None.
+    max_relative_std : float, optional
+        Cap on the relative standard deviation of every bin (3.0 is 300 %); None
+        applies no cap.
+    pin_threshold_bins : bool
+        Rescale the variance of the bins that straddle the first energy where an
+        MT's PENDF cross section is positive, to a target taken from the median
+        of the MT's other bins (a congruence transform that keeps the
+        correlations). The factor of such a bin is still applied to the whole bin.
+    energy_ranges : list of tuple of float, optional
+        ``(emin, emax)`` windows in eV. A bin whose centre lies outside every
+        window gets factor 1. None perturbs every bin.
+    njoy_exe : str, optional
+        NJOY executable. Needed with ``"ace"``; also the executable of RECONR
+        when given (otherwise ``"njoy"``).
+    ace_temperatures : sequence of float, optional
+        Temperatures in K of the ACE files; None gives 293.6 K.
+    ace_extensions : sequence of str, optional
+        ACE extension of each temperature, as many as *ace_temperatures*;
+        otherwise raises (checked only when ``"ace"`` is in *output_formats*).
+    ace_library_name : str, optional
+        Library name handed to NJOY; None gives ``"endfb81"``. A name unknown to
+        kika gives the suffix ``00`` and a warning.
+    ace_njoy_version : str
+        NJOY version string for the metadata and titles.
+    xsdir_file : str, optional
+        Baseline xsdir; for each sample a copy named ``<stem>_<NNNN>`` in
+        ``output_dir/xsdir`` has the entry of each ACE table replaced or added.
+    output_dir : str
+        Root of everything written (created if missing); see *Notes*.
+    seed : int, optional
+        Base seed; None draws a different ensemble at each call.
+    nprocs : int
+        Worker processes for the samples of a file; used only with ``"ace"`` and
+        at least 2 samples, or with 100 samples or more.
+    dry_run : bool
+        Draw and write the factors only: no perturbed PENDF and no Stage B. RECONR
+        still runs (or its cache is read), so NJOY is still needed.
+    verbose_diagnostics : int
+        0 is quiet; any positive value prints summaries.
+    log_file : str, optional
+        Log file to append to. None starts ``pendf_perturbation_<timestamp>.log``
+        in *output_dir*.
+    precomputed : list of dict, optional
+        One entry per ENDF file (``None`` for a file that still draws its own),
+        with ``factors`` (``num_samples`` × n_params), ``mt_to_param_block``
+        (``{mt: slice}`` of the columns of each MT) and ``union_grid`` (the bin
+        edges in eV), and optionally ``diagnostics``. The covariance is then not
+        loaded and nothing is drawn; RECONR and everything after the draw run as
+        usual. It exists for the joint MF33-MF34 draw.
+
+    Returns
+    -------
+    dict
+        ``timestamp``, ``log_file``, ``output_dir`` (absolute), ``output_formats``,
+        ``master_matrix`` (path of the factors parquet, or ``""`` when none was
+        written) and ``isotopes``: ``{str(zaid): summary}``. A summary has the
+        ``mts`` perturbed, ``n_native_bins`` and ``n_samples``; unless
+        *dry_run*, also ``n_pendf_ok``, ``n_ace_ok`` and ``fix_info``; for a
+        failed file only ``error``.
+
+    Raises
+    ------
+    ValueError
+        If *output_formats* is empty or has an unknown name; ``"ace"`` is
+        requested without *njoy_exe*; *ace_extensions* and *ace_temperatures*
+        differ in length; or *mt_list* is a list of lists whose length is not
+        that of *endf_files*.
+    TypeError
+        If *mt_list* is neither a flat list of int nor a list of lists of int.
+
+    Notes
+    -----
+    Written under *output_dir*, with the sample number ``NNNN`` from 1:
+
+    - ``pendf/<zaid>/<NNNN>/<base>_<NNNN>.pendf``: the perturbed PENDF (an
+      existing file is overwritten).
+    - ``perturbation_matrix_<timestamp>_master.parquet`` and
+      ``perturbation_matrix_<timestamp>_metadata.json``: one row per sample, a
+      ``Sample_ID`` column from 1 and one ``float32`` column per MT and bin,
+      ``<symbol>_MT<mt>_<lower>_<upper>``.
+    - ``pendf_perturbation_<timestamp>.log``, unless *log_file* is given.
+    - With ``"ace"``: ``ace/<NNNN>/`` (ACE files; ``ace/<NNNN>/xsdir/`` for the
+      xsdir lines) and, with *xsdir_file*, ``xsdir/<stem>_<NNNN>``.
     """
     global _logger
 

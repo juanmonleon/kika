@@ -161,46 +161,137 @@ def perturb_ENDF_PENDF_combined(
 ) -> Dict[str, Any]:
     """Run MF33 (σ) and MF34 (angular) perturbation independently, then pair-NJOY.
 
+    Stage A.MF34 runs :func:`kika.sampling.endf_perturbation.perturb_ENDF_files`
+    (no ACE) and Stage A.MF33 runs
+    :func:`kika.sampling.pendf_perturbation.perturb_PENDF_files` (PENDF only).
+    Stage B then pairs sample ``i`` of the perturbed ENDF tapes with sample ``i``
+    of the perturbed PENDF files and runs NJOY once per pair and temperature
+    (RECONR skipped), producing ACE files. **The two families are drawn
+    independently**, so a covariance that the evaluation states between the
+    cross-section and the Legendre coefficients is absent from the ensemble;
+    matching two Sobol sets by index also correlates them. Use
+    ``kika.sampling.joint_perturbation.perturb_joint_mf33_mf34`` to draw both
+    from one covariance.
+
+    Each stage keeps its own conventions (see the two functions above): the
+    Legendre factors are ``1 + X`` in linear space and the cross-section factors
+    are lognormal by default; *energy_ranges* acts by overlap of a bin with a
+    window on MF34 and by the bin centre on MF33. The perturbed ENDF tape of a
+    sample already present under ``output_dir/endf`` is reused, not rewritten, and
+    Stage B pairs whatever tapes it finds there.
+
+    A stage that raises is logged and recorded in the returned summary
+    (``mf34_error`` or ``mf33_error``) and the run stops there; per-file and
+    per-sample failures inside a stage are logged by that stage.
+
     Parameters
     ----------
-    endf_files
-        Single path or list of ENDF tape paths.
-    mt_list_mf33
-        MTs to perturb in MF33 (cross sections, written to PENDF). Flat list
-        broadcasts across all input ENDFs, list-of-lists is per-file.
-    mt_list_mf34
-        MTs to perturb in MF34 (angular distributions, written to ENDF MF4).
-        Same broadcast/per-file convention.
-    legendre_coeffs
-        Legendre coefficient indices to perturb (e.g. ``[1, 2, 3]``).
-    num_samples
-        Number of paired (ENDF, PENDF) realisations to produce.
-    seed
-        Master seed. Shared seed pattern: MF33 uses ``seed``, MF34 uses
-        ``seed + 1`` so a given ``seed`` reproduces the same paired set.
-    generate_ace
-        If True (default), Stage B runs NJOY against each (perturbed ENDF,
-        perturbed PENDF) pair and writes ACE + xsdir.
+    endf_files : str or list of str
+        ENDF tape(s) with MF33 and MF34.
+    mt_list_mf33 : list of int or list of list of int
+        MTs perturbed in MF33 (cross sections, written to the PENDF), with the
+        signed convention of
+        :func:`~kika.sampling.pendf_perturbation.perturb_PENDF_files`. A flat list
+        applies to every file; a list of lists is one per file.
+    mt_list_mf34 : list of int or list of list of int
+        MTs perturbed in MF34 (angular distributions, written to MF4), with the
+        convention of :func:`~kika.sampling.endf_perturbation.perturb_ENDF_files`.
+    legendre_coeffs : list of int
+        Legendre orders perturbed (e.g. ``[1, 2, 3]``).
+    num_samples : int
+        Number of paired realisations per file.
+    generate_ace : bool
+        Run Stage B (NJOY on each pair). Needs *njoy_exe*. With False the run
+        stops after the two perturbed sets are written.
+    keep_njoy_io : bool
+        Keep the NJOY input and output files of the RECONR run and of each pair.
+    pendf_cache_dir, pendf_tolerance, pendf_timeout_s
+        RECONR cache directory (None: the library default), tolerance and time
+        limit in seconds, as in ``perturb_PENDF_files``.
+    space_mf33, decomposition_method_mf33, sampling_method_mf33, psd_method_mf33
+        ``space``, ``decomposition_method``, ``sampling_method`` and
+        ``psd_method`` of the MF33 stage.
+    autofix_mf33, high_val_thresh_mf33, accept_tol_mf33
+        ``autofix``, ``high_val_thresh`` and ``accept_tol`` of the MF33 stage.
+    max_relative_std_mf33, pin_threshold_bins_mf33
+        ``max_relative_std`` and ``pin_threshold_bins`` of the MF33 stage.
+    space_mf34, decomposition_method_mf34, sampling_method_mf34, psd_method_mf34
+        ``space``, ``decomposition_method``, ``sampling_method`` and
+        ``psd_method`` of the MF34 stage. ``space_mf34`` other than linear and a
+        decomposition other than ``"svd"`` or ``"eigen"`` raise inside that stage
+        and end the run with ``mf34_error``.
+    higham_projection_mf34, enforce_positivity_mf34, positivity_check_points_mf34
+        ``higham_projection``, ``enforce_positivity`` and
+        ``positivity_check_points`` of the MF34 stage.
+    energy_ranges : list of tuple of float, optional
+        ``(emin, emax)`` windows in eV, given to both stages.
+    njoy_exe : str, optional
+        NJOY executable; required with *generate_ace*. It is also the RECONR
+        executable of the MF33 stage when given (otherwise ``"njoy"``).
+    ace_temperatures : sequence of float, optional
+        Temperatures in K; None gives 293.6 K. Only used with *generate_ace*.
+    ace_extensions : sequence of str, optional
+        ACE extension of each temperature, as many as *ace_temperatures*;
+        otherwise raises (checked only with *generate_ace*).
+    ace_library_name : str, optional
+        Library name handed to NJOY; None gives ``"endfb81"``.
+    ace_njoy_version : str
+        NJOY version string for the metadata and titles.
+    xsdir_file : str, optional
+        Baseline xsdir; for each sample a copy named ``<stem>_<NNNN>`` in
+        ``output_dir/xsdir`` has the entry of each ACE table replaced or added.
+    output_dir : str
+        Root of everything written (created if missing); see *Notes*.
+    seed : int, optional
+        Master seed: the MF33 stage uses ``seed`` and the MF34 stage ``seed + 1``;
+        None draws a different ensemble at each call.
+    nprocs : int
+        Worker processes of both stages and of Stage B.
+    dry_run : bool
+        Draw and write the factors only; Stage B is skipped.
+    verbose_diagnostics : int
+        0 is quiet; any positive value prints summaries.
+    log_file : str, optional
+        Orchestrator log. It is opened for writing (an existing file is
+        overwritten) and both stages append to it. None starts
+        ``combined_perturbation_<timestamp>.log`` in *output_dir*.
 
-    Output layout
-    -------------
-    ``output_dir/``
-        ├── ``combined_perturbation_<ts>.log``       orchestrator log
-        ├── ``endf_perturbation_<ts>.log``           MF34 sub-step log
-        ├── ``pendf_perturbation_<ts>.log``          MF33 sub-step log
-        ├── ``endf_perturbation_factors_<ts>.parquet``    Legendre factors
-        ├── ``perturbation_matrix_<ts>_master.parquet``   σ factors
-        ├── ``endf/<zaid>/<NNNN>/<base>_<NNNN>.endf``
-        ├── ``pendf/<zaid>/<NNNN>/<base>_<NNNN>.pendf``
-        ├── ``ace/<temp_str>/<zaid>/<NNNN>/...``          paired ACEs (Stage B)
-        ├── ``njoy_files/recon/<zaid>/<base>_recon.{input,output}``
-        │                                                 RECONR deck + stdout
-        │                                                 (only if keep_njoy_io)
-        ├── ``njoy_files/<temp_str>/<zaid>/<NNNN>/<base>_<NNNN>.{input,output}``
-        │                                                 acer-chain I/O
-        │                                                 (only if keep_njoy_io)
-        └── ``xsdir/<temp_str>/...``                      xsdir entries
-                                                          (only if xsdir_file)
+    Returns
+    -------
+    dict
+        ``timestamp``, ``log_file``, ``output_dir`` (absolute), ``generate_ace``,
+        ``num_samples``, ``mf33_pendf_summary`` (what ``perturb_PENDF_files``
+        returned), ``isotopes`` and, after a failed stage, ``mf34_error`` or
+        ``mf33_error``. ``isotopes`` is filled by Stage B: ``{str(zaid):
+        {"n_attempted", "n_ace_ok", "n_missing_inputs"}}``, or ``{"error"}`` under
+        the file name for a tape whose ZAID cannot be read. A pair is missing when
+        the perturbed ENDF or the perturbed PENDF of that sample is not on disk.
+
+    Raises
+    ------
+    ValueError
+        If *generate_ace* is true and *njoy_exe* is None; *ace_extensions* and
+        *ace_temperatures* differ in length; or an MT list is a list of lists
+        whose length is not that of *endf_files*.
+    TypeError
+        If an MT list is neither a flat list of int nor a list of lists of int.
+
+    Notes
+    -----
+    Written under *output_dir*, with the sample number ``NNNN`` from 1 and
+    ``base`` the input file name without extension:
+
+    - ``combined_perturbation_<ts>.log`` (or *log_file*): the one log of the
+      orchestrator and of both stages.
+    - ``endf_perturbation_factors_<ts>.parquet``: the Legendre factors.
+    - ``perturbation_matrix_<ts>_master.parquet`` and its metadata: the
+      cross-section factors.
+    - ``endf/<zaid>/<NNNN>/<base>_<NNNN><ext>``: the perturbed ENDF tapes, and
+      ``pendf/<zaid>/<NNNN>/<base>_<NNNN>.pendf``: the perturbed PENDF files.
+    - With *generate_ace*: ``ace/<NNNN>/`` (ACE files; ``ace/<NNNN>/xsdir/`` for
+      the xsdir lines), ``njoy_files/<NNNN>/`` and, with *xsdir_file*,
+      ``xsdir/<stem>_<NNNN>``. With *keep_njoy_io*, ``njoy_files/recon/<zaid>/``
+      holds the RECONR deck and output.
     """
     global _logger
 

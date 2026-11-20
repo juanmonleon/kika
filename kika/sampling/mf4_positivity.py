@@ -172,7 +172,7 @@ def repair_tabulated_positivity(mu, p, p_prime, info, pairs=None):
     at every node. Lin-lin in mu makes the node constraints the whole
     constraint. When the covariance is in the other frame (``info["frame"]``),
     the ``d_l`` are that frame's shifts and the basis carries them back with the
-    cosine map's Jacobian (:func:`kika._legendre_frames.correctionBasis`): the
+    cosine map's Jacobian (``kika._legendre_frames.correctionBasis``): the
     repair moves the coefficients the covariance describes.
 
     **Never a clip and a renormalisation.** Only the perturbed orders move, and
@@ -181,9 +181,34 @@ def repair_tabulated_positivity(mu, p, p_prime, info, pairs=None):
     is close but not the same: it pins a_0 and the orders *above* the highest
     perturbed one, so an unperturbed order below it may still move.
 
-    Returns ``(table, event)`` where *event* is ``{"min_before", "min_after",
-    "max_delta_change"}`` -- the shape of the ENDF path's positivity events,
-    less the MT and energy that the applier and the set add.
+    The nearest set is found by SLSQP (tolerance 1e-12, at most 500 iterations),
+    and the function does not check that the optimiser converged.
+
+    Parameters
+    ----------
+    mu, p
+        The unperturbed table: ascending cosines over [-1, 1] and ``f`` at each.
+    p_prime : numpy.ndarray
+        The perturbed table on the same nodes, before the repair. Only its minimum
+        is read, for the event.
+    info : dict
+        What :func:`~kika.nuclear_data.model.angular_tables.perturbTabulatedAngular`
+        returns for that table: ``info["deltas"]`` is ``{order: d_l}``, the shifts
+        ``(c_l - 1) a_l`` of the perturbed orders, and ``info.get("frame")`` the
+        ``(γ, direction)`` of the covariance's frame, or None for the table's own.
+    pairs
+        Accepted so that the applier can pass the table's ``(NBT, INT)``; not
+        read.
+
+    Returns
+    -------
+    table : numpy.ndarray
+        The repaired table, ``p + C d*`` on the nodes of *mu*.
+    event : dict
+        ``min_before`` (the minimum of *p_prime*), ``min_after`` (the minimum of
+        the repaired table) and ``max_delta_change`` (the largest ``|d*_l - d_l|``
+        over the perturbed orders). The ENDF path's positivity events have this
+        shape, less the MT and the energy.
     """
     mu = np.asarray(mu, dtype=float)
     p = np.asarray(p, dtype=float)

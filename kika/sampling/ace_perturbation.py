@@ -810,71 +810,141 @@ def perturb_ACE_files(
     max_relative_std: Optional[float] = 3.0,
 ):
     """
-    Perturb ACE nuclear data files using covariance matrices.
+    Perturb ACE nuclear data files using multigroup covariance matrices.
 
-    This function generates perturbed ACE files by sampling perturbation factors
-    from multivariate normal distributions derived from covariance matrices.
+    A multigroup relative covariance is read from a processed covariance file
+    (SCALE or NJOY format), ``num_samples`` sets of group factors are drawn, and
+    each cross-section value of a perturbed reaction in the ACE file is multiplied
+    by the factor of the group that its energy falls in. Energies outside the
+    covariance's group boundaries keep their value. The ENDF tape is never read.
+
+    A factor on a lumped MT (4, 103, 104, 105, 106, 107) is applied to every
+    partial of the group that the ACE file carries, unless the request names some
+    partials of the group and not the lumped MT itself: then only those partials
+    are perturbed (and the lumped covariance is under-propagated). A reaction
+    for which any factor is zero or negative is left unperturbed, and nothing is
+    logged about it (the write path calls the applier with ``verbose=False``).
+
+    Before the draw, the covariance gets: a rescale of the groups that straddle a
+    reaction threshold (the threshold is the first energy where the ACE cross
+    section is positive; for an MT absent from the ACE it is taken from the group
+    of largest variance), a rescale of the groups whose variance exceeds 1000
+    times the median of their MT, a cap on the relative standard deviation
+    (*max_relative_std*), and then the repair named by *psd_method*. Groups with no
+    stated variance are left out of the decomposition and get factor 1. The
+    factors are ``float32``. The draw of each isotope is seeded with
+    ``seed + zaid``, retains every direction of the matrix (null ones included),
+    and with ``"svd"`` draws a direction of negative variance with the magnitude
+    of its eigenvalue.
+
+    An ACE file that does not exist, a covariance file that cannot be read or
+    holds no matrix, and an isotope whose covariance cannot be fixed (*autofix*)
+    are logged and skipped; the run goes on with the next one. Any other error of
+    the draw is raised.
 
     Parameters
     ----------
-    ace_files : Union[str, List[str]]
-        Path(s) to ACE file(s) to be perturbed
-    cov_files : Union[str, List[str]]
-        Path(s) to covariance matrix file(s) (SCALE or NJOY format).
-        Can be a single file (used for all ACE files) or one file per ACE file.
-    mt_list : List[int] or List[List[int]]
-        MT reactions to perturb. Either a flat list (applied to every ACE file)
-        or a list-of-lists with one entry per ACE file (per-file selection).
-        An empty (or inner-empty) list means "perturb all MTs available in the
-        covariance" for that file.
+    ace_files : str or list of str
+        ACE file(s) to perturb.
+    cov_files : str or list of str
+        Covariance file(s) in SCALE or NJOY format: one used for all ACE files, or
+        one per ACE file.
+    mt_list : list of int or list of list of int
+        MTs to perturb: a flat list for every file, or one list per file. An empty
+        list means every MT that the covariance and the ACE file share. Negative
+        entries exclude (a negative lumped MT also excludes its partials); only
+        negatives select all the shared MTs except those. A single MT is
+        perturbed when the covariance and the ACE file both carry it. A lumped MT
+        (4, 103 to 107) that the covariance carries is also perturbed when the
+        request names it, or names a partial of its range that the ACE file
+        carries, even if the ACE file has no such lumped MT: its factor then goes
+        to the partials.
     num_samples : int
-        Number of perturbed ACE files to generate
-    space : str, default "log"
-        Sampling space: "linear" (factors = 1 + X) or "log"
-        (factors = exp(Y - diag(Σ_log)/2), Y ~ N(0, Σ_log), Σ_log = log1p(Σ): unit mean, Cov = Σ)
-    decomposition_method : str, default "svd"
-        Matrix decomposition method: "svd", "cholesky", "eigen", or "pca"
-    sampling_method : str, default "sobol"
-        Sampling method: "sobol", "lhs", or "random"
-    output_dir : str, default "."
-        Output directory for perturbed files
-    xsdir_file : Optional[str], default None
-        Path to master XSDIR file to be modified for each sample
-    seed : Optional[int], default None
-        Random seed for reproducible sampling
-    nprocs : int, default 1
-        Number of parallel processes (currently unused)
-    dry_run : bool, default False
-        If True, only generate perturbation factors without creating ACE files
-    autofix : Optional[str], default None
-        Covariance matrix fixing level:
-        - None: No autofix - use covariance matrix as-is
-        - "soft": Clamp diagonal variances only
-        - "medium": Clamp variances then remove worst block pairs
-        - "hard": Clamp variances then remove worst reactions entirely
-    high_val_thresh : float, default 1.0
-        Threshold for identifying problematic covariance values during autofix
-    accept_tol : float, default -1.0e-4
-        Minimum eigenvalue threshold for accepting the covariance matrix
-    remove_blocks : Optional[Dict[int, Union[Tuple[int, int], List[Tuple[int, int]]]]], default None
-        Manual specification of covariance blocks to remove by isotope
-    verbose : bool, default True
-        Enable verbose logging output
-    energy_ranges : Optional[List[Tuple[float, float]]], default None
-        List of (emin, emax) energy ranges in eV. Only energy bins overlapping
-    max_relative_std : float or None, default 3.0
-        Maximum relative standard deviation (e.g. 3.0 = 300%). Variances
-        exceeding this cap are reduced via a correlation-preserving congruence
-        transform. Common near threshold reactions. Set to None to disable.
-        these ranges will be perturbed; bins outside are set to neutral (1.0 for
-        linear space, 0.0 for log space). None means perturb all energies.
+        Number of perturbed ACE files per input file.
+    space : {"log", "linear"}
+        ``"log"`` draws lognormal factors of unit mean that reproduce the
+        relative covariance; ``"linear"`` draws ``1 + X``.
+    decomposition_method : {"svd", "eigen"}
+        As in :func:`kika.sampling.core.draw_samples`; any other value, Cholesky
+        included, raises.
+    sampling_method : {"sobol", "lhs", "random"}
+        As in :func:`kika.sampling.core.draw_samples`.
+    output_dir : str
+        Root of everything written (created if missing); see *Notes*.
+    xsdir_file : str, optional
+        Baseline xsdir; for each sample a copy named ``<stem>_<NNNN>`` in
+        ``output_dir/xsdir`` has the entry of each ACE table replaced or added.
+    seed : int, optional
+        Base seed (each isotope uses ``seed + zaid``); None draws a different
+        ensemble at each call.
+    nprocs : int
+        Worker processes. In a dry run with several ACE files, one per isotope;
+        otherwise the samples of a file are written by a pool of this size, and an
+        error in a sample is then not reported.
+    dry_run : bool
+        Draw and write the factors only: no ACE file.
+    only_xsdir : bool
+        When true, nothing is drawn or written except xsdir: the snippets already
+        under ``output_dir/ace`` for the ZAIDs of *ace_files* are re-wrapped and the
+        master copies in ``output_dir/xsdir`` rebuilt from *xsdir_file*. Cannot be
+        combined with *dry_run*.
+    autofix : {None, "soft", "medium", "hard"}
+        Repair of the covariance by its own ``fix_covariance``, before the draw.
+        None uses the matrix as read. ``"soft"`` clamps the variances, ``"medium"``
+        then removes the worst block pairs and ``"hard"`` removes the worst
+        reactions. A level that cannot reach *accept_tol* skips that isotope
+        (``"soft"`` tries the decomposition anyway).
+    high_val_thresh : float
+        Threshold of what ``autofix`` treats as a problematic value.
+    accept_tol : float
+        Smallest eigenvalue that ``autofix`` accepts.
+    remove_blocks : dict, optional
+        ``{zaid: (mt_row, mt_col)}`` or ``{zaid: [(mt_row, mt_col), ...]}``: the
+        covariance blocks removed for that isotope before anything else.
+    verbose : bool
+        Progress messages of the run and of the draw. The factors applied are
+        not reported.
+    energy_ranges : list of tuple of float, optional
+        ``(emin, emax)`` windows in eV. A group that overlaps no window is set to
+        the neutral value, 1 in linear space and **0 in log space**: a reaction
+        with a zero factor is left unperturbed, so with the default ``"log"`` space
+        any reaction that has a group outside the windows is not perturbed at all.
+        Use ``space="linear"`` with *energy_ranges*. None perturbs every group.
+    psd_method : {"auto", "higham", "clip", "clip_rescale", "none"}
+        As in :func:`kika.sampling.core.draw_samples`.
+    max_relative_std : float, optional
+        Cap on the relative standard deviation of every group (3.0 is 300 %); None
+        applies no cap.
+
+    Raises
+    ------
+    ValueError
+        If *only_xsdir* and *dry_run* are both true; the number of *cov_files* is
+        neither 1 nor that of *ace_files*; *mt_list* is a list of lists whose
+        length is not that of *ace_files*; the covariance's energy unit is neither
+        eV nor MeV; or the draw refuses its arguments (*space*,
+        *decomposition_method*, *psd_method*, *sampling_method*).
+    TypeError
+        If *mt_list* is neither a flat list of int nor a list of lists of int.
 
     Notes
     -----
-    When autofix=None, the covariance matrix is used exactly as read from the file,
-    without any modifications. This may result in decomposition failures if the
-    matrix is not positive semi-definite, but preserves the original uncertainties
-    and correlations exactly as specified in the nuclear data evaluation.
+    Written under *output_dir*, with the sample number ``NNNN`` from 1, ``base`` the
+    input file name without extension and ``<temp>`` the temperature of the table in
+    K (``293.6``, ``600``):
+
+    - ``ace/<temp>/<zaid>/<NNNN>/<base>_<NNNN><ext>``: the perturbed ACE file
+      (overwritten if it exists), with its xsdir line in
+      ``<base>_<NNNN>.xsdir`` beside it.
+    - ``perturbation_matrix_<timestamp>_master.parquet`` and
+      ``perturbation_matrix_<timestamp>_metadata.json``: one row per sample, a
+      ``Sample_ID`` column from 1 and one ``float32`` column per MT and group,
+      ``<symbol>_MT<mt>_<lower>_<upper>`` (energies in MeV).
+    - ``ace_perturbation_<timestamp>.log``.
+
+    With ``autofix=None`` the matrix is used as read, which can make the
+    decomposition fail when it is not positive semi-definite, but keeps the
+    uncertainties and correlations as stated.
     """
     global _logger
     
