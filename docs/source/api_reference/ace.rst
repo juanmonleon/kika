@@ -19,6 +19,13 @@ kika.ace.parsers.parse_ace
    :undoc-members:
    :show-inheritance:
 
+kika.ace.classes.ace
+--------------------
+
+The object :func:`kika.ace.read_ace` returns.
+
+.. autoclass:: kika.ace.classes.ace.Ace
+
 kika.ace.model_adapter
 ----------------------
 

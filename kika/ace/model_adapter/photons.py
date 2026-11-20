@@ -136,7 +136,20 @@ def _domainOf(function) -> Tuple[float, float]:
 
 
 def photonProductionTotal(ace) -> Optional[XYs1d]:
-    """GPD as an :class:`XYs1d` in eV and barns, labelled ``heated_<T>``, or ``None``."""
+    """GPD as an :class:`~kika.nuclear_data.model.functions.xys1d.XYs1d` in eV and barns, labelled ``heated_<T>``, or ``None``.
+
+    Parameters
+    ----------
+    ace : Ace
+        A neutron-type table read by :func:`~kika.ace.read_ace`.
+
+    Returns
+    -------
+    ~kika.nuclear_data.model.functions.xys1d.XYs1d or None
+        The total photon production cross section, lin-lin: energies in eV (the
+        file's MeV times 10**6) and values in barns. ``None`` when the table has
+        no such total.
+    """
     total = ace.photon_production_total() if hasattr(ace, "photon_production_total") else None
     if total is None:
         return None
@@ -360,6 +373,27 @@ def attachAcePhotons(ace, suite, report: Optional[ConversionReport] = None,
     MTMULT and MFTYPE 13 divides by its heated σ. Returns the report; never
     raises on an unsupported law — that photon is reported and either kept
     with the half that could be read or, when it has no host, left out.
+
+    Parameters
+    ----------
+    ace : Ace
+        A neutron-type table read by :func:`~kika.ace.read_ace`.
+    suite : ReactionSuite
+        The suite :func:`~kika.ace.model_adapter.decodeAce` is building, with its
+        reactions already in it. It is changed in place: photon products are
+        appended to the output channel of their reaction, and the total photon
+        production is set as ``suite.photonProductionTotal`` (an attribute, not a
+        GNDS node).
+    report : ConversionReport, optional
+        Receives what is unsupported, approximated or lost. Default: a new report.
+    provenance : AceProvenance, optional
+        Attached to the orphan reactions created for photon production cross
+        sections whose MT the table has no cross section for.
+
+    Returns
+    -------
+    ConversionReport
+        The report.
     """
     report = report if report is not None else ConversionReport()
     sigp = getattr(ace, "photon_production_xs", None)

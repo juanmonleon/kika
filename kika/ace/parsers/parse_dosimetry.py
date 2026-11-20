@@ -4,7 +4,7 @@ The layout is NJOY2016's ``dosout`` (``acedo.f90``), described in
 :mod:`kika.ace.classes.dosimetry`. The decoder refuses instead of guessing: a
 location outside XSS, a reaction whose data runs into the next one, an
 interpolation law that is not an ENDF law or energies that decrease raise
-:class:`ValueError` naming the reaction.
+``ValueError`` naming the reaction.
 
 NJOY2016 writes the NBT and INT of an MF 10 reaction interleaved (``acedo.f90``,
 the MF 10 loop) while it writes MF 3 reactions, and reads every reaction, as two
@@ -23,12 +23,56 @@ _LAWS = {1, 2, 3, 4, 5, 6}
 
 
 def is_dosimetry_extension(extension) -> bool:
-    """True for a ZAID suffix such as ``.80y``: MCNP's class letter ``y`` is dosimetry."""
+    """True for a ZAID suffix such as ``.80y``: MCNP's class letter ``y`` is dosimetry.
+
+    Parameters
+    ----------
+    extension : str or None
+        The suffix of the ZAID, with or without its leading dot.
+
+    Returns
+    -------
+    bool
+        True when ``extension`` is not empty and, stripped of blanks and lower-cased,
+        ends in ``y``. The test is on the last character only: the digits before it
+        are not checked.
+    """
     return bool(extension) and str(extension).strip().lower().endswith("y")
 
 
 def parse_dosimetry(header, xss: np.ndarray, filename=None, int_words=None) -> DosimetryAce:
-    """Decode the XSS of a dosimetry table whose header is already read."""
+    """Decode the XSS of a dosimetry table whose header is already read.
+
+    Parameters
+    ----------
+    header
+        The parsed ACE header; its ``nxs_array`` and ``jxs_array`` are read
+        (NXS(1), NXS(2), NXS(4), JXS(3), JXS(6) and JXS(7)).
+    xss : numpy.ndarray
+        The 1-based XSS array (``xss[0]`` is a placeholder), ``NXS(1) + 1`` long.
+        Energies in it are in MeV and cross sections in barns, as ACE writes them.
+    filename : str, optional
+        Stored on the result as ``filename``.
+    int_words : numpy.ndarray, optional
+        The integer-spelling mask of the XSS, stored on the result as
+        ``xss_int_words``.
+
+    Returns
+    -------
+    DosimetryAce
+        The table, one ``DosimetryReaction`` per MTR entry in file order. Energies
+        are converted to eV; cross sections stay in barns.
+
+    Raises
+    ------
+    ValueError
+        Naming the reaction when it can: if NXS or JXS is short, the XSS length is
+        not NXS(1), NXS(4) is not positive, MTR, LSIG or SIGD lies outside the
+        table, a reaction's data does not fit its location, NR is negative, NE
+        does not fill the data, the NBT/INT pairs are not an ENDF interpolation
+        table over NE points (an interleaved NBT/INT list is refused), or the
+        energies decrease.
+    """
     nxs = list(header.nxs_array)
     jxs = list(header.jxs_array)
     if len(nxs) < 17 or len(jxs) < 33:

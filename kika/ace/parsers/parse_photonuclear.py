@@ -6,7 +6,7 @@ by the same readers as a neutron table's ANDH and DLWH, so every law those
 know is read here too. The decoder refuses instead of guessing: a location
 outside XSS, a count that does not fit its block, a particle type that is not
 one of the seven, or a yield record of an unknown MFTYPE raise
-:class:`ValueError` naming the place.
+``ValueError`` naming the place.
 """
 from __future__ import annotations
 
@@ -21,12 +21,59 @@ from kika.ace.classes.photonuclear import (
 
 
 def is_photonuclear_extension(extension) -> bool:
-    """True for a ZAID suffix such as ``.24u``: MCNP's class letter ``u`` is photonuclear."""
+    """True for a ZAID suffix such as ``.24u``: MCNP's class letter ``u`` is photonuclear.
+
+    Parameters
+    ----------
+    extension : str or None
+        The suffix of the ZAID, with or without its leading dot.
+
+    Returns
+    -------
+    bool
+        True when ``extension`` is not empty and, stripped of blanks and lower-cased,
+        ends in ``u``. The test is on the last character only: the digits before it
+        are not checked.
+    """
     return bool(extension) and str(extension).strip().lower().endswith("u")
 
 
 def parse_photonuclear(header, xss: np.ndarray, filename=None, int_words=None) -> PhotonuclearAce:
-    """Decode the XSS of a photonuclear table whose header is already read."""
+    """Decode the XSS of a photonuclear table whose header is already read.
+
+    Parameters
+    ----------
+    header
+        The parsed ACE header; its ``nxs_array`` and ``jxs_array`` are read.
+    xss : numpy.ndarray
+        The 1-based XSS array (``xss[0]`` is a placeholder), ``NXS(1) + 1`` long.
+        Energies in it are in MeV and cross sections in barns, as ACE writes them.
+    filename : str, optional
+        Stored on the result as ``filename``.
+    int_words : numpy.ndarray, optional
+        The integer-spelling mask of the XSS, stored on the result as
+        ``xss_int_words``.
+
+    Returns
+    -------
+    PhotonuclearAce
+        The table: the energy grid, total, non-elastic and elastic cross sections
+        (the last two only when JXS gives an elastic block), heating, the
+        reactions and, per emitted particle, its production, yields, angular
+        records and energy laws. Energies, Q-values and the heating numbers (eV per
+        collision) are converted from MeV to eV; cross sections stay in barns. The
+        angular records and energy laws keep the table's MeV.
+
+    Raises
+    ------
+    ValueError
+        Naming the place: if NXS or JXS is short, the XSS length is not NXS(1),
+        there is no energy grid, the IXS entry is not 12 words (NXS(7)), a block
+        runs outside the table, the energy grid decreases, a particle type is not
+        one a photonuclear table describes, a frame (TYRP) is not 1 or -1, a
+        yield record has an unknown MFTYPE, or a locator of an angular
+        distribution or energy law is invalid.
+    """
     nxs = [int(v) for v in header.nxs_array]
     jxs = [int(v) for v in header.jxs_array]
     if len(nxs) < 17 or len(jxs) < 33:

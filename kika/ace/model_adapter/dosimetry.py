@@ -6,7 +6,7 @@ What goes in, in this order (the order ACER writes MF 3 then MF 10):
    included (MT 1, 3, 4, 103-107 …), as the processing tabulated them: lin-lin,
    one region, reconstructed and broadened. A level sum the tape does not state
    (MT 103 from MT 600-649, 107 from 800-849, 16 from 875-891 …,
-   :data:`kika.hdf5.processing.LEVEL_SUMS`) is added up on the union grid, as
+   ``kika.hdf5.processing.LEVEL_SUMS``) is added up on the union grid, as
    RECONR adds it to the PENDF ACER copies: Fe-56 (n,p) is MT 103 of a tape that
    states only its levels. ACER skips MT 1; kika keeps it, since a
    total-collision tally is as legitimate as any other and costs one table.
@@ -216,6 +216,33 @@ def dosimetryReactions(suite, crossSections, heating: Optional[dict] = None
     ``{301: (E, h), 444: (E, d)}`` or ``None``. ``suite`` is the whole decoded
     evaluation (its reactions' products give the gas production, its
     ``productions`` the MF 9/10 cross sections).
+
+    Parameters
+    ----------
+    suite : ReactionSuite
+        The decoded evaluation.
+    crossSections : dict of int to tuple of numpy.ndarray
+        ``{MT: (E, sigma)}`` at the table's temperature. Energies in eV and cross
+        sections in barns: they are stored unchanged in the
+        :class:`~kika.ace.classes.dosimetry.DosimetryReaction`, which holds eV.
+    heating : dict of int to tuple of numpy.ndarray, optional
+        ``{301: (E, h), 444: (E, d)}``, in eV and eV·b, stored unchanged. A
+        quantity that is zero everywhere is not written. Default: none.
+
+    Returns
+    -------
+    tuple
+        ``(reactions, omitted)``. ``reactions`` is a list of
+        :class:`~kika.ace.classes.dosimetry.DosimetryReaction`: first those
+        of MF 3 (with the level sums the tape lacks), MT 301 and 444 and the gas
+        production MT 203-207, in ascending MT (a gas MT the cross sections already
+        state is left as stated), then the production cross sections in the order of
+        ``suite.productions``. A cross section zero everywhere is dropped.
+        ``omitted`` is a list of messages, one per production not written: more than
+        more than one non-photon product, none, or no ``ENDF_MT`` (all three give the
+        message "no single product"), no cross section, an MF 9 whose reaction has
+        no processed cross section or no multiplicity, or a number shared by several
+        products of one MT and LFS.
     """
     omitted: List[str] = []
     rows: Dict[int, DosimetryReaction] = {}
@@ -245,7 +272,23 @@ def pointwiseDosimetryReactions(suite) -> Tuple[List[DosimetryReaction], List[st
     reconstructed, linearised or broadened, which is what a dosimetry
     evaluation such as IRDFF-II is made to be used as, and what ACER copies.
     An MF 9 production is the multiplicity times the stated σ, tabulated lin-lin
-    to :data:`PRODUCT_RTOL`.
+    to ``PRODUCT_RTOL`` (1e-3, relative).
+
+    Parameters
+    ----------
+    suite : ReactionSuite
+        An evaluation whose cross sections are tabulated (``reactions`` and
+        ``sums``). Each reaction uses its ``eval`` form, or its first form when it
+        has no such label.
+
+    Returns
+    -------
+    tuple
+        ``(reactions, omitted)`` as :func:`dosimetryReactions` returns them, with
+        energies in eV and cross sections in barns: the reactions of MF 3 in
+        ascending MT, then the productions. A reaction whose cross section is
+        zero everywhere is dropped. ``omitted`` also names each reaction that has
+        no tabulated cross section.
     """
     from kika.nuclear_data.model import EVAL_LABEL
 

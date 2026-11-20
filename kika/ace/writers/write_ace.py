@@ -1,3 +1,10 @@
+"""Write an ACE table to a text file.
+
+:func:`write_ace` writes the header and the XSS array as ACE text (four 20-character
+fields per line), spelling each word as an integer or a real as the table records.
+:func:`write_ace_checked` writes through a temporary file and reads it back before
+it replaces the target. See the ACE format chapter of the manual.
+"""
 import os
 import io
 import numpy as np
@@ -6,6 +13,50 @@ from kika.ace.writers.write_header import write_header
 from kika.ace.classes.xss import unpack_int_words
 
 def write_ace(ace: Ace, filepath: str = None, overwrite: bool = False) -> str:
+    """Write ``ace`` to a text ACE file and return a success message.
+
+    The file is the header, then ``xss_data`` without its placeholder ``xss_data[0]``,
+    four words per line in 20-character fields, with LF line ends on every platform.
+    Where ``ace.xss_int_words`` gives the spelling of each word, integer words are
+    written as I20 and the others as E20.11, and the last line holds only its fields,
+    unpadded. Without that mask every word is a real
+    in E20.11, or every word is an integer in I20 when all are whole numbers, and the
+    last line is padded to 80 characters. A table with ``xss_real_format`` set and no
+    mask has every word written as a real in that format. The numbers are written as
+    stored: no unit conversion.
+
+    Parameters
+    ----------
+    ace : Ace
+        The table to write: any object with ``header``, ``xss_data`` (1-based, with
+        a placeholder at index 0) and optionally ``xss_int_words``, ``filename``.
+    filepath : str, optional
+        The file to write. When ``None``: ``ace.filename`` with ``_recon`` before its
+        extension, or, when ``ace`` has no filename, ``<zaid>_<n>K.ace`` in the
+        current directory, with ``n`` the integer part of the header temperature.
+        That temperature is kT in MeV, so ``n`` is 0 for an ordinary table and the
+        name is ``<zaid>_0K.ace``. When the header temperature is ``None`` or 0.0
+        the name cannot be built and ``ValueError`` is raised. A message is printed
+        when a name is built.
+    overwrite : bool, optional
+        Whether an existing file is replaced. The default, ``False``, refuses.
+
+    Returns
+    -------
+    str
+        ``"Success! ACE file written to: <filepath>"``.
+
+    Raises
+    ------
+    ValueError
+        If ``ace.header`` is ``None``, ``ace.xss_data`` is ``None`` or empty, or
+        ``ace.xss_data`` is not one-dimensional, or ``filepath`` is ``None``, the
+        table has no filename and its header temperature is ``None`` or 0.0.
+    FileExistsError
+        If ``filepath`` exists and ``overwrite`` is false.
+    IOError
+        With the message "Error writing ACE file", if writing fails.
+    """
     # Verify header and XSS data exist
     if ace.header is None:
         raise ValueError("Ace object must have a header")
@@ -100,6 +151,24 @@ def format_xss_lines(values: np.ndarray, is_int: np.ndarray, first_row: int = 0,
     ``first_row..last_row`` (0-based, inclusive; default all) are formatted;
     integer words are rounded first, so a count stays a count. The last line
     of the table holds only its remaining fields, unpadded.
+
+    Parameters
+    ----------
+    values : numpy.ndarray
+        XSS(1..n) as floats, without the placeholder at index 0.
+    is_int : numpy.ndarray
+        Boolean mask of the same length: True for a word written as I20.
+    first_row, last_row : int, optional
+        The first and last row (four words each, counted from 0) to write,
+        both included. ``last_row`` defaults to the last row of the table.
+    real : str, optional
+        The ``%`` format of a real word. Default: ``"%20.11E"``.
+
+    Yields
+    ------
+    str
+        Up to 65536 rows of text at a time, rows separated by a newline and the
+        chunk ending in one.
     """
     real = real or _REAL
     rows = _ROW_FORMATS if real == _REAL else         ["".join(_INT if (code >> (3 - k)) & 1 else real for k in range(4)) for code in range(16)]
@@ -150,6 +219,28 @@ def write_ace_checked(ace: Ace, filepath) -> None:
     """Write ``ace`` at ``filepath`` through a temporary file, read back in strict
     mode and compared word for word before it replaces ``filepath``: NXS, JXS
     and the integer words equal, the reals to the 12 digits E20.11 keeps.
+
+    The temporary file is ``.<name>.tmp`` beside ``filepath``. It becomes
+    ``filepath``, replacing any file there, only when the comparison passes. If the
+    read-back or the comparison fails, the temporary file is deleted. If writing it
+    fails, the partial temporary file stays, and so does it if the final
+    replacement fails. ``filepath`` is untouched until that replacement. The header text (ZAID,
+    temperature, comment, date) is not part of the comparison. Words that
+    ``ace.xss_int_words`` does not mark as integers are compared as reals, within
+    a relative 5.001e-12.
+
+    Parameters
+    ----------
+    ace : Ace
+        The table to write; see :func:`write_ace`.
+    filepath : str or path-like
+        The destination. An existing file is replaced without asking.
+
+    Raises
+    ------
+    ValueError
+        If the file read back differs from ``ace`` in NXS, JXS, the length of the
+        XSS, an integer word or a real beyond that tolerance.
     """
     from pathlib import Path
 

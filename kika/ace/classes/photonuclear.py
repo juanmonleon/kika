@@ -55,7 +55,20 @@ IXS_ENTRY_WORDS = 12
 
 @dataclass
 class PhotonuclearReaction:
-    """One reaction: σ on the main grid from point ``first_index`` (1-based) on."""
+    """One reaction: σ on the main grid from point ``first_index`` (1-based) on.
+
+    Attributes
+    ----------
+    mt : int
+        The reaction number.
+    q_value : float
+        The Q-value in eV.
+    first_index : int
+        The 1-based point of the main grid (``PhotonuclearAce.energies``) where
+        ``cross_section`` starts; the cross section is zero below it.
+    cross_section : numpy.ndarray
+        Cross sections in barns, for the grid points from ``first_index`` on.
+    """
 
     mt: int
     q_value: float                 # eV
@@ -63,7 +76,25 @@ class PhotonuclearReaction:
     cross_section: np.ndarray      # b
 
     def on_grid(self, n: int) -> np.ndarray:
-        """σ on all ``n`` points of the main grid, zero below the first."""
+        """σ on all ``n`` points of the main grid, zero below the first.
+
+        Parameters
+        ----------
+        n : int
+            The number of points of the main grid.
+
+        Returns
+        -------
+        numpy.ndarray
+            ``n`` cross sections in barns: zero below ``first_index``, then
+            ``cross_section``.
+
+        Raises
+        ------
+        ValueError
+            If ``cross_section`` runs past the ``n`` points (numpy refuses the
+            assignment with a shape mismatch).
+        """
         out = np.zeros(n)
         out[self.first_index - 1:self.first_index - 1 + self.cross_section.size] = self.cross_section
         return out
@@ -78,6 +109,23 @@ class ProductYield:
     ``interpolation`` (both empty for one lin-lin region). MFTYPE 13: a
     production cross section, ``values`` (b) from main-grid point
     ``first_index`` on.
+
+    Attributes
+    ----------
+    mftype : int
+        6, 12, 13 or 16.
+    mt_mult : int
+        The reaction whose multiplicity this is (MFTYPE 6, 12, 16); 0 for 13.
+    breakpoints, interpolation : list of int
+        NBT and INT of the table (MFTYPE 6, 12, 16); empty otherwise.
+    energies : numpy.ndarray or None
+        Incident energies in eV (MFTYPE 6, 12, 16); ``None`` for 13.
+    values : numpy.ndarray or None
+        The multiplicities (dimensionless) for MFTYPE 6, 12, 16, or the
+        production cross section in barns for 13.
+    first_index : int
+        The 1-based main-grid point where ``values`` starts (MFTYPE 13 only; 0
+        otherwise).
     """
 
     mftype: int
@@ -95,6 +143,25 @@ class ProductReaction:
 
     ``angular_locator`` is the table's LANDP word kind: 0 isotropic, −1 the
     angle is in the energy law, 1 a record (``angular``).
+
+    Attributes
+    ----------
+    mt : int
+        The reaction number.
+    frame : int
+        The table's TYRP: +1 for the laboratory frame, -1 for the centre of mass.
+        The decoder refuses any other value.
+    yield_ : ProductYield
+        The product's yield record (SIGP).
+    angular_locator : int
+        0, -1 or 1 as above.
+    angular : object or None
+        The angular distribution record when ``angular_locator`` is 1 (as a
+        neutron table's angular distribution, with its energies in MeV); ``None``
+        otherwise.
+    laws : list
+        The chain of energy laws of the reaction, as in a neutron table's DLW
+        (energies in MeV).
     """
 
     mt: int
@@ -107,7 +174,24 @@ class ProductReaction:
 
 @dataclass
 class ParticleProduction:
-    """What a table says about one kind of emitted particle."""
+    """What a table says about one kind of emitted particle.
+
+    Attributes
+    ----------
+    ipt : int
+        The particle type: 1 neutron, 2 photon, 9 proton, 31 deuteron, 32 triton,
+        33 helium-3, 34 alpha.
+    production_first_index : int
+        The 1-based main-grid point where ``production`` starts.
+    production : numpy.ndarray
+        The production cross section in barns, from ``production_first_index`` on.
+    heating_first_index : int
+        The 1-based main-grid point where ``heating`` starts.
+    heating : numpy.ndarray
+        The heating number in eV per collision, from ``heating_first_index`` on.
+    reactions : list of ProductReaction
+        The reactions that emit the particle, in the order of the table.
+    """
 
     ipt: int
     production_first_index: int
@@ -118,16 +202,56 @@ class ParticleProduction:
 
     @property
     def particle(self) -> str:
+        """The kika name of the particle.
+
+        One of ``n``, ``photon``, ``H1``, ``H2``, ``H3``, ``He3`` and ``He4``; an IPT
+        outside these gives ``"IPT <number>"``.
+        """
         return PARTICLE_IPT.get(self.ipt, f"IPT {self.ipt}")
 
     @property
     def mt_numbers(self) -> List[int]:
+        """The reaction numbers of ``reactions``, in order."""
         return [r.mt for r in self.reactions]
 
 
 @dataclass
 class PhotonuclearAce:
-    """The decoded contents of a photonuclear ACE table. See the module docstring for units."""
+    """The decoded contents of a photonuclear ACE table. See the module docstring for units.
+
+    :func:`~kika.ace.read_ace` returns one for a file whose ZAID suffix ends in ``u``.
+
+    Attributes
+    ----------
+    filename : str or None
+        The path the table was read from.
+    header : object or None
+        The parsed ACE header.
+    xss_data : numpy.ndarray or None
+        The XSS array as read (MeV and barns, 1-based).
+    xss_int_words : numpy.ndarray or None
+        The integer-spelling mask of the XSS.
+    za : int or None
+        1000·Z + A of the target (NXS(2)).
+    isomeric_state : int
+        NXS(9).
+    energies : numpy.ndarray or None
+        The main energy grid in eV.
+    total : numpy.ndarray or None
+        The total cross section in barns, on the main grid.
+    nonelastic : numpy.ndarray or None
+        The nonelastic cross section in barns; set only when the table has an
+        elastic block, else ``None``.
+    elastic : numpy.ndarray or None
+        The elastic cross section in barns; ``None`` when the table has none.
+    heating : numpy.ndarray or None
+        The heating number in eV per collision, on the main grid; ``None`` when
+        the table has none.
+    reactions : list of PhotonuclearReaction
+        The reactions in the order of the table.
+    particles : list of ParticleProduction
+        One block per emitted particle kind.
+    """
 
     filename: Optional[str] = None
     header: object = None
@@ -145,16 +269,50 @@ class PhotonuclearAce:
 
     @property
     def mt_numbers(self) -> List[int]:
+        """The reaction numbers of ``reactions``, in order."""
         return [r.mt for r in self.reactions]
 
     def reaction(self, mt: int) -> PhotonuclearReaction:
+        """The reaction numbered ``mt``.
+
+        Parameters
+        ----------
+        mt : int
+            A reaction number.
+
+        Returns
+        -------
+        PhotonuclearReaction
+            The first reaction with that number.
+
+        Raises
+        ------
+        KeyError
+            If the table has no such reaction.
+        """
         for r in self.reactions:
             if r.mt == int(mt):
                 return r
         raise KeyError(f"no reaction {mt} in the table")
 
     def particle(self, name_or_ipt) -> ParticleProduction:
-        """The block of one emitted particle, by kika name (``'n'``, ``'H1'``…) or IPT."""
+        """The block of one emitted particle, by kika name (``'n'``, ``'H1'``…) or IPT.
+
+        Parameters
+        ----------
+        name_or_ipt : str or int
+            The kika name (``ParticleProduction.particle``) or the IPT number.
+
+        Returns
+        -------
+        ParticleProduction
+            The first block that matches.
+
+        Raises
+        ------
+        KeyError
+            If the table emits no such particle.
+        """
         for p in self.particles:
             if p.ipt == name_or_ipt or p.particle == name_or_ipt:
                 return p

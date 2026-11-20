@@ -88,9 +88,21 @@ def aceLabels(ace):
     """``(heated, urr)``: the labels of this table's temperature, ``heated_294K``/``URR_294K``.
 
     Named from kT exactly as OpenMC names a temperature group
-    (:func:`kika.hdf5.names.temperatureName`), because the HDF5 encoder checks
+    (``kika.hdf5.names.temperatureName``), because the HDF5 encoder checks
     that the name and the stated kT agree. A table with no header temperature
     is named ``0K``.
+
+    Parameters
+    ----------
+    ace : Ace
+        A table read by :func:`~kika.ace.read_ace`. Its header temperature is kT
+        in MeV; it is converted to eV (times 10**6) for the name.
+
+    Returns
+    -------
+    tuple of str
+        ``(heated, urr)``: the label of the ``heated_<T>`` style and the label of
+        the ``URR_<T>`` style.
     """
     from kika.hdf5.names import heatedLabel, temperatureName, urrLabel
 
@@ -106,6 +118,23 @@ def qValuesByMT(ace, report: Optional[ConversionReport] = None) -> Dict[int, flo
     — so the mapping is positional and there is no MT written next to a Q. MT 2
     is absent from MTR because elastic scattering has Q = 0 by definition, which
     is knowledge and not a default, so it is filled in here.
+
+    Parameters
+    ----------
+    ace : Ace
+        A neutron-type table read by :func:`~kika.ace.read_ace`.
+    report : ConversionReport, optional
+        Receives what is lost (no LQR block, so no Q at all) and a warning when
+        MTR and LQR differ in length (the shorter one is used, so the reactions
+        beyond it have no Q). Default: a new report that the caller does not get
+        back.
+
+    Returns
+    -------
+    dict of int to float
+        The Q-value of each MT of MTR, in eV (the file's MeV times 10**6), with
+        MT 2 set to 0.0 when MTR does not list it. An empty dict when the table has
+        no LQR block.
     """
     report = report if report is not None else ConversionReport()
 
@@ -142,7 +171,27 @@ def aceStyles(ace, report: Optional[ConversionReport] = None):
 
     The ``evaluated`` style *is* declared, empty: §9 makes it the root every
     ``derivedFrom`` chain resolves to, and ACE refers to an evaluation it does
-    not contain. That absence is reported rather than hidden.
+    not contain. That absence is reported, not hidden.
+
+    Parameters
+    ----------
+    ace : Ace
+        A neutron-type table read by :func:`~kika.ace.read_ace`. Its header
+        comment names the library of the ``evaluated`` style, and its header
+        temperature (kT in MeV) is the temperature of the ``heated_<T>`` style.
+    report : ConversionReport, optional
+        Receives the loss of the evaluation, and a warning when the header has no
+        temperature. Default: a new report.
+
+    Returns
+    -------
+    tuple
+        ``(styles, report)``. ``styles`` is the list of styles in order:
+        ``eval`` (empty, ``library`` the stripped header comment or ``None``),
+        ``heated_<T>`` (derived from ``eval``; its temperature is kT in eV, or
+        none when the header has none), ``URR_<T>`` only when the table has
+        unresolved-resonance data (derived from ``heated_<T>``), and
+        ``MonteCarlo`` (derived from ``eval``).
     """
     report = report if report is not None else ConversionReport()
     styles = []
@@ -174,11 +223,45 @@ def aceStyles(ace, report: Optional[ConversionReport] = None):
 
 
 def decodeAce(ace, report: Optional[ConversionReport] = None):
-    """A parsed :class:`~kika.ace.classes.ace.Ace` → a :class:`ReactionSuite`.
+    """A parsed :class:`~kika.ace.classes.ace.Ace` → a :class:`~kika.nuclear_data.model.suite.ReactionSuite`.
 
     The cross sections land under the ``heated_<T>`` style, because that is
     what they are: values on ACE's unionised grid at the file's temperature.
-    Nothing is labelled ``eval``.
+    Nothing is labelled ``eval``. Energies and Q-values are in eV (ACE's MeV
+    times 10**6) and cross sections in barns; the damage energy MT 444 is
+    multiplied by 10**6 too, from MeV·b to eV·b.
+
+    Each MT of the table (with the sums kika adds, MT 4, 18, 101 and others) is a
+    reaction with a lin-lin ``XYs1d`` cross section on the union grid. Reactions
+    that are sums of others go to ``suite.sums``, the response functions
+    (MT 203-207, 301, 444 and 901) to ``suite.productions``, and the fission
+    chances to ``suite.fissionComponents`` when MT 18 is present. When the table
+    has no MT 301 in MTR, ESZ's heating numbers become the KERMA MT 301
+    (heating number times the total cross section, in eV·b).
+
+    The secondary distributions come from AND, DLW, TYR, NU, DNU, BDD and DNED as
+    ``MonteCarlo`` forms; an angle is in the frame TYR gives (negative: centre of
+    mass). Energy laws 22, 24 and 67 have no model form and are reported in the
+    report, not converted. The unresolved-resonance tables, the light charged
+    particles (PTYPE, NTRO, IXS) and the photon production blocks are decoded
+    too. What the model needs to write the table back (MTR order, the law numbers
+    of a chain, NXS and so on) is kept in the ``AceProvenance`` of the suite.
+    ACE has no QM, LR or covariances, and the report says so.
+    See the ACE format chapter of the manual.
+
+    Parameters
+    ----------
+    ace : Ace
+        A neutron-type table read by :func:`~kika.ace.read_ace` (not a
+        photo-atomic, dosimetry or photonuclear one, which have none of the blocks
+        read here).
+    report : ConversionReport, optional
+        Receives what is lost, warned and unsupported. Default: a new report.
+
+    Returns
+    -------
+    tuple
+        ``(suite, report)``. The report is also set as ``suite.report``.
     """
     report = report if report is not None else ConversionReport()
 
@@ -279,14 +362,41 @@ def _mtNumbers(ace) -> List[int]:
 
 def decodeAceReaction(ace, mt: int, qByMT: Dict[int, float],
                       provenance: AceProvenance, report: ConversionReport, label: Optional[str] = None):
-    """One MT → a :class:`Reaction` with a ``heated_<T>``-labelled cross section.
+    """One MT → a ``Reaction`` with a ``heated_<T>``-labelled cross section.
 
     ``label`` is the table's heated label (:func:`aceLabels`), computed from the
     header when not given.
 
-    An ``XYs1d`` rather than the ``regions1d`` the ENDF decoder builds: ACE has
-    no ``(NBT, INT)`` regions, it is lin-lin on one union grid, and a
-    single-region ``regions1d`` would assert a structure the file does not have.
+    The cross section is an ``XYs1d``, not the ``regions1d`` the ENDF decoder
+    builds: ACE has no ``(NBT, INT)`` regions, it is lin-lin on one union grid,
+    and a single-region ``regions1d`` would assert a structure the file does not
+    have.
+
+    Parameters
+    ----------
+    ace : Ace
+        A neutron-type table read by :func:`~kika.ace.read_ace`.
+    mt : int
+        The reaction number. A composite (MT 4, 18, 101 and others) is summed from
+        its components when the file does not state it.
+    qByMT : dict of int to float
+        Q-values in eV by MT, as :func:`qValuesByMT` returns them. The Q of the
+        reaction is ``qByMT.get(mt)`` in eV; when ``mt`` is not in it the Q is
+        ``None`` and the report records the loss.
+    provenance : AceProvenance
+        Attached to the reaction.
+    report : ConversionReport
+        Receives the lost Q-value.
+    label : str, optional
+        The ``heated_<T>`` label. Default: from :func:`aceLabels`.
+
+    Returns
+    -------
+    tuple
+        ``(reaction, report)``. ``reaction`` is ``None`` when the table has no
+        cross section for ``mt``. Otherwise its cross section has energies in eV
+        and values in barns, except MT 444, whose values are multiplied by 10**6
+        (MeV·b to eV·b).
     """
     reactionData = ace.cross_section._get_or_compute_reaction(mt)
     if reactionData is None:

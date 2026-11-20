@@ -22,14 +22,53 @@ from kika.ace.classes.xss import pack_int_words
 def encode_dosimetry(reactions: Iterable[DosimetryReaction], *, zaid: int, extension: str, za: int,
                      awr: float, temperature_mev: float, comment: str = "", date: Optional[str] = None,
                      matid: Optional[int] = None) -> DosimetryAce:
-    """A :class:`DosimetryAce` with its header and XSS built from ``reactions``.
+    """Build a :class:`~kika.ace.classes.dosimetry.DosimetryAce` from ``reactions``.
 
-    Every reaction must have increasing energies (eV) and as many cross
+    The header and the XSS are built here. Every reaction must have non-decreasing energies (eV) and as many cross
     sections; ``breakpoints``/``interpolation`` either both empty (one lin-lin
     region, written NR = 0) or an interpolation table ending at the last point.
+    A single region with law 2 is also written as NR = 0.
     A repeated reaction number is written as given (it is how ACER names
     several MF 10 products of one MT and LFS); whoever builds the reactions
     decides whether to allow it.
+
+    Parameters
+    ----------
+    reactions : iterable of DosimetryReaction
+        The reactions, written in this order. Energies in eV, cross sections in
+        barns; the energies are written in MeV (divided by 10**6).
+    zaid : int
+        The ZAID written in the header.
+    extension : str
+        The ZAID suffix (for example ``"80y"``); a leading dot is added when
+        missing.
+    za : int
+        1000·Z + A of the target, written as NXS(2).
+    awr : float
+        The atomic weight ratio, written in the header.
+    temperature_mev : float
+        The temperature kT in MeV, written in the header.
+    comment : str, optional
+        The header comment, cut to 70 characters.
+    date : str, optional
+        The header date. Default: today, as ``mm/dd/yy``.
+    matid : int, optional
+        The header's material identifier.
+
+    Returns
+    -------
+    DosimetryAce
+        The table, with a legacy-format header, ``xss_data`` and the integer
+        spelling mask (``xss_int_words``) set, and ``reactions`` the list given.
+        Write it with :func:`~kika.ace.writers.write_ace.write_ace`.
+
+    Raises
+    ------
+    ValueError
+        If there is no reaction, a reaction's energies and cross sections are not
+        one-dimensional arrays of the same non-zero length, its energies decrease,
+        or its ``breakpoints`` and ``interpolation`` differ in length or do not end
+        at the last point.
     """
     reactions = list(reactions)
     if not reactions:

@@ -1268,10 +1268,61 @@ def encodeAce(suite, temperature=None, *, zaid: Optional[int] = None, awr: Optio
     ``awr`` and ``extension`` override the header the suite's
     ``AceProvenance`` states. A suite kika processed itself has none: its ZAID
     is 1000·Z + A and its suffix its temperature's (``.02c`` for 293.6 K, the
-    one kika's NJOY runs give; :func:`kika._utils.ace_temperature_suffix`),
+    one kika's NJOY runs give; ``kika._utils.ace_temperature_suffix``),
     and a temperature with no suffix raises. The table is laid out by the block encoders and read
-    back with the parser in ``strict`` mode, so a block that would not read
-    raises here rather than in the code that opens the file.
+    back with the parser, so a block that would not read raises here (when ``strict``),
+    not in the code that opens the file.
+
+    Energies and Q-values are written in MeV (the model's eV divided by 10**6)
+    and the header temperature as kT in MeV. A distribution without a
+    ``MonteCarlo`` form, or without an ACE law, is refused.
+    See the ACE format chapter of the manual.
+
+    Parameters
+    ----------
+    suite : ReactionSuite
+        A processed suite: ``heated_<T>`` styles, cross sections as lin-lin
+        tables on a union grid.
+    temperature : str or float, optional
+        The ``heated_<T>`` style to write: a name such as ``"294K"`` or a
+        temperature in kelvin. Needed when the suite has more than one style.
+    zaid : int, optional
+        The ZAID of the header. Default: the one the suite's ``AceProvenance``
+        states, else 1000·Z + A of the target (an isomer as A + 300 + 100·m, so
+        Am-242m1 is 95642).
+    awr : float, optional
+        The atomic weight ratio. Default: the provenance's, else the AWR of the
+        tape the suite was processed from, else the target's mass over the
+        neutron's.
+    extension : str, optional
+        The ZAID suffix, such as ``".02c"``. Default: the provenance's, else the
+        one the temperature gives.
+    report : ConversionReport, optional
+        Receives what is lost or not written. Default: a new report.
+    strict : bool, optional
+        Whether the read-back of the table raises on a block it cannot read
+        (``True``), or records it in the ``read_report`` of the result.
+
+    Returns
+    -------
+    tuple
+        ``(ace, report)``: the :class:`~kika.ace.classes.ace.Ace` and the report.
+        A suite kika processed itself gets today's date, a comment made of its
+        target, evaluation and kika version (70 characters at most) and the
+        tape's MAT.
+
+    Raises
+    ------
+    AceEncodeError
+        If the suite has several temperatures and ``temperature`` does not pick
+        one, there is no elastic reaction (MT 2), a cross section is not a
+        lin-lin table or its energies are not a suffix of the union grid, a
+        distribution has no ``MonteCarlo`` form or no ACE law, a constant
+        multiplicity is not an integer, no ZAID or AWR can be found and none is
+        given, or the temperature has no suffix and ``extension`` is not given.
+    HDF5FormatError
+        If ``temperature`` names no ``heated_<T>`` style of the suite, or the suite
+        has none.
     """
     from kika.ace.classes.ace import Ace
     from kika.ace.classes.read_report import ReadReport

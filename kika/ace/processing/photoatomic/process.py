@@ -43,12 +43,21 @@ def _z(model) -> Optional[int]:
 
 
 class PhotoatomicProcessing:
-    """The EPRDATA table of an element, built; :meth:`write_ace` writes it.
+    """The EPRDATA table of an element, built; ``write_ace`` writes it.
 
-    ``table`` is the :class:`~kika.ace.classes.photoatomic.PhotoatomicAce` (every
+    ``table`` is the ``PhotoatomicAce`` (every
     block decoded, energies in eV); ``notes`` lists what the build decided that a
     user should know (Compton shells joined or dropped, transitions whose energy
     from the binding energies is not positive).
+
+    :func:`~kika.endf.process_photoatomic` returns one.
+
+    Parameters
+    ----------
+    table : PhotoatomicAce
+        The table, with energies in eV.
+    notes : list of str
+        The messages of the build.
     """
 
     def __init__(self, table, notes: List[str]):

@@ -34,6 +34,50 @@ def encode_photonuclear(table: PhotonuclearAce, *, zaid: int, extension: str, aw
 
     ``table`` needs ``za``, ``energies``, ``total``, ``heating``, ``reactions``
     and ``particles``; ``elastic`` and ``nonelastic`` together or neither.
+
+    Parameters
+    ----------
+    table : PhotonuclearAce
+        The table to encode. Its energies, Q-values and heating numbers are in eV
+        and are written in MeV; cross sections are in barns. ``heating`` may be
+        ``None``, in which case no heating block is written.
+    zaid : int
+        The ZAID written in the header.
+    extension : str
+        The ZAID suffix (for example ``"24u"``); a leading dot is added when
+        missing.
+    awr : float
+        The atomic weight ratio, written in the header.
+    temperature_mev : float, optional
+        The temperature kT in MeV, written in the header.
+    comment : str, optional
+        The header comment, cut to 70 characters.
+    date : str, optional
+        The header date. Default: today, as ``mm/dd/yy``.
+    matid : int, optional
+        The header's material identifier.
+    z, a : int, optional
+        Written as NXS(10) and NXS(11); 0 by default (the value older tables have).
+    izaw : list, optional
+        The ``(ZA, AWR)`` pairs of the header's IZAW array. Default: 17 pairs of
+        ``(0, 0.0)``.
+
+    Returns
+    -------
+    PhotonuclearAce
+        A shallow copy of ``table`` whose ``header``, ``xss_data`` and
+        ``xss_int_words`` are the new ones. ``za`` and ``isomeric_state`` of
+        ``table`` become NXS(2) and NXS(9).
+
+    Raises
+    ------
+    ValueError
+        If the energy grid is empty or decreases, only one of ``elastic`` and
+        ``nonelastic`` is set, ``total``, ``heating``, ``elastic`` or
+        ``nonelastic`` does not have one value per grid point, a particle has an
+        IPT a photonuclear table does not describe, a block of values runs past
+        the grid from its first index, a yield has an unknown MFTYPE or
+        mismatched lengths, or an angular record is announced and missing.
     """
     e = np.asarray(table.energies, dtype=float)
     nes = e.size
