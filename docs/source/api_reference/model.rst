@@ -17,6 +17,15 @@ The doors
 
 .. autofunction:: kika.process
 
+.. autofunction:: kika.sniff_format
+
+The compiled extensions
+-----------------------
+
+.. autofunction:: kika.native_status
+
+.. autoclass:: kika.NativeExtensionWarning
+
 The model
 ---------
 

@@ -60,36 +60,47 @@ def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
           mat: Optional[int] = None, tapeId: Optional[str] = None,
           label: Optional[str] = None, compressed: bool = False, *,
           resonance_extensions: bool = False, temperatures=None, **options):
-    """Write a :class:`ReactionSuite` out, and say what did not go with it.
+    """Write a reaction suite out, and say what did not go with it.
+
+    The GNDS file is written to *path*, creating its parent directories and
+    replacing a file that is already there. The ``externalFiles`` links of the
+    suite and of its covariance suite are put back as they were after a GNDS write.
 
     Parameters
     ----------
     suite
-        The evaluation. Its ``covarianceSuite``, if it has one, is written
-        beside it as the separate document §25.1.1 requires.
+        The evaluation: a :class:`~kika.nuclear_data.model.suite.ReactionSuite`
+        or, for a decay or fission-yield evaluation, a ``PoPs`` or a
+        ``fissionFragmentData`` (see *format*). Its ``covarianceSuite``, if it has
+        one, is written beside it as the separate document §25.1.1 requires.
     path
         Where the ``reactionSuite`` goes. The covariance sibling is derived from
-        it — same stem, under ``Covariances/``.
+        it: ``Covariances/<name>-covar.xml`` beside it, with ``.xml`` taken out of
+        ``<name>``.
     format
-        ``'gnds'``, ``'endf'`` or ``'g4ndl'``. ENDF writes **one** file: §25.1.1's
+        ``'gnds'``, ``'endf'``, ``'g4ndl'``, ``'hdf5'`` or ``'ace'``, in any case.
+        ENDF writes **one** file: §25.1.1's
         split into two documents is GNDS's, and an ENDF tape states the
-        covariances in the same material. G4NDL writes what the suite holds
+        covariances in the same material. A ``PoPs`` is written as ``'endf'`` or
+        ``'gnds'``, and a ``fissionFragmentData`` as ``'gnds'`` (``'hdf5'`` and
+        ``'ace'`` leave both to their own writers). G4NDL
+        writes what the suite holds
         into the library directory ``path``: the elastic channel (MT2) as
         ``Elastic/CrossSection/<name>`` and ``Elastic/FS/<name>``, and the
         inelastic channels as ``Inelastic/CrossSection/<name>`` and
-        ``Inelastic/Fxx/<name>`` (:func:`kika.g4ndl.encode.writeSuite`); to
+        ``Inelastic/Fxx/<name>`` (``kika.g4ndl.encode.writeSuite``); to
         replace one isotope in a copy of a whole library use
         :func:`kika.g4ndl.patch_isotope`.
     gnds
         ``'2.0'`` or ``'2.1'``, forcing the declared version. The default
         mirrors what the suite was read from, and is ``'2.0'`` for a suite with
-        no GNDS origin — see :func:`kika.gnds.encode.chooseFormat`. Ignored by
+        no GNDS origin (``kika.gnds.encode.chooseFormat`` decides). Ignored by
         the ENDF path.
     mat
         ENDF only. The material number every record is stamped with. The
         default is the one the suite's provenance recorded; a suite that never
-        came from an ENDF tape has none, and is **refused** rather than stamped
-        with a guess.
+        came from an ENDF tape has none, and is **refused**: kika does not
+        stamp a guessed number.
     tapeId
         ENDF only. The 66 text columns of the tape identification record.
         By default the tape identification the suite was read with (``read_endf``
@@ -97,13 +108,13 @@ def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
     label
         ENDF only. Which §9.1 style label to write out of each multi-form
         container; the default is ``'eval'``. Naming a ``realization`` label
-        (§9.3) writes the drawn sample rather than the evaluation it was drawn
+        (§9.3) writes the drawn sample, not the evaluation it was drawn
         from, falling back to ``'eval'`` for anything that carries no form under
         it. GNDS needs no such parameter — it writes every form, with its label.
         For G4NDL it is the style of the elastic angular distribution (default
         ``'eval'``; the inelastic distributions are always ``'eval'``); the
-        cross sections written are always the ``'recon'`` ones, see
-        :func:`kika.g4ndl.encode.encodeElastic`.
+        cross sections written are always the ``'recon'`` ones
+        (``kika.g4ndl.encode.encodeElastic``).
     compressed
         G4NDL only: write ``<name>.z`` (zlib, what Geant4 distributes) instead
         of plain text.
@@ -113,7 +124,7 @@ def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
         ``<name>.h5`` goes in it and ``cross_sections.xml`` beside it indexes
         it. A suite read from an OpenMC file is written as it is; an
         evaluation is reconstructed, broadened to each temperature and
-        tabulated first (:func:`kika.hdf5.writer.writeSuite`, which takes the
+        tabulated first (``kika.hdf5.writer.writeSuite``, which takes the
         remaining ``options``).
         ACE: the one temperature of the table (kelvin, or a name such as
         ``"294K"``), needed when the suite has several. ``path`` is the table
@@ -128,16 +139,30 @@ def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
         URR's cross-section INT in the versioned KIKA applicationData
         institution. Other consumers require
         support for this institution before reconstructing the resonances.
+    **options
+        Keyword options of the HDF5 writer (``format='hdf5'``) or of the ACE
+        encoder (``format='ace'``: ``zaid``, ``awr``, ``extension``). Any option
+        with another format is refused.
 
     Returns
     -------
-    ConversionReport
+    ~kika.nuclear_data.model.conversion.ConversionReport
         **Read it.** A partial model writes a partial file, and the file itself
         cannot say so: a product whose §18 law kika does not read comes out with
         an empty ``<distribution/>``, which looks like nothing at all. The report
         names each one, and says that such a file does not validate — which is
         deliberate, because the alternative is asserting on the evaluator's
         behalf that no distribution was given.
+
+    Raises
+    ------
+    ValueError
+        If *format* is not one of the five above; if *resonance_extensions* is set
+        for a format other than ``'gnds'``; if *temperatures* or any option is
+        given for a format other than ``'hdf5'`` or ``'ace'``; if a
+        ``fissionFragmentData`` is written as ``'endf'`` or ``'g4ndl'``; or if a
+        ``PoPs`` is written as ``'g4ndl'``. ``'hdf5'`` and ``'ace'`` return
+        before those two checks and leave the object to their writers.
     """
     format = format.lower()
     if format not in WRITE_FORMATS:

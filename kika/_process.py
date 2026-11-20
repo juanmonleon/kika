@@ -54,48 +54,97 @@ class ProcessingRouteError(ValueError):
 def process(source, *, kind: Optional[str] = None, temperatures: Optional[Sequence[float]] = None,
             heating: Optional[bool] = None, name: Optional[str] = None, neutron=None,
             relaxation=None, electrons=None, workers: Optional[int] = None, progress=None, plan=None):
-    """Process the evaluation at ``source`` and return a :class:`Processing`.
+    """Process the evaluation at ``source`` and return a :class:`~kika._process.Processing`.
 
     Nothing has to be chosen: kika reads the tape's header (MF1/451 NSUB, or the
     GNDS root), takes the route of that kind of evaluation and its tested
     defaults, and verifies every stage. What it decided is in the report
     (``report_document()``, section *Choices made for you*).
 
-    Parameters, all optional:
+    Run it under ``if __name__ == "__main__":`` in a script on Windows or macOS,
+    where worker processes import the script again.
 
+    Parameters
+    ----------
+    source
+        An ENDF-6 tape or a GNDS file. The route is read from its content. A GNDS
+        file is processed as a neutron evaluation only.
     kind
         ``"neutron"``, ``"thermal"``, ``"photoatomic"``, ``"photonuclear"`` or
         ``"dosimetry"``, to override the route the header says. ``"dosimetry"``
         is never inferred: a dosimetry tape looks like any neutron tape.
     temperatures
         Kelvin. Neutron and dosimetry: default 293.6 K. Thermal: default every
-        temperature the evaluation tabulates.
+        temperature the evaluation tabulates. A photonuclear table is at 0 K and
+        refuses it; a photo-atomic one does not use it.
     heating
-        Neutron. Not given: the ACE and HDF5 files carry KERMA (MT301) and
-        damage (MT444), computed when they are written. ``True``: the processing
-        stage computes them too (in the PENDF). ``False``: no heating anywhere,
-        and the files are faster to write; an ACE table's heating numbers are
-        then 0 (``ProcessingPlan.heating``).
+        Neutron only (any other route refuses it). Not given: the ACE and HDF5
+        files carry KERMA (MT301) and damage (MT444), computed when they are
+        written. ``True``: the processing stage computes them too (in the
+        PENDF). ``False``: no heating anywhere, and the files are faster to
+        write; an ACE table's heating numbers are then 0
+        (``ProcessingPlan.heating``).
     name
-        Thermal: the OpenMC name of the table (``"c_H_in_H2O"``), when kika cannot
-        tell it from the tape.
+        Thermal only: the OpenMC name of the table (``"c_H_in_H2O"``), when kika
+        cannot tell it from the tape. Ignored on the neutron route.
     neutron
-        Thermal: the principal nuclide's neutron tape, whose mass ratio ACER
-        writes in the table's header (otherwise the scattering law's).
+        Thermal only: the principal nuclide's neutron tape, whose mass ratio ACER
+        writes in the table's header (otherwise the scattering law's). Ignored on
+        the neutron route.
     relaxation, electrons
-        Photo-atomic: the element's atomic-relaxation and electro-atomic tapes,
-        when they are not beside the photo-atomic one.
+        Photo-atomic only: the element's atomic-relaxation and electro-atomic
+        tapes, when they are not beside the photo-atomic one. Ignored on the
+        neutron and thermal routes.
     workers
         Processes or threads; default from ``KIKA_WORKERS`` or the machine. No
-        result depends on it.
+        result depends on it. The photo-atomic and photonuclear routes do not use
+        it.
     progress
         ``progress(stage, fraction)``, as :func:`kika.endf.process_endf` calls it.
+        The neutron and thermal routes call it; the others do not.
     plan
-        Neutron: a full :class:`kika.endf.ProcessingPlan`, for whoever needs more
-        than the options above.
+        Neutron only: a full :class:`kika.endf.ProcessingPlan`, for whoever needs
+        more than the options above. *temperatures*, *heating* and *workers*, when
+        given, replace the same fields of the plan.
 
-    Run it under ``if __name__ == "__main__":`` in a script on Windows or macOS,
-    where worker processes import the script again.
+    Returns
+    -------
+    ~kika._process.Processing
+        The run, with its ``kind`` (the route taken) and ``source``. With
+        ``kind="dosimetry"`` on a tape that has resonance parameters (``LRP=1``)
+        the run is a neutron one: its ``kind`` is ``"neutron"`` and its
+        ``formats`` start with ``dosimetry``. Its
+        ``stages`` list one record per stage with a ``status`` (``"done"``,
+        ``"skipped"`` or ``"rejected"``, with a message). On the thermal,
+        photo-atomic and photonuclear routes a failure of the processing stage is
+        recorded as a rejected stage and the call still returns.
+        ``write(directory, format)`` writes the files and returns their paths;
+        ``formats`` lists what it accepts: ``ace``, ``hdf5``, ``pendf``, ``gnds``
+        and ``dosimetry`` for a neutron evaluation, ``ace`` and ``hdf5`` for a
+        thermal one, ``ace`` for the others. ``report_document()`` returns the
+        report, which gives ``to_html()``, ``to_text()``, ``to_json()`` and
+        ``save(path)``. For a neutron evaluation every attribute of the underlying
+        :class:`kika.endf.EndfProcessing` run (``cross_sections``,
+        ``probability_tables``, ``heating``...) is also reachable on it.
+
+    Raises
+    ------
+    FileNotFoundError
+        If *source* does not exist.
+    ProcessingRouteError
+        If the file is not an evaluation to process, or its route is not one kika
+        takes (sublibrary other than neutron, thermal, photo-atomic,
+        photonuclear), or *kind* is not one of the five, or contradicts a GNDS
+        file; if a neutron tape holds more than one material; if a photo-atomic
+        tape's relaxation or electro-atomic tape is not found, or a thermal
+        table's name is not recognised; or if an option is given on a route that
+        refuses it. *plan* and *heating* are refused on every route but neutron;
+        *temperatures* with photonuclear; *name* and *neutron* on the
+        photo-atomic, photonuclear and dosimetry routes; *relaxation* and
+        *electrons* on the photonuclear and dosimetry routes. The neutron route
+        returns before those checks, so it ignores *name*, *neutron*, *relaxation*
+        and *electrons*; the thermal route ignores *relaxation* and *electrons*.
+        It is a ``ValueError``.
     """
     path = Path(os.fspath(source))
     if not path.exists():
@@ -195,14 +244,25 @@ def _endf_float(text):
 class Processing:
     """What :func:`kika.process` returns, whatever the route.
 
-    ``kind``
+    A user gets one from :func:`kika.process`, not by building it. Its
+    :meth:`write` makes the files and :meth:`report_document` the report.
+
+    Parameters
+    ----------
+    source
+        Path of the evaluation.
+
+    Attributes
+    ----------
+    kind : str
         The route: ``neutron``, ``thermal``, ``photoatomic``, ``photonuclear``,
-        ``dosimetry``.
-    ``source``
+        ``dosimetry``. A dosimetry request on a tape with resonance parameters
+        (``LRP=1``) gives a neutron run, with ``kind`` ``"neutron"``.
+    source : pathlib.Path
         The evaluation.
-    ``stages``
+    stages : list
         One :class:`kika.endf.StageReport` per stage, file writes included.
-    ``formats``
+    formats : tuple of str
         What :meth:`write` can make from it.
     """
 
@@ -216,11 +276,32 @@ class Processing:
     def write(self, directory, format=None, *, replace: bool = False) -> list:
         """Write the processed evaluation into ``directory`` and return the paths.
 
-        ``format`` is one of :attr:`formats` or a list of them; the default is
-        ``ace``. Every file is read back and verified before it replaces one; a
+        Every file is read back and verified before it replaces one; a
         refused file raises :class:`kika.endf.ProcessingOutputError` and is listed in
-        the report. ``replace`` lets a table replace one the directory's ``xsdir``
-        already names.
+        the report.
+
+        Parameters
+        ----------
+        directory
+            Where the files go.
+        format
+            One of :attr:`formats` or a list of them; None is ``"ace"``.
+        replace
+            Lets an ACE table replace one the directory's ``xsdir`` already
+            names. The ``hdf5``, ``pendf`` and ``gnds`` files do not use it.
+
+        Returns
+        -------
+        list
+            The paths of the files written, in the order of *format*; an
+            ``ace`` write can give several (one per table).
+
+        Raises
+        ------
+        ValueError
+            If a format is not in :attr:`formats` for this evaluation.
+        ~kika.endf.ProcessingOutputError
+            If a file fails its verification or cannot be written.
         """
         formats = [format or "ace"] if isinstance(format, (str, type(None))) else list(format)
         unknown = [f for f in formats if f not in self.formats]
