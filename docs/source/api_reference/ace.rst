@@ -72,3 +72,11 @@ Photonuclear tables
 
 .. automodule:: kika.ace.encoders.photonuclear
    :members: encode_photonuclear
+
+What the readers return and raise
+---------------------------------
+
+.. autoclass:: kika.ace.classes.photoatomic.PhotoatomicAce
+   :no-members:
+
+.. autoexception:: kika.ace.classes.read_report.AceReadError

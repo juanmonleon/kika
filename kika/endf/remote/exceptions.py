@@ -2,13 +2,22 @@
 
 
 class ENDFRemoteError(Exception):
-    """Base exception for ENDF remote operations."""
+    """Base class of the errors the remote download functions raise.
+
+    Catch it to handle every failure of :func:`~kika.endf.download_endf`,
+    :func:`~kika.endf.fetch_endf` and ``download_entry`` at once.
+    """
 
     pass
 
 
 class IsotopeNotFoundError(ENDFRemoteError):
-    """Raised when the requested isotope is not found in the library."""
+    """The isotope is not in the library, or its name cannot be read.
+
+    Raised when the isotope string or number cannot be parsed, and when the server
+    answers 404 for the file. ``isotope`` and ``library`` keep the values the caller
+    passed.
+    """
 
     def __init__(self, isotope: str, library: str):
         self.isotope = isotope
@@ -17,7 +26,11 @@ class IsotopeNotFoundError(ENDFRemoteError):
 
 
 class LibraryNotFoundError(ENDFRemoteError):
-    """Raised when the requested library is not recognized."""
+    """The library name is not one kika knows.
+
+    ``library`` is the name the caller passed and ``available`` the names kika
+    accepts, as :func:`~kika.endf.list_available_libraries` returns them.
+    """
 
     def __init__(self, library: str, available: list[str]):
         self.library = library
@@ -28,7 +41,13 @@ class LibraryNotFoundError(ENDFRemoteError):
 
 
 class NetworkError(ENDFRemoteError):
-    """Raised when a network operation fails."""
+    """A request to the IAEA server failed.
+
+    Raised on a timeout, an HTTP error other than 404 and a bot-protection
+    refusal (see :class:`~kika.endf.remote.exceptions.AccessBlockedError`), a request that could not be made,
+    and a ZIP archive from which the ENDF file could not be extracted. ``url`` is
+    the address requested, when known.
+    """
 
     def __init__(self, message: str, url: str | None = None):
         self.url = url
@@ -38,11 +57,11 @@ class NetworkError(ENDFRemoteError):
 class AccessBlockedError(NetworkError):
     """Raised when the server answers but refuses automated clients.
 
-    The IAEA put ``nds.iaea.org`` behind a Cloudflare managed challenge (seen
-    October 2026): every non-browser request gets a 403 carrying
+    The IAEA put ``nds.iaea.org`` behind a Cloudflare managed challenge: every
+    non-browser request gets a 403 carrying
     ``cf-mitigated: challenge`` and an HTML "Just a moment..." page, unless
     it sends the allowlisted ``IAEA_USER_AGENT``. Seeing this error means that
-    allowlist entry no longer works. Retrying does not help; a web browser
+    allowlist entry does not work. Retrying does not help; a web browser
     still gets through.
     """
 
@@ -55,6 +74,11 @@ class AccessBlockedError(NetworkError):
 
 
 class CacheError(ENDFRemoteError):
-    """Raised when a cache operation fails."""
+    """A file could not be written to the local download cache.
+
+    Raised when writing a downloaded file into the cache fails with an
+    ``OSError``, or when ``download_entry`` finds the file absent
+    from the cache after downloading it.
+    """
 
     pass

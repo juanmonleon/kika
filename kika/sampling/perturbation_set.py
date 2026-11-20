@@ -147,12 +147,22 @@ class PerturbationSet:
         applies it.
     factors
         ``ComponentKey -> one value per bin`` (a NumPy array). A factor
-        multiplies the evaluated value on its bin; with additive semantics the
-        value is a delta added to it.
+        multiplies the evaluated value on its bin. A block with additive
+        semantics holds absolute deltas, and a delta is not added to the value on
+        its bin: the only additive-absolute blocks a draw produces are MF35's, and
+        each delta is an absolute change of the group-integrated probability of
+        ``chi(E'|E)`` over that outgoing-energy bin. ``pfns_ratio_rule`` turns
+        each delta into a ratio (1 plus the delta over the group's evaluated
+        probability, projected so that no ratio is negative and the group
+        probabilities still sum to the same total), and ``applySpectrumFactors``
+        scales the table of each incident energy group by group and renormalises
+        it.
     binEdges
         ``ComponentKey -> the bin boundaries those values are stated on``, one
-        longer than the values (energies in eV; for MF35, outgoing energies).
-        Must have the same keys as *factors*.
+        longer than the values. They are the covariance grid, not converted: the
+        cross-section applier takes them as energies in eV, and for MF31, MF34 and
+        MF35 the unit is whatever the covariance grid carries. For MF35 they are
+        outgoing energies. Must have the same keys as *factors*.
     groups
         The components that were drawn together, one tuple per block. Two
         components in different tuples were drawn independently, which is a
@@ -168,9 +178,11 @@ class PerturbationSet:
         *semantics*. A request for cross sections and a fission spectrum draws
         factors for one and absolute deltas for the other.
     outerDomains
-        ``ComponentKey -> (low, high)``, the incident-energy band in eV that a
-        block is stated over but not on. Required for every MF35 component and
-        empty for the other quantities.
+        ``ComponentKey -> (low, high)``, the incident-energy band that a block is
+        stated over but not on, as ``(domainMin, domainMax)`` of the covariance
+        section's incident-energy slice and in the unit that slice carries (not
+        converted). Required for every MF35 component and empty for the other
+        quantities.
     componentFrames
         ``ComponentKey -> "LAB" or "CM"`` for an MF34 block whose coefficients
         are stated in another frame than the angular distribution's own. Absent
@@ -1432,8 +1444,9 @@ class PerturbationSet:
         """Realisation *sample* of a run, back from its factors table.
 
         The one-file-per-run counterpart of :meth:`read`: the table is the
-        ``factors.parquet`` that ``perturbFromModel`` writes. Only the rows of
-        *sample* are read. ``provenance["sample"]`` is set to *sample*.
+        ``factors.parquet`` that ``perturbFromModel`` writes. That file exists
+        only when the run was given an ``outputDir``, ``writeFactors`` was true
+        and the run had samples. Only the rows of *sample* are read. ``provenance["sample"]`` is set to *sample*.
 
         Parameters
         ----------

@@ -587,6 +587,32 @@ class TableProcessing(Processing):
 
 
 class PhotoatomicProcessing(TableProcessing):
+    """The run :func:`kika.process` returns for a photo-atomic evaluation.
+
+    A user gets one from :func:`kika.process`, not by building it. It is a
+    :class:`~kika._process.Processing` with ``kind`` ``"photoatomic"`` and
+    ``formats`` ``("ace",)``: :meth:`~kika._process.Processing.write` makes one EPRDATA ACE table and returns
+    its path in a list.
+
+    Parameters
+    ----------
+    source
+        Path of the photo-atomic tape.
+    relaxation, electrons
+        Paths of the atomic-relaxation and electro-atomic tapes of the same
+        element.
+
+    Attributes
+    ----------
+    table
+        The processed table, or None when the ``tables`` stage was rejected (the
+        stage record says why).
+    notes : list
+        What the processing noted about the table.
+    relaxation, electrons : pathlib.Path
+        The two other tapes.
+    """
+
     def __init__(self, source, relaxation, electrons):
         super().__init__(source, "photoatomic")
         self.relaxation, self.electrons = Path(relaxation), Path(electrons)

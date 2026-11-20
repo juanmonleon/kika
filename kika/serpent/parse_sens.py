@@ -28,6 +28,14 @@ _INT_RE = re.compile(
 
 
 class ParseError(RuntimeError):
+    """A Serpent sensitivity output is incomplete or inconsistent.
+
+    Raised by :func:`~kika.serpent.read_sensitivity_file` and
+    :func:`~kika.serpent.parse_sensitivity_text` when a required ``SENS_*``
+    scalar or block is missing, a list or grid length disagrees with the counts in
+    the header, or a response bin lacks its energy-dependent or integrated block.
+    It is a ``RuntimeError``.
+    """
     pass
 
 

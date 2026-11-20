@@ -46,3 +46,14 @@ The HDF5 tree
 
 .. automodule:: kika.hdf5.records
    :members:
+
+Errors
+------
+
+.. autoexception:: kika.hdf5.exceptions.HDF5Error
+
+.. autoexception:: kika.hdf5.exceptions.HDF5FormatError
+
+.. autoexception:: kika.hdf5.exceptions.HDF5UnsupportedError
+
+.. autoexception:: kika.hdf5.exceptions.NuclideNotFoundError

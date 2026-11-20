@@ -520,7 +520,7 @@ def photoatomicTable(photoat, relaxation, *, extension: str = ".00p", awr: Optio
     photoat : ReactionSuite
         The photo-atomic evaluation (projectile ``photon``, interaction ``atomic``),
         with every cross section lin-lin and energies in eV.
-    relaxation : PoPs
+    relaxation : ~kika.nuclear_data.model.pops.PoPs
         The element's atomic-relaxation data; one element with atomic data.
     extension : str, optional
         The ZAID suffix of the header. Default: ``".00p"``.

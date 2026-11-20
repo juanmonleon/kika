@@ -160,7 +160,28 @@ class IncoherentElastic:
 
 @dataclass
 class MF7MT2(MF7MT):
-    """One MF7/MT2 section: HEAD, then whichever blocks ``LTHR`` announces."""
+    """One MF7/MT2 section: HEAD, then whichever blocks ``LTHR`` announces.
+
+    A user gets one from ``endf[7][2]`` on a thermal-scattering tape read with
+    :func:`kika.endf.read_endf` or :func:`kika.endf.open_endf`; every field has a
+    default, so an empty one can also be built by hand.
+
+    Attributes
+    ----------
+    number : int
+        The MT number, 2.
+    data : dict
+        A free-form dictionary. The parser does not fill it.
+    num_lines : int
+        The number of lines of the section on the tape, as the parser counted them.
+    pad : PadStyle
+        How the tape filled the unused fields of a short line, kept so that the
+        section writes back in the dialect it came in.
+    coherent : CoherentElastic or None
+        The Bragg-edge block, None when the section has none.
+    incoherent : IncoherentElastic or None
+        The Debye-Waller block, None when the section has none.
+    """
 
     _lthr: Optional[int] = None
     coherent: Optional[CoherentElastic] = None

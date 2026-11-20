@@ -74,7 +74,88 @@ class RelaxationTransitionAce:
 
 @dataclass
 class PhotoatomicAce:
-    """The decoded blocks of a photo-atomic ACE table. See the module docstring for units."""
+    """The decoded blocks of a photo-atomic ACE table. See the module docstring for units.
+
+    :func:`~kika.ace.read_ace` returns one for a table whose ZAID ends in ``p``.
+    Every field has a default, so an empty one can be built by hand and filled.
+    Energies are in eV and cross sections in barns, as the module docstring says.
+
+    Attributes
+    ----------
+    filename : str or None
+        The file the table was read from.
+    header
+        The ACE header (ZAID, NXS and JXS arrays) of the table.
+    xss_data : numpy.ndarray or None
+        The XSS array as read, with the table's one-based indexing (element 0 is
+        a pad).
+    layout : {"mcplib", "eprdata"}
+        Which of the two layouts the table has: ``"eprdata"`` when NXS(6) is
+        positive.
+    format_flag : int
+        NXS(6) as written.
+    z : int
+        The atomic number, NXS(2).
+    energies : numpy.ndarray
+        The photon energy grid in eV, non-decreasing. The partial cross sections
+        and ``heating`` are tabulated on it.
+    incoherent, coherent, photoelectric, pair_production : numpy.ndarray
+        The four partial cross sections in barns on ``energies``. A stored zero is
+        a zero cross section.
+    heating : numpy.ndarray
+        The average heating number per collision in eV on ``energies`` (LHNM).
+    incoherent_x, coherent_x : numpy.ndarray
+        The abscissae ``v`` of the incoherent scattering function and of the
+        coherent form factors, in 1/Angstrom. A MCPLIB table does not carry them;
+        kika fills in MCNP's fixed grids.
+    incoherent_scattering_function : numpy.ndarray
+        The incoherent scattering function on ``incoherent_x``.
+    coherent_integrated_form_factor, coherent_form_factor : numpy.ndarray
+        The integrated coherent form factor, which MCNP samples from, and the
+        coherent form factor, both on ``coherent_x``.
+    fluorescence_edge_energies : numpy.ndarray
+        The binding energies of the edges of the old fluorescence data, in eV
+        (empty when NXS(4) is 0).
+    fluorescence_ejection_probabilities, fluorescence_yields : numpy.ndarray
+        Per edge, as the table writes them.
+    fluorescence_energies : numpy.ndarray
+        Per edge, the energy of the fluorescence line in eV.
+    shell_electrons : numpy.ndarray
+        The number of electrons of each Compton shell (LNEPS).
+    shell_binding_energies : numpy.ndarray
+        The binding energy of each Compton shell, in eV.
+    shell_probabilities : numpy.ndarray
+        LPIPS as written, not normalised (differential in some libraries,
+        cumulative in others).
+    compton_profiles : list of ComptonProfile
+        One Compton profile per shell, with ``interpolation``, ``pz``, ``pdf``
+        and ``cdf``.
+    subshell_designators : numpy.ndarray of int
+        EPRDATA only: the ENDF designator of each subshell (1 is K).
+    subshell_electrons, subshell_vacancy_probabilities : numpy.ndarray
+        EPRDATA only: per subshell, the number of electrons and the vacancy
+        probability as the table writes them.
+    subshell_binding_energies : numpy.ndarray
+        EPRDATA only: per subshell, in eV.
+    subshell_num_transitions : numpy.ndarray of int
+        EPRDATA only: the number of relaxation transitions of each subshell.
+    subshell_photoelectric : dict
+        EPRDATA only: ENDF designator to the photoelectric cross section of that
+        subshell in barns on ``energies``.
+    relaxation : dict
+        EPRDATA only: ENDF designator to the list of
+        ``RelaxationTransitionAce`` that fill a vacancy there. Each has two
+        designators, an energy in eV and a cumulative probability.
+    unparsed_blocks : list of str
+        The electron blocks the table carries and kika does not decode, by their
+        manual names.
+    xss_real_format : str
+        The format with which every XSS word is spelled when the table is written.
+    electron_nxs, electron_words, electron_jxs
+        The electron blocks kept word for word so that the table writes back
+        whole: NXS(8) to NXS(12), the words from JXS(19) to the end, and JXS(19)
+        to JXS(32) relative to JXS(19) (None for 0).
+    """
 
     filename: Optional[str] = None
     header: object = None

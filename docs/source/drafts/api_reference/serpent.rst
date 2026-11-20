@@ -89,3 +89,8 @@ Depletion output
 .. autoclass:: DepletionFile
 
 .. autoclass:: DepletionMaterial
+
+Errors
+------
+
+.. autoexception:: kika.serpent.parse_sens.ParseError

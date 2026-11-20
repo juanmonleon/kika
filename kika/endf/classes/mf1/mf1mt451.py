@@ -6,6 +6,23 @@ import pandas as pd
 class MF1MT451:
     """
     Data class for MF1MT451 (General Information) section.
+
+    The tape's identity and directory: ZA, AWR, the library and sublibrary
+    numbers, the descriptive text and the list of (MF, MT) sections the tape holds.
+    A user gets one from the ``mt451`` property of an
+    :class:`~kika.endf.classes.endf.ENDF` (or ``endf[1][451]`` when MF1 was
+    parsed). Its values are read through properties (``zaid``, ``sublibrary``,
+    ``temperature``, ``description``...); every field has a default.
+
+    Attributes
+    ----------
+    number : int
+        The MT number, 451.
+    num_lines : int
+        The number of lines of the section on the tape, as the parser counted
+        them; 0 for a section built by hand.
+    extra_data : dict
+        A free-form dictionary. The parser does not fill it.
     """
     # Make MF1MT451 follow the same interface as MT
     number: int = 451

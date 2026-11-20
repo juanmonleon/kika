@@ -16,14 +16,23 @@ __all__ = ["HDF5Error", "HDF5FormatError", "HDF5UnsupportedError",
 
 
 class HDF5Error(Exception):
-    """Base class for every OpenMC-HDF5 error kika raises."""
+    """Base class for every OpenMC-HDF5 error kika raises.
+
+    Catch it to handle the three errors below (:class:`HDF5FormatError`,
+    :class:`HDF5UnsupportedError` and :class:`NuclideNotFoundError`) together.
+    """
 
 
 class HDF5FormatError(HDF5Error, ValueError):
     """A file is not what the OpenMC format says it must be.
 
+    Raised by the readers and writers when the HDF5 content breaks the layout
+    OpenMC's C++ reader assumes (a missing ``filetype`` attribute, an unknown
+    interpolation code, tables whose counts disagree). It is a ``ValueError``.
+
     ``path`` is the file and ``node`` the HDF5 path inside it, e.g.
-    ``/U235/reactions/reaction_018/product_0``.
+    ``/U235/reactions/reaction_018/product_0``. Each is None when the raiser did
+    not know it, and the message ends with the ones that are set in brackets.
     """
 
     def __init__(self, message: str, *, path: Optional[Path] = None,
@@ -35,12 +44,18 @@ class HDF5FormatError(HDF5Error, ValueError):
 
 
 class HDF5UnsupportedError(HDF5Error, NotImplementedError):
-    """Well formed, and something kika will not decide on.
+    """The file or distribution is well formed, but kika does not handle it.
 
-    Raised rather than approximating, so the caller sees what is missing
-    instead of receiving a file that looks complete.
+    Raised where the alternative would be an approximation: a photon or ``wmp``
+    file read into the model, a ``filetype`` kika does not read, a distribution
+    with no OpenMC layout to write. The caller sees what is missing and does not
+    receive a file that looks complete. It is a ``NotImplementedError``.
     """
 
 
 class NuclideNotFoundError(HDF5Error, LookupError):
-    """``cross_sections.xml`` names no file for this exact material."""
+    """``cross_sections.xml`` lists no file of the requested type for this material.
+
+    Raised by the library look-ups. The match is exact: OpenMC names metastables
+    ``Am242_m1`` and thermal tables ``c_H_in_H2O``. It is a ``LookupError``.
+    """

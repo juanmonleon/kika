@@ -21,7 +21,13 @@ logger = logging.getLogger(__name__)
 
 
 class AceReadError(ValueError):
-    """A part of an ACE table could not be read (``read_ace(strict=True)``)."""
+    """A part of an ACE table could not be read.
+
+    :func:`~kika.ace.read_ace` raises it with the default ``strict=True`` when a
+    block or reaction cannot be read. The message names the block and the place in
+    it. With ``strict=False`` the same gap is recorded in ``ace.read_report``
+    and nothing is raised. It is a ``ValueError``.
+    """
 
 
 @dataclass(frozen=True)

@@ -79,7 +79,13 @@ COVARIANCE_MF = (31, 32, 33, 34, 35)
 
 
 class UnknownFormatError(ValueError):
-    """The file matched none of the formats kika can open."""
+    """The file matched none of the formats kika can open.
+
+    :func:`~kika.sniff_format` raises it for a file whose content is not ENDF, ACE,
+    GNDS XML or OpenMC HDF5, and for a directory that is not the root of a G4NDL
+    library. :func:`~kika.read` raises it when no ``format`` is given and the sniff
+    fails. It is a ``ValueError``, and its message says what was tried.
+    """
 
 
 # ----------------------------------------------------------------------
@@ -288,7 +294,7 @@ def read(path, format: Optional[str] = None, covariances: bool = True,
 
     Returns
     -------
-    ReactionSuite, PoPs, fissionFragmentData or PhotoatomicAce
+    ReactionSuite, ~kika.nuclear_data.model.pops.PoPs, fissionFragmentData or PhotoatomicAce
         By what the file holds. A **PoPs** for an ENDF decay (NSUB=4),
         fission-yield (NSUB=5 or 11) or atomic-relaxation (NSUB=6) sublibrary
         tape, and for a GNDS file whose root is ``PoPs``; for a decay

@@ -53,3 +53,16 @@ The model
 
 .. autoclass:: kika.nuclear_data.model.functions.regions1d.Regions1d
    :no-members:
+
+What the doors return and raise
+-------------------------------
+
+.. autoexception:: kika._read.UnknownFormatError
+
+.. autoclass:: kika.nuclear_data.model.pops.PoPs
+   :no-members:
+
+.. autoclass:: kika.nuclear_data.model.output_channel.FissionEnergyRelease
+   :no-members:
+
+.. autoexception:: kika.nuclear_data.model.units.UnitError
