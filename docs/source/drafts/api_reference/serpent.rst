@@ -43,8 +43,10 @@ Sensitivity output
 .. autoclass:: PertCategory
 
 .. autoclass:: Material
+   :no-index:
 
 .. autoclass:: Nuclide
+   :no-index:
 
 Detector output
 ---------------

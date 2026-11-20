@@ -44,12 +44,14 @@ What a data object holds
 .. autoclass:: Axis
 
 .. autoclass:: XYs1d
+   :no-index:
 
 .. autoclass:: Polynomial1d
 
 .. autoclass:: Materials
 
 .. autoclass:: Material
+   :no-index:
 
 .. autoclass:: Geometry
 
@@ -89,6 +91,7 @@ The entry around the data
 .. autoclass:: Calculation
 
 .. autoclass:: Comparison
+   :no-index:
 
 Corrections and uncertainties
 -----------------------------
