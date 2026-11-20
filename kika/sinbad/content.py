@@ -982,7 +982,7 @@ class Material:
     nuclides : tuple of ``Nuclide``
         One ``Nuclide`` per line of the file's csv block that has at least two
         fields (other lines are skipped): its ``name`` as written (in
-        :attr:`nuclide_format`) and its ``amount``, a float in :attr:`units`.
+        ``nuclide_format``) and its ``amount``, a float in ``units``.
     units : str
         What the amounts are -- ``weight fraction``, ``atom fraction``, ...
         ``""`` when the file gives none.
@@ -1034,7 +1034,7 @@ class Materials(Content):
     """
     SFCOMPO ``MaterialsType``. The materials of the assembly, by name.
 
-    Iterating gives the :class:`~kika.sinbad.Material` records in file order;
+    Iterating gives the ``kika.sinbad.Material`` records in file order;
     indexing by name gives one. Two materials with the same name collapse into
     the last one.
 

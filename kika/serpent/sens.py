@@ -303,9 +303,9 @@ class SensitivityFile:
     n_mu_bins : int or None
         Number of mu bins written by Serpent, kept for information.
     materials : list of str
-        Material names, in file order; stored as :class:`Material`.
+        Material names, in file order; stored as ``Material``.
     nuclides : list of int
-        ZAI codes, in file order; stored as :class:`Nuclide`, with the trailing zero
+        ZAI codes, in file order; stored as ``Nuclide``, with the trailing zero
         of a code ending in 0 dropped.
     perturbations_raw : list of str
         Perturbation labels as written in the file.
@@ -325,8 +325,8 @@ class SensitivityFile:
     ----------
     n_materials, n_nuclides, n_perturbations, n_energy_bins, n_mu_bins
         As given.
-    materials : list of Material
-    nuclides : list of Nuclide
+    materials : list of ``Material``
+    nuclides : list of ``Nuclide``
     perturbations_raw : list of str
     perturbations : list of Perturbation
     energy_grid, lethargy_widths : numpy.ndarray

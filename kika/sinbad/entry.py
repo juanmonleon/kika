@@ -911,11 +911,11 @@ class Comparison:
     """
     §4.9. A published comparison of a calculated table with a measured one --
     or, from v0.4, with another calculated one of the same file (the ratio of
-    two calculations). :attr:`against` says which.
+    two calculations). ``against`` says which.
 
     Row by row on ``position``, in the convention it declares. The published
     numbers are in ``table`` (a :class:`~kika.sinbad.Table`, or ``None`` when
-    the file gives none), in the unit each column declares; :meth:`recompute`
+    the file gives none), in the unit each column declares; ``recompute``
     forms the same comparison from the two data objects, which is how a reader
     finds out whether the entry's C/E can be reproduced from the entry's own
     numbers.
@@ -932,8 +932,8 @@ class Comparison:
         The ``comparison`` element.
     entry : Calculations, optional
         The calculations file the comparison belongs to, which resolves
-        :attr:`numerator` and :attr:`denominator`. Without it they are ``None``
-        and :meth:`recompute` raises.
+        ``numerator`` and ``denominator``. Without it they are ``None``
+        and ``recompute`` raises.
 
     Examples
     --------

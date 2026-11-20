@@ -1192,7 +1192,7 @@ class MultigroupLegendreCovariance:
         
         Parameters
         ----------
-        endf_data : LegendreCovariance or ENDF object
+        endf_data : ~kika.cov.LegendreCovariance or ENDF object
             Either:
             - LegendreCovariance: Original ENDF MF34 covariance data object
             - ENDF object: ENDF object containing MF34 data (will extract LegendreCovariance automatically)
