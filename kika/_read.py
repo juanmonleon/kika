@@ -270,8 +270,8 @@ def read(path, format: Optional[str] = None, covariances: bool = True,
         ``'endf'``, ``'ace'``, ``'gnds'``, ``'g4ndl'`` or ``'hdf5'`` (OpenMC's
         HDF5 data, ``kika.hdf5``), forcing the choice. Matched without regard
         to case.
-        For the file whose header is malformed, or an ACE 2.0 file the sniffer
-        cannot place.
+        Use it for a file whose header is malformed, or an ACE 2.0 file the
+        sniffer cannot place.
     covariances
         When true, the covariances are decoded onto ``suite.covarianceSuite``.
         For ENDF that means MF31/33/34 off the same tape; for GNDS it means
