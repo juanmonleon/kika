@@ -10,16 +10,34 @@ from enum import IntEnum
 
 
 class Orientation(IntEnum):
+    """Page orientation, the first field of VIEWR and PLOTR card 1.
+
+    The integer value is what NJOY reads: ``PORTRAIT`` is 0 and ``LANDSCAPE`` is 1.
+    """
+
     PORTRAIT = 0
     LANDSCAPE = 1
 
 
 class FontStyle(IntEnum):
+    """Font of the plot text, the second field of VIEWR and PLOTR card 1.
+
+    The integer value is what NJOY reads: ``ROMAN`` is 1 and ``SWISS`` is 2.
+    """
+
     ROMAN = 1
     SWISS = 2
 
 
 class PlotType(IntEnum):
+    """Linear or logarithmic axes of a plot, the ``itype`` field of card 4.
+
+    The first word is the x axis and the second the y axis (``LIN_LOG`` is a linear
+    x axis and a logarithmic y axis). The values are the positive ``itype`` codes
+    of NJOY, which are the 2D plots: the module writes a curve-style card only
+    when the value is positive.
+    """
+
     LIN_LIN = 1
     LIN_LOG = 2
     LOG_LIN = 3
@@ -27,6 +45,12 @@ class PlotType(IntEnum):
 
 
 class GridStyle(IntEnum):
+    """Frame decoration of a plot, the ``igrid`` field of card 4.
+
+    The integer value is what NJOY reads: no decoration (0), grid lines (1), tic
+    marks outside the frame (2) or inside it (3).
+    """
+
     NONE = 0
     GRID_LINES = 1
     TIC_MARKS_OUTSIDE = 2
@@ -34,12 +58,24 @@ class GridStyle(IntEnum):
 
 
 class LegendStyle(IntEnum):
+    """How the curves of a plot are labelled, the ``ileg`` field of card 4.
+
+    ``NONE`` writes no legend text. ``LEGEND_BOX`` and ``TAG_LABELS`` make the
+    module write the legend text of every curve; ``TAG_LABELS`` also writes a tag
+    position for it.
+    """
+
     NONE = 0
     LEGEND_BOX = 1
     TAG_LABELS = 2
 
 
 class CurveColor(IntEnum):
+    """Colour of a curve, the ``iccol`` field of the curve-style card (card 9).
+
+    The integer value is what NJOY reads, from ``BLACK`` (0) to ``ORANGE`` (8).
+    """
+
     BLACK = 0
     RED = 1
     GREEN = 2
@@ -52,6 +88,12 @@ class CurveColor(IntEnum):
 
 
 class PageColor(IntEnum):
+    """Background colour of the page (card 1) or of a plot window (``iwcol``, card 2).
+
+    The integer value is what NJOY reads: ``WHITE`` is 0 and the seven pale
+    colours are 1 to 7.
+    """
+
     WHITE = 0
     VERY_PALE_GREEN = 1
     VERY_PALE_CYAN = 2
@@ -63,6 +105,13 @@ class PageColor(IntEnum):
 
 
 class SymbolType(IntEnum):
+    """Marker drawn at the data points of a curve, the ``isym`` field of card 9.
+
+    The integer value is what NJOY reads, from ``SQUARE`` (0) to ``EXED_DIAMOND``
+    (24). By NJOY's convention for ``CurveStyle.icon``, a curve with ``icon`` 0 is
+    a line with no marker.
+    """
+
     SQUARE = 0
     OCTAGON = 1
     TRIANGLE_UP = 2
@@ -91,6 +140,11 @@ class SymbolType(IntEnum):
 
 
 class DashType(IntEnum):
+    """Line pattern of a curve, the ``idash`` field of card 9.
+
+    The integer value is what NJOY reads, from ``SOLID`` (0) to ``INVISIBLE`` (5).
+    """
+
     SOLID = 0
     DASHED = 1
     CHAIN_DASH = 2
@@ -104,7 +158,21 @@ class DashType(IntEnum):
 
 @dataclass
 class PageSetup:
-    """Card 1 — page-level settings (emitted once per ViewrPlot)."""
+    """Card 1 of VIEWR and PLOTR: the page settings, written once per job.
+
+    Held by ``ViewrPlot.page`` and ``PlotrJob.page``.
+
+    Attributes
+    ----------
+    orientation
+        Page orientation.
+    font_style
+        Font of the plot text.
+    size
+        The size field of the card, as NJOY reads it (1.0 by default).
+    page_color
+        Background colour of the page.
+    """
 
     orientation: Orientation = Orientation.PORTRAIT
     font_style: FontStyle = FontStyle.SWISS
@@ -114,7 +182,15 @@ class PageSetup:
 
 @dataclass
 class AxisRange:
-    """Axis range specification (Cards 5/6/7)."""
+    """Limits and step of one axis, as written on cards 5, 6 and 7.
+
+    Attributes
+    ----------
+    min, max
+        Lower and upper limit of the axis, in the units of the plotted quantity.
+    step
+        Axis step, as NJOY reads it, in the same units.
+    """
 
     min: float = 0.0
     max: float = 0.0
@@ -123,7 +199,29 @@ class AxisRange:
 
 @dataclass
 class CurveStyle:
-    """Card 9 — per-curve visual style (2D only)."""
+    """Card 9 of VIEWR and PLOTR: how one curve is drawn.
+
+    The module writes this card only for the 2D plot types (a positive
+    ``PlotType``).
+
+    Attributes
+    ----------
+    icon
+        0 draws a line with no marker; a positive value a marker and a line; a
+        negative value markers only.
+    isym
+        Marker.
+    idash
+        Line pattern.
+    iccol
+        Curve colour.
+    ithick
+        Line thickness, as NJOY reads it.
+    ishade
+        The shading field, written unchanged and never read by kika. In NJOY, 0
+        is open, 1 to 7 are cross-hatch patterns and 100 or more is a colour
+        fill.
+    """
 
     icon: int = 0
     """0=line only, positive=symbol+line, negative=symbol only."""
@@ -137,10 +235,18 @@ class CurveStyle:
 
 @dataclass
 class DataPoint2D:
-    """A single 2D data point (Card 13).
+    """One point of a user-supplied 2D curve, a line of card 13.
 
-    At minimum provide *x* and *y*.  Optional error-bar fields default
-    to zero (no error bar).
+    The point is written as ``x y`` when the four error fields are all 0, and
+    with the four errors after them otherwise.
+
+    Attributes
+    ----------
+    x, y
+        Coordinates, in the units of the plotted quantity.
+    yerr_upper, yerr_lower, xerr_upper, xerr_lower
+        Error-bar extents on each side of the point, in the units of the axis.
+        0 is no error bar.
     """
 
     x: float = 0.0
@@ -153,7 +259,17 @@ class DataPoint2D:
 
 @dataclass
 class View3D:
-    """Card 11 — 3D viewpoint parameters."""
+    """Card 11 of VIEWR: the viewpoint of a 3D plot.
+
+    Written only for a curve of a plot whose ``PlotType`` value is negative.
+
+    Attributes
+    ----------
+    xv, yv, zv
+        The first three fields of the card (viewpoint), as NJOY reads them.
+    x3, y3, z3
+        The last three fields of the card, as NJOY reads them.
+    """
 
     xv: float = 15.0
     yv: float = -15.0
@@ -165,7 +281,28 @@ class View3D:
 
 @dataclass
 class Curve:
-    """A single curve within a Plot."""
+    """One curve of a ``Plot``, with its style, legend and data.
+
+    Attributes
+    ----------
+    style
+        How the curve is drawn (card 9).
+    legend
+        Legend text (card 10), written when the plot's legend style is not
+        ``LegendStyle.NONE``.
+    xtag, ytag
+        Tag position (card 10a), written only with ``LegendStyle.TAG_LABELS``.
+    view3d
+        Viewpoint (card 11), written only for a 3D plot and when it is not None.
+    nform
+        Data format (card 12): 0 for the free-format 2D points of ``data_2d``,
+        1 for the 3D families of ``data_3d``. Any other value writes no data.
+    data_2d
+        The points, used when ``nform`` is 0.
+    data_3d
+        Each element is ``(x_value, [(y1, z1), (y2, z2), ...])``; used when
+        ``nform`` is 1.
+    """
 
     style: CurveStyle = field(default_factory=CurveStyle)
     legend: str = ""
@@ -192,7 +329,46 @@ class Curve:
 
 @dataclass
 class Plot:
-    """A single plot (one set of axes, possibly with multiple curves)."""
+    """One plot of a ``ViewrPlot``: a set of axes with its curves.
+
+    The first curve carries the window and axis cards (2 to 7); each further
+    curve is written on the same axes. A plot with no curves writes nothing.
+
+    Attributes
+    ----------
+    title1, title2
+        The two title lines (cards 3 and 3a).
+    plot_type
+        Linear or logarithmic axes.
+    alt_axis_type
+        The ``jtype`` field of card 4, written unchanged. kika tests only whether
+        it is 0: a non-zero value makes the module write the ``z_range`` and
+        ``z_label`` cards. In NJOY, 0 is no alternate axis, 1 a linear and 2 a
+        logarithmic alternate y axis, and a negative value is the z axis of a 3D
+        plot.
+    grid
+        Frame decoration.
+    legend_style
+        How the curves are labelled.
+    x_range, y_range
+        Limits and step of the x and y axes.
+    x_label, y_label
+        Axis labels.
+    z_range
+        Limits of the alternate y axis or of the z axis; None writes an all-zero
+        range.
+    z_label
+        Label of that axis.
+    new_page
+        True starts a new page (``iplot`` 1); False places the plot as a subplot of
+        the current page (``iplot`` -1).
+    window_color
+        Background colour of the plot window.
+    factx, facty, xll, yll, ww, wh
+        The window fields of card 2, as NJOY reads them.
+    curves
+        The curves, drawn on the same axes in order.
+    """
 
     title1: str = ""
     title2: str = ""
@@ -226,10 +402,18 @@ class Plot:
 
 @dataclass
 class ViewrPlot:
-    """Top-level VIEWR custom plot definition.
+    """The plot commands of a VIEWR step, built by hand.
 
-    Pass to ``InputDeck.viewr(plot_def=...)`` to emit inline plot
-    commands.
+    Pass it to ``InputDeck.viewr(plot_def=...)`` to write the commands in the deck
+    after the module card; the deck then reads them from standard input. The
+    commands end with the ``99 /`` card.
+
+    Attributes
+    ----------
+    page
+        Page settings (card 1).
+    plots
+        The plots, in the order they are written.
     """
 
     page: PageSetup = field(default_factory=PageSetup)
