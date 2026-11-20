@@ -65,7 +65,29 @@ _Z_SYMBOL = re.compile(r"^\d+-(?P<symbol>[A-Z][a-z]?)$")
 
 @dataclass(frozen=True)
 class TSLNaming:
-    """The labels a library listing groups a TSL tape by."""
+    """The labels a library listing groups a TSL tape by.
+
+    Returned by :func:`tsl_naming`.
+
+    Attributes
+    ----------
+    name
+        The tape's name in the library: the file stem without ``tsl-`` or ``tsl_``.
+    principal
+        The atom the tape describes (``H``, ``7Li``, ``H1``). None when the tape
+        treats a whole molecule.
+    compound
+        The compound the atom is bound in, which tapes are grouped by (``H2O``,
+        ``Graphite``, ``Be metal``).
+    variant
+        What sets the tape apart within its compound and atom (``5P``, ``ortho``,
+        ``alpha``, ``reactor 10P``). None for the plain one.
+    source
+        Which rule gave the labels. :func:`tsl_naming` returns ``"filename"``,
+        ``"zsymam"`` or ``"verbatim"`` (neither applied, and the name is its own
+        compound). ``"title"`` and ``"openmc"`` come from the naming of an ACE
+        title and of an OpenMC group, which can also return ``"verbatim"``.
+    """
 
     #: The tape's own name in the library: the file stem without ``tsl-``.
     name: str
@@ -84,7 +106,19 @@ class TSLNaming:
 
 
 def tsl_stem(file_name: Union[str, Path]) -> str:
-    """``tsl-HinH2O.endf`` → ``HinH2O``; ``tsl_Be_BeO.txt`` → ``Be_BeO``."""
+    """``tsl-HinH2O.endf`` → ``HinH2O``; ``tsl_Be_BeO.txt`` → ``Be_BeO``.
+
+    Parameters
+    ----------
+    file_name
+        A file name or path. Only the name is used.
+
+    Returns
+    -------
+    str
+        The name without its last extension and without a leading ``tsl-`` or
+        ``tsl_`` (any case).
+    """
     return _PREFIX.sub("", Path(file_name).stem)
 
 
@@ -149,6 +183,22 @@ def tsl_naming(file_name: Union[str, Path], zsymam: Optional[str] = None) -> TSL
 
     >>> tsl_naming("tsl-OinUO2-HALEU.endf")
     TSLNaming(name='OinUO2-HALEU', principal='O', compound='UO2', variant='HALEU', source='filename')
+
+    Parameters
+    ----------
+    file_name
+        The tape's file name or path. Tried first, by NNDC's
+        ``tsl-<principal>in<compound>[-<variant>]`` convention and the other
+        spellings the libraries use.
+    zsymam
+        The ZSYMAM text of the tape, tried when the file name gives nothing.
+
+    Returns
+    -------
+    TSLNaming
+        ``source`` says which rule applied. When neither does, the name is its
+        own compound, with no principal and no variant (``"verbatim"``). A name
+        taken from ZSYMAM has no variant.
     """
     name = tsl_stem(file_name)
     naming = _from_name(name)

@@ -37,6 +37,19 @@ def detect_tsl_format(path: Union[str, Path]) -> Optional[str]:
     Decided on content: an NSUB=12 ENDF tape, a GNDS ``reactionSuite`` whose
     interaction is the TNSL one, an ACE thermal table, an OpenMC
     ``data_thermal`` file, or a G4NDL ``ThermalScattering`` folder.
+
+    Parameters
+    ----------
+    path
+        A file, or a folder for G4NDL. A file that cannot be opened gives None.
+
+    Returns
+    -------
+    str or None
+        One of ``TSL_FORMATS`` (``"endf"``, ``"gnds"``, ``"ace"``, ``"openmc"``,
+        ``"g4ndl"``), or None. An ENDF-6 tape is ``"endf"`` only when its NSUB is
+        12; a GNDS file only when its text names the thermal neutron scattering
+        interaction.
     """
     from kika._read import _headLines, _looksLikeEndf
     from .ace import looks_like_ace_thermal
@@ -68,7 +81,31 @@ def detect_tsl_format(path: Union[str, Path]) -> Optional[str]:
 
 @dataclass
 class TSLMaterial:
-    """A TSL material in the model, with its processed tables when it has them."""
+    """A TSL material in the model, with its processed tables when it has them.
+
+    Returned by :func:`read_tsl`. The methods answer the same questions for every
+    format, and give None for what the format does not hold.
+
+    Attributes
+    ----------
+    format
+        One of ``TSL_FORMATS``.
+    suite
+        The model ``reactionSuite`` with the thermal scattering interaction.
+    paths
+        The files read, as strings (for G4NDL, the files of the material).
+    processed
+        The processed tables, for the formats in ``PROCESSED_FORMATS``; None
+        for ENDF-6 and GNDS.
+    member
+        The *member* the caller passed to :func:`read_tsl` for a processed format
+        (ACE, OpenMC, G4NDL), stored as given; None when none was passed, and
+        for ENDF-6 and GNDS.
+    report
+        The report of the conversion into the model, when the reader gives one.
+    endf
+        The decoded ENDF-6 tape, for ``format="endf"`` only; None otherwise.
+    """
 
     format: str
     suite: object
@@ -82,6 +119,7 @@ class TSLMaterial:
 
     @property
     def is_processed(self) -> bool:
+        """True when ``processed`` holds tables (ACE, OpenMC and G4NDL materials)."""
         return self.processed is not None
 
     # -- the forms ----------------------------------------------------------
@@ -123,7 +161,21 @@ class TSLMaterial:
         return out
 
     def bragg(self, temperature: float) -> Optional[BraggTable]:
-        """The Bragg edges and cumulative S at *temperature*, or None."""
+        """The Bragg edges and cumulative S at *temperature*, or None.
+
+        Parameters
+        ----------
+        temperature
+            In K. A processed file matches it to a tabulated one within a relative
+            1e-6; an evaluation needs it to be exactly a tabulated value. Nothing is
+            interpolated in temperature.
+
+        Returns
+        -------
+        BraggTable or None
+            Edge energies in eV and cumulative S in eV·b. None when the material has
+            no coherent elastic part or does not hold that temperature.
+        """
         from kika.nuclear_data.model import CoherentElastic
 
         if self.processed is not None:
@@ -143,6 +195,25 @@ class TSLMaterial:
         """σ_coh and σ_inc (b) at *energies* (eV) and a temperature the file holds.
 
         A part the file does not hold at that temperature is None.
+
+        Parameters
+        ----------
+        temperature
+            In K. Coherent: as in :meth:`bragg`. Incoherent of a processed file: a
+            tabulated temperature within a relative 1e-6. Incoherent of an
+            evaluation: interpolated in W'(T) between its tabulated temperatures,
+            and None outside the table.
+        energies
+            Incident energies in eV.
+
+        Returns
+        -------
+        dict
+            ``{"coherent": σ_coh, "incoherent": σ_inc}``, each an array of barns of
+            the shape of *energies*, or None. The coherent value is S(E_i)/E (zero
+            below the first edge). A tabulated incoherent σ of a processed file is
+            interpolated linearly, is NaN below the first tabulated energy and
+            zero above the last; an OpenMC file gives the closed form instead.
         """
         from kika.nuclear_data.model import IncoherentElastic
 
@@ -167,7 +238,20 @@ class TSLMaterial:
         return out
 
     def inelastic(self, temperature: float) -> Optional[Tuple[np.ndarray, np.ndarray]]:
-        """σ_inel(E) at *temperature* as (E eV, σ b), from a processed file; None otherwise."""
+        """σ_inel(E) at *temperature* as (E eV, σ b), from a processed file; None otherwise.
+
+        Parameters
+        ----------
+        temperature
+            In K; a tabulated temperature within a relative 1e-6.
+
+        Returns
+        -------
+        tuple of numpy.ndarray or None
+            Incident energies in eV and σ_inel in barns, on the file's own grid. None
+            for an ENDF-6 or GNDS evaluation (it holds S(α,β), not σ_inel), for a
+            temperature the file does not hold, and for a block with no inelastic σ.
+        """
         if self.processed is None:
             return None
         try:
@@ -179,7 +263,19 @@ class TSLMaterial:
         return block.inelastic_energies, block.inelastic_xs
 
     def outgoing(self, temperature: float) -> Optional[OutgoingTable]:
-        """The inelastic outgoing-neutron table at *temperature* (processed files only)."""
+        """The inelastic outgoing-neutron table at *temperature* (processed files only).
+
+        Parameters
+        ----------
+        temperature
+            In K; a tabulated temperature within a relative 1e-6.
+
+        Returns
+        -------
+        OutgoingTable or None
+            Read from the file on first request. None for an evaluation, for a
+            temperature the file does not hold, and when the block has no table.
+        """
         if self.processed is None:
             return None
         try:
@@ -188,7 +284,21 @@ class TSLMaterial:
             return None
 
     def elastic_cosines(self, temperature: float) -> Optional[Tuple[np.ndarray, np.ndarray]]:
-        """Incoherent elastic equiprobable cosines (incident E, cosines) at *temperature*."""
+        """Incoherent elastic equiprobable cosines (incident E, cosines) at *temperature*.
+
+        Parameters
+        ----------
+        temperature
+            In K; a tabulated temperature within a relative 1e-6.
+
+        Returns
+        -------
+        tuple of numpy.ndarray or None
+            Incident energies in eV, and an array with one row of equiprobable
+            cosines per energy. None for an evaluation, for a temperature the file
+            does not hold, and when the incoherent elastic has no cosines (OpenMC
+            keeps the bound σ and W'(T) instead).
+        """
         if self.processed is None:
             return None
         try:
@@ -207,6 +317,31 @@ def read_tsl(source: Union[str, Path, Sequence[Union[str, Path]]], *, format: Op
     *source* is a file, or for ACE several files of one material (one per
     temperature), or for G4NDL the ``ThermalScattering`` folder (or the G4NDL
     root) with *member* naming the material (``h_water``).
+
+    Parameters
+    ----------
+    source
+        What to read, as above. Only the first file decides the format; the
+        formats other than ACE read that first file alone.
+    format
+        One of ``TSL_FORMATS``, in any case. None detects it from the first
+        file with :func:`detect_tsl_format`.
+    member
+        The G4NDL material name. Required for ``"g4ndl"``. ACE and OpenMC only
+        store it on the result; ENDF-6 and GNDS ignore it.
+
+    Returns
+    -------
+    TSLMaterial
+        Its ``processed`` is set for ACE, OpenMC and G4NDL, and None for ENDF-6
+        and GNDS. GNDS is read without covariances.
+
+    Raises
+    ------
+    ValueError
+        If *source* is an empty list, if the format is not one of
+        ``TSL_FORMATS`` or cannot be detected, or if the format is G4NDL and
+        *member* is empty.
     """
     sources = [source] if isinstance(source, (str, Path)) else list(source)
     if not sources:

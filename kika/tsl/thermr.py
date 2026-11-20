@@ -1,7 +1,7 @@
 """The thermal cross sections of a TSL tape, computed by NJOY THERMR.
 
 kika computes the two elastic parts of a thermal scattering law in closed form
-(:mod:`kika.nuclear_data.model.thermal_scattering`) and the incoherent
+(``kika.nuclear_data.model.thermal_scattering``) and the incoherent
 inelastic tables with its own THERMR (:mod:`kika.processing.thermal`).
 :func:`run_thermr` runs NJOY's instead, as the reference to compare with, in
 the chain every NJOY processing of a TSL material uses::
@@ -37,7 +37,30 @@ DEFAULT_MTREF = 222
 
 @dataclass
 class ThermrResult:
-    """The cross sections THERMR wrote, per temperature, in eV and barns."""
+    """The cross sections THERMR wrote, per temperature, in eV and barns.
+
+    Returned by :func:`run_thermr`.
+
+    Attributes
+    ----------
+    temperatures
+        The temperatures of the PENDF, in K, in increasing order.
+    mtref
+        The MT under which THERMR wrote the inelastic cross section; the elastic
+        one, when the tape has it, is ``mtref + 1``.
+    sections
+        ``{temperature: {mt: (energies, sigma)}}``, energies in eV and σ in
+        barns, for those of MT1, MT2, ``mtref`` and ``mtref + 1`` that the PENDF
+        holds. The temperature keys are in K, rounded to three decimals.
+    deck
+        The NJOY input that was run.
+    listing
+        NJOY's output listing of the run, or None if it could not be read.
+    emax
+        The upper energy of the thermal treatment, in eV, as asked for.
+    natom
+        The number of principal atoms given to THERMR (at least 1).
+    """
 
     temperatures: List[float]
     mtref: int
@@ -65,7 +88,37 @@ def _fmt(values: Sequence[float]) -> str:
 def thermr_deck(tsl_mat: int, neutron_mat: int, temperatures: Sequence[float], *,
                 icoh: int, natom: int, mtref: int = DEFAULT_MTREF, emax: float = 4.0,
                 tol: float = 0.001, nbin: int = 16) -> str:
-    """The NJOY input: the neutron tape on unit 20, the TSL tape on 24, the result on 26."""
+    """The NJOY input: the neutron tape on unit 20, the TSL tape on 24, the result on 26.
+
+    The RECONR and BROADR cards are fixed: tolerance 0.001, maximum error 0.01
+    and integration error 5e-8 in both, and BROADR's thinning limit of 1e6 eV.
+    The temperatures and the arguments below set the THERMR card.
+
+    Parameters
+    ----------
+    tsl_mat, neutron_mat
+        MAT of the TSL tape and of the free-atom neutron evaluation.
+    temperatures
+        In K, written to BROADR and THERMR with six significant digits.
+    icoh
+        THERMR's ICOH, the elastic option. :func:`run_thermr` gives 1 when the
+        tape has an elastic section and 0 when it has none.
+    natom
+        THERMR's NATOM, the number of principal atoms in the compound.
+    mtref
+        The MT THERMR writes the inelastic cross section under.
+    emax
+        The upper energy of the thermal treatment, in eV.
+    tol
+        THERMR's tolerance (the first value of its energy card).
+    nbin
+        The number of equiprobable angles (cosine bins) of THERMR.
+
+    Returns
+    -------
+    str
+        The input, one NJOY card per line, ending with ``stop``.
+    """
     temps = _fmt(temperatures)
     return "\n".join([
         "moder", " 20 -21/",
@@ -89,6 +142,22 @@ def read_thermr_pendf(path: Union[str, Path], mts: Sequence[int]) -> Dict[float,
     Each temperature is a material block of its own, its TEMP in the fourth
     record of MF1/MT451. Read here directly: a multi-temperature PENDF is
     several materials in one tape.
+
+    Parameters
+    ----------
+    path
+        An ASCII PENDF.
+    mts
+        The MF3 sections to keep.
+
+    Returns
+    -------
+    dict
+        ``{temperature: {mt: (energies, sigma)}}``: energies in eV and σ in barns
+        as arrays, the interpolation laws of the section not kept. The key is the
+        block's TEMP in K, rounded to three decimals (0.0 when its MF1/MT451 is
+        shorter than four lines). A section of *mts* a block lacks is missing from
+        its dict, and a block with no MF1/MT451 is not returned.
     """
     import numpy as np
     from kika.endf.utils import parse_tab1
@@ -240,13 +309,72 @@ def run_thermr(njoy_exe: Union[str, Path], tsl_path: Union[str, Path],
                should_stop=None) -> ThermrResult:
     """Run THERMR for *tsl_path* over the free-atom evaluation *neutron_path*.
 
-    *temperatures* must be ones the TSL tape tabulates (THERMR does not
-    interpolate S(α,β) in temperature). *tsl_path* may also be a GNDS TSL
-    file: it is written to ENDF-6 by :func:`kika.write` first, since THERMR
-    reads only ENDF. Raises ``RuntimeError`` with NJOY's
-    listing tail when the run writes no output tape, and
-    :class:`ThermrCancelled` when *should_stop* turns true (NJOY is killed).
-    *on_stage* is called with each NJOY module as it starts.
+    THERMR does not interpolate S(α,β) in temperature, so the temperatures
+    must be ones the TSL tape tabulates. The deck is that of :func:`thermr_deck`
+    with ``icoh`` 1 when the tape has an elastic section, ``natom`` the tape's
+    number of principal atoms (B(6) of MF7/MT4, rounded, at least 1) and the
+    default ``nbin`` of 16. NJOY is run again, up to 12 times, when its output
+    shows it misread the numbers of the input (the decimal-separator problem of
+    some Windows builds).
+
+    Parameters
+    ----------
+    njoy_exe
+        The NJOY executable.
+    tsl_path
+        The TSL tape: ENDF-6 with NSUB 12, or a GNDS TSL file, which THERMR
+        cannot read and which is first written to ENDF-6 with :func:`kika.write`
+        in a temporary folder that is removed afterwards.
+    neutron_path
+        The free-atom neutron evaluation of the principal atom, an ENDF-6 tape
+        with NSUB 10 (or 0).
+    temperatures
+        In K. Each must match a temperature of the tape (its S(α,β), or its
+        elastic part when it has none) within 0.05 K; the temperatures given, not
+        the tape's, go into the deck.
+    emax
+        The upper energy of the thermal treatment, in eV, written unchanged into
+        THERMR's energy card. By NJOY's convention, below it the bound-atom data
+        replaces the free-atom elastic.
+    mtref
+        The MT the inelastic cross section is written under; the elastic goes to
+        ``mtref + 1``.
+    tol
+        THERMR's tolerance.
+    workdir
+        The folder NJOY runs in. None uses a temporary folder, removed when the
+        call ends. A folder given is created if needed and kept, with the tapes
+        (``tape20`` to ``tape26``), ``input`` and ``output`` in it. Before each
+        run ``output`` and ``tape21``, ``tape22``, ``tape23``, ``tape25`` and
+        ``tape26`` are deleted, and ``tape20``, ``tape24`` and ``input`` are
+        overwritten.
+    on_stage
+        A callable called with ``"moder"``, ``"reconr"``, ``"broadr"`` or
+        ``"thermr"`` when NJOY's output reaches that module. The same name can
+        come more than once.
+    should_stop
+        A callable with no arguments, polled about every 0.25 s while NJOY runs.
+        When it returns true NJOY is killed and :class:`ThermrCancelled` is
+        raised.
+
+    Returns
+    -------
+    ThermrResult
+        The MF3 sections MT1, MT2, ``mtref`` and ``mtref + 1`` of each
+        temperature of the PENDF NJOY wrote, with the deck and the listing.
+
+    Raises
+    ------
+    ValueError
+        If *temperatures* is empty, if one of them is not tabulated by the tape,
+        if *tsl_path* is not a TSL tape (NSUB other than 12) or *neutron_path* is
+        not an incident-neutron evaluation, or if either file has no MF1/MT451
+        header.
+    RuntimeError
+        If NJOY misread its input in 12 runs in a row, or wrote no output tape
+        (the message ends with the last 25 lines of its listing).
+    ThermrCancelled
+        If *should_stop* turned true.
     """
     from kika.njoy.locale_guard import read_listing
     from .library import read_tsl_header
