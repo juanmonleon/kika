@@ -24,9 +24,11 @@ class AceReadError(ValueError):
     """A part of an ACE table could not be read.
 
     :func:`~kika.ace.read_ace` raises it with the default ``strict=True`` when a
-    block or reaction cannot be read. The message names the block and the place in
-    it. With ``strict=False`` the same gap is recorded in ``ace.read_report``
-    and nothing is raised. It is a ``ValueError``.
+    block or reaction of a neutron-type table cannot be read. The message names
+    the block and the place in it. With ``strict=False`` the same gap is recorded
+    in ``ace.read_report`` and nothing is raised. Photo-atomic, dosimetry and
+    photonuclear tables that cannot be read raise a plain ``ValueError`` whatever
+    ``strict`` is. It is a ``ValueError``.
     """
 
 

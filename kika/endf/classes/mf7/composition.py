@@ -85,8 +85,9 @@ class MF7MT451(MF7MT):
 
     It states the composition of the compound a thermal-scattering evaluation
     describes. A user gets one from ``endf[7][451]`` on a thermal-scattering tape
-    read with :func:`kika.endf.read_endf` or :func:`kika.endf.open_endf`; every
-    field has a default, so an empty one can also be built by hand.
+    read with :func:`kika.endf.read_endf` or :func:`kika.endf.open_endf`. It can
+    also be built by hand: ``number`` has no default and every other field has
+    one.
 
     Attributes
     ----------

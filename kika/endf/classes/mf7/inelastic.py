@@ -97,8 +97,8 @@ class MF7MT4(MF7MT):
     """One MF7/MT4 section: the inelastic thermal scattering law S(α, β).
 
     A user gets one from ``endf[7][4]`` on a thermal-scattering tape read with
-    :func:`kika.endf.read_endf` or :func:`kika.endf.open_endf`; every field has a
-    default, so an empty one can also be built by hand.
+    :func:`kika.endf.read_endf` or :func:`kika.endf.open_endf`. It can also be
+    built by hand: ``number`` has no default and every other field has one.
 
     **What the B array means, and what it does not.** Measured across the
     ENDF/B-VIII.1 TSL sublibrary, three entries are unambiguous and are the only

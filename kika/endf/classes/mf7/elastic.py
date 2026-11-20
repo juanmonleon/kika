@@ -163,8 +163,8 @@ class MF7MT2(MF7MT):
     """One MF7/MT2 section: HEAD, then whichever blocks ``LTHR`` announces.
 
     A user gets one from ``endf[7][2]`` on a thermal-scattering tape read with
-    :func:`kika.endf.read_endf` or :func:`kika.endf.open_endf`; every field has a
-    default, so an empty one can also be built by hand.
+    :func:`kika.endf.read_endf` or :func:`kika.endf.open_endf`. It can also be
+    built by hand: ``number`` has no default and every other field has one.
 
     Attributes
     ----------
