@@ -185,21 +185,31 @@ def test_a_lump_is_stated_through_its_members():
 
 
 #: What each tape needs beyond the app's defaults, and what it must show.
-#: U-235's MT102 states a relative covariance of -1.056, where log space's
-#: ln(1 + C) does not exist. O-16's 44 reactions on one pooled grid are a
-#: 68922-row matrix (35 GiB) under grouping="mf".
+#: Log space's ln(1 + C) does not exist for C <= -1, and both tapes state such
+#: terms (LB=5): U-235's MT102 -1.056 at 955 eV, O-16's MT2 down to -84.7. O-16's
+#: reactions on one pooled grid are a 68922-row matrix (35 GiB) under
+#: grouping="mf"; "stated" is at most 1584.
 B81_TAPES = {
     "u235_b81_tape": ({"space": "linear"}, {851, 852}),
     "u238_b81_tape": ({}, {851, 852}),
     "pu239_b81_tape": ({}, {1, 2}),
-    "o16_b81_tape": ({"grouping": "stated"}, {2}),
+    "o16_b81_tape": ({"space": "linear", "grouping": "stated"}, {2}),
 }
 
 
+#: O-16's MT2 x MT2 (LB=5) is indefinite as written, with a correlation of
+#: 2.2e6: the pre-flight refuses it until a repair policy says what to do.
+O16_REFUSED = pytest.mark.xfail(
+    strict=True, raises=ValueError,
+    reason="O-16 MF33 MT2 x MT2 is not a covariance as stated (|rho| 2.2e6)")
+
+
 @pytest.mark.slow
-@pytest.mark.parametrize("tape", sorted(B81_TAPES))
+@pytest.mark.parametrize("tape", [
+    pytest.param(name, marks=O16_REFUSED) if name == "o16_b81_tape" else name
+    for name in sorted(B81_TAPES)])
 def test_endf_b81_mf33_passes_the_pre_flight(tape, request):
-    """The four tapes roadmap item 9 names, as the app asks for them."""
+    """The four tapes roadmap item 9 names, with the options ``B81_TAPES`` gives."""
     options, drawn = B81_TAPES[tape]
     path = request.getfixturevalue(tape)
     run = model_perturbation.perturbFromModel(str(path), {33: None}, 1, seed=1,
