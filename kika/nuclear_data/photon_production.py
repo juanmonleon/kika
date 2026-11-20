@@ -1,9 +1,9 @@
 """The photons a reaction suite emits: lines, continua and their production.
 
 This is the physics behind KIKA's photon panel, moved into the library so that
-any :class:`~kika.nuclear_data.model.ReactionSuite` answers it the same way,
+any :class:`~kika.nuclear_data.model.suite.ReactionSuite` answers it the same way,
 whichever format it was read from (ENDF through
-:func:`kika.endf.model_adapter.decodeReactionSuite`, GNDS, G4NDL). It asks a
+``kika.endf.model_adapter.decodeReactionSuite``, GNDS, G4NDL). It asks a
 physical question instead of listing a file's sections: *which gammas come out,
 and how many?*
 
@@ -12,7 +12,7 @@ differently:
 
 * a **level cascade** (ENDF MF12 LO=2): the reaction leaves the residual in a
   level, and the level's decay lives in PoPs.
-  :func:`~kika.nuclear_data.model.cascadeLines` follows it to the ground state;
+  ``kika.nuclear_data.model.cascadeLines`` follows it to the ground state;
   each line's photons per reaction are fixed, independent of the incident
   energy. A cascade is isotropic: the model adapter refuses an anisotropic
   MF14 on a cascade, since GNDS has no place for a per-transition angular
@@ -647,7 +647,12 @@ def _primary_energy(binding: float, awr: Optional[float], energy):
 # ---------------------------------------------------------------------------
 
 class PhotonProduction:
-    """The photons of a :class:`~kika.nuclear_data.model.ReactionSuite`.
+    """The photons of a :class:`~kika.nuclear_data.model.suite.ReactionSuite`.
+
+    Built by hand from a suite. Energies are in eV and cross sections in b. The
+    methods return plain dicts, lists and floats (see the module docstring for the
+    meaning of the line keys) and raise :class:`PhotonProductionError` for a request
+    the evaluation cannot answer.
 
     Parameters
     ----------
@@ -763,6 +768,25 @@ class PhotonProduction:
         changes in scale), lowest first: ``[{"energy_ev", "mts": [...]}]``.
 
         ``{"grid": [eV...], "min": eV|None, "max": eV|None, "thresholds": [...]}``.
+
+        Parameters
+        ----------
+        mt
+            Restrict the axis to the photons of this reaction. None takes every
+            photon-producing reaction.
+
+        Returns
+        -------
+        dict
+            The grid in eV (ascending, at most 1500 points), the lowest and highest
+            incident energy of the photon data in eV, and the thresholds. With no
+            photon data the grid and the thresholds are empty and ``min`` and
+            ``max`` are None.
+
+        Raises
+        ------
+        PhotonProductionError
+            If *mt* is given and emits no photons in this evaluation.
         """
         points = set()
         lo, hi = math.inf, -math.inf
@@ -812,6 +836,31 @@ class PhotonProduction:
 
         ``totals`` holds ``line_photons``, ``line_energy_ev``,
         ``continuum_photons``, ``continuum_energy_ev``.
+
+        Parameters
+        ----------
+        incident_energy
+            The incident neutron energy in eV.
+        mt
+            The reaction to answer for. None sums the photons of every reaction,
+            which only ``quantity="production"`` allows.
+        quantity : {"production", "multiplicity"}
+            ``"multiplicity"`` is photons per reaction, for one reaction;
+            ``"production"`` is the cross section times the multiplicity, in b.
+
+        Returns
+        -------
+        dict
+            As above. A line or continuum value is in photons per reaction or in b
+            (a continuum per eV of photon energy). The totals count photons per
+            reaction or b, and eV times that for the energies; a continuum's totals
+            are trapezoid integrals of its tabulated spectrum.
+
+        Raises
+        ------
+        PhotonProductionError
+            If *quantity* is neither string, *quantity* is ``"multiplicity"``
+            without *mt*, or *mt* emits no photons in this evaluation.
         """
         self._check(quantity, mt)
         contributions = self._select(mt)
@@ -942,6 +991,33 @@ class PhotonProduction:
 
         A primary photon's ``gamma_energy_ev`` is its mean over the grid, since
         its energy moves with E; its energy curve uses the moving energy.
+
+        Parameters
+        ----------
+        mt
+            The reaction to answer for. None sums every photon-producing reaction,
+            which only ``quantity="production"`` allows.
+        quantity : {"production", "multiplicity"}
+            ``"multiplicity"`` is photons per reaction; ``"production"`` is the
+            cross section times the multiplicity, in b.
+        max_lines
+            The number of lines given their own curve; the rest are summed.
+        max_points
+            The most points of any returned curve (the extremes of each bin are
+            kept when decimating).
+
+        Returns
+        -------
+        dict
+            As above, with incident energies in eV on every curve. The values are
+            photons per reaction or b for lines and continua, eV per reaction or
+            b·eV for ``energy``. With no photon data the curves are empty or None.
+
+        Raises
+        ------
+        PhotonProductionError
+            If *quantity* is neither string, *quantity* is ``"multiplicity"``
+            without *mt*, or *mt* emits no photons in this evaluation.
         """
         self._check(quantity, mt)
         contributions = self._select(mt)
@@ -1084,6 +1160,26 @@ class PhotonProduction:
         ``line`` is a line key, a continuum key, ``'total'`` or ``'energy'``.
         ``info`` carries ``label``, ``xs_source``, ``excluded`` and
         ``resonance_top_ev``. NaN marks where a reaction was left out.
+
+        Parameters
+        ----------
+        line
+            The key of a line or of a continuum, or ``'total'`` or ``'energy'``.
+        mt, quantity
+            As in :meth:`curves`.
+
+        Returns
+        -------
+        tuple
+            ``(E, y, info)``: the incident energies in eV and the values (units as
+            in :meth:`curves`) as float arrays of the same length, and the
+            ``info`` dict.
+
+        Raises
+        ------
+        PhotonProductionError
+            If no curve has the key *line* (the message lists some keys), or for the
+            reasons given for :meth:`curves`.
         """
         full = self.curves(mt=mt, quantity=quantity, max_lines=10 ** 9, max_points=10 ** 9)
         if line in ("total", "energy"):
@@ -1117,6 +1213,30 @@ class PhotonProduction:
 
         A ``line:`` key several reactions emit is taken from ``mt`` when given,
         and otherwise from the first reaction whose photon is anisotropic.
+
+        Parameters
+        ----------
+        key
+            A line key as :meth:`spectrum` gives it (``cascade:``, ``line:`` or
+            ``primary:``).
+        incident_energy
+            The incident neutron energy in eV.
+        mt
+            Restrict the search to this reaction. None searches every reaction.
+
+        Returns
+        -------
+        dict
+            As above. ``mu`` is 201 cosines from -1 to 1 in the laboratory frame and
+            ``pdf`` the probability density per unit cosine at each (0.5 for an
+            isotropic photon; a Legendre node is summed with the
+            ``(2l+1)/2 a_l P_l`` convention). A cascade line is isotropic.
+
+        Raises
+        ------
+        PhotonProductionError
+            If no line has the key *key* (in *mt* when given), or *mt* emits no
+            photons in this evaluation.
         """
         E = float(incident_energy)
         mu = np.linspace(-1.0, 1.0, ANGULAR_POINTS)
@@ -1170,6 +1290,30 @@ class PhotonProduction:
         Returns ``{"mt", "scaled", "continua": [{"key", "label",
         "incident_energy_ev": [E_i], "photon_energy_ev": [Eγ_j], "grid":
         "log"|"linear", "multiplicity": [Y(E_i)], "value": [[row per E_i]]}]}``.
+
+        Parameters
+        ----------
+        mt
+            The reaction whose continuum photons are mapped.
+        scaled
+            Multiply each row by the multiplicity at its node. False gives the
+            probability density per eV.
+        points
+            The number of photon-energy points of the common grid.
+
+        Returns
+        -------
+        dict
+            As above, with energies in eV; ``value`` rows hold 1/eV (or photons per
+            eV per reaction when *scaled*), at six significant digits, one row per
+            tabulated incident energy and one column per ``photon_energy_ev``. One
+            entry per continuum photon of *mt*.
+
+        Raises
+        ------
+        PhotonProductionError
+            If *mt* emits no photons in this evaluation, or has no continuum
+            photon.
         """
         contributions = self._select(mt)
         out = []
@@ -1266,7 +1410,20 @@ def resonance_background(endf) -> Tuple[List[int], float]:
     (total MT1, nonelastic MT3); ``top`` is the highest upper bound of a
     resolved or unresolved range, in eV. A tape without real resonance ranges
     returns ``([], 0.0)``. This is the rule KIKA's ENDF panels use, kept here
-    so the photon quantity in :mod:`kika.plotting` and the app agree.
+    so the photon quantity in ``kika.plotting`` and the app agree.
+
+    Parameters
+    ----------
+    endf
+        A flat ENDF object, read with ``kika.endf.read_endf``. Its MF 2 is
+        inspected; one without MF 2 gives no background.
+
+    Returns
+    -------
+    tuple
+        ``(mts, top)``: the MTs as a sorted list of int and the top of the
+        resonance range in eV. The MTs are MT 1, 2, 3 and 102, with MT 18 added when
+        MF 2 states fission widths.
     """
     mf2 = getattr(endf, "mf", {}).get(2)
     if mf2 is None or not _has_real_resonance_ranges(mf2):

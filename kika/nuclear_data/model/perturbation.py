@@ -10,7 +10,7 @@ own version and the three can disagree. Here the operation is on the node --
 format is a way of writing the answer down afterwards.
 
 The arithmetic is not new. It reproduces
-:func:`kika.sampling.mf33_sampling.apply_factors_to_pendf_mf3`, the format
+``kika.sampling.mf33_sampling.apply_factors_to_pendf_mf3``, the format
 route's applier, and the gate is byte-identity of the section that
 comes out of ``encodeMF3MT`` against the section that applier writes. Three
 pieces:
@@ -25,7 +25,7 @@ pieces:
    the bin that **starts** there. Outside the block's coverage the factor is 1.
 3. **The ``(NBT, INT)`` bookkeeping** -- which is not here, and that is the whole
    difference. Insertion happens inside the region that owns the edge, so the
-   pairs fall out of :meth:`Regions1d.toEndfRegions` counting region lengths.
+   pairs fall out of ``Regions1d.toEndfRegions`` counting region lengths.
    The format applier computes ``new_NBT_i = NBT_i + sum(n for pos < NBT_i)``
    by hand; that arithmetic and the point count were two sources of truth for
    the same fact, and they once disagreed.
@@ -222,33 +222,46 @@ def applyFactors(function1d: Function1dT, factors: ArrayLike,
                  binEdges: ArrayLike) -> Tuple[Function1dT, dict]:
     """Scale *function1d* by a piecewise-constant factor per bin.
 
+    Each ordinate is multiplied by the factor of its bin (a factor of 1 leaves it
+    unchanged; the factor is not applied as ``1 + f``). The abscissae are not
+    moved, apart from the points inserted at the interior bin edges (see
+    ``refineAtBinEdges``): a bin edge that has no pair of repeated abscissae gets
+    one, so that the step between two factors is a real discontinuity.
+
+    A bin is ``[binEdges[i], binEdges[i + 1])``. At a repeated abscissa the first
+    copy takes the factor of the bin that ends there and the second the factor of
+    the bin that starts there. Outside the first and last edge the factor is 1.
+
     Parameters
     ----------
     function1d
-        The form to perturb -- ``crossSection['eval']``, typically. Not
-        mutated.
+        The form to perturb (an ``XYs1d`` or a ``Regions1d``), typically
+        ``crossSection['eval']``. Not mutated.
     factors
         One factor per bin, so ``len(binEdges) - 1`` of them.
     binEdges
-        The covariance's own energy grid, ascending, in the units the function's
-        domain is stated in.
+        The covariance's own energy grid, strictly ascending, in the unit the
+        function's abscissa is stated in (eV for a cross section). No unit is
+        converted.
 
     Returns
     -------
-    (perturbed, diagnostics)
-        A node of the same kind as *function1d*, and what the application did:
-        ``min_factor``, ``max_factor``, ``frac_out_of_coverage`` and
-        ``n_inserted``. The diagnostics are returned rather than logged because
-        the caller is drawing thousands of these and decides what is worth
-        saying.
+    perturbed
+        A node of the same kind as *function1d*, sharing no arrays with it.
+    diagnostics : dict
+        ``min_factor`` and ``max_factor`` (over the points of the refined table,
+        counting the 1 of the points outside the bins), ``frac_out_of_coverage``
+        (the fraction of those points no bin covers) and ``n_inserted`` (the number
+        of points the refinement added). They are returned and not logged because
+        the caller is drawing thousands of these and decides what is worth saying.
 
     Raises
     ------
     ValueError
-        If *factors* and *binEdges* do not describe the same binning. Guessing
-        which of the two is right would put a silently misaligned perturbation
-        on a cross section, which is the failure this whole track exists to
-        avoid.
+        If *binEdges* is not a one-dimensional array of at least two strictly
+        ascending values, or *factors* does not hold ``len(binEdges) - 1`` values.
+        Guessing which of the two is right would put a silently misaligned
+        perturbation on a cross section.
     """
     factors = np.asarray(factors, dtype=float)
     binEdges = np.asarray(binEdges, dtype=float)
@@ -521,46 +534,83 @@ def applyLegendreFactors(angular, factors, binEdges, *, coverageEdges="step",
                          frameConversion=None):
     """Scale the Legendre coefficients of an angular distribution, order by order.
 
+    Each coefficient ``a_l`` of the order named in *factors* is multiplied by the
+    factor of its incident-energy bin (a factor of 1 leaves it unchanged; the
+    factor is not applied as ``1 + f``). The model's convention is
+    ``f(mu) = sum_l (2l+1)/2 a_l P_l(mu)``, so the multiplier scales that term.
+    Only the Legendre regions are touched: the tabulated half of an LTT=3
+    distribution is kept as it is (see ``tabulated_uncovered`` below).
+
     Parameters
     ----------
     angular
-        The ``XYs2d`` or ``Regions2d`` of :class:`Legendre` forms that an
-        :class:`~kika.nuclear_data.model.distributions.AngularTwoBody` carries.
+        The ``XYs2d`` or ``Regions2d`` of ``Legendre`` forms that an
+        ``AngularTwoBody`` carries.
         Not mutated.
-    factors
-        ``Legendre order -> one factor per bin``. Order 0 is refused; see
-        :data:`MAGNITUDE_ORDER`.
-    binEdges
+    factors : dict
+        ``Legendre order -> one factor per bin``, each array of
+        ``len(binEdges[order]) - 1`` values. Order 0 (``MAGNITUDE_ORDER``) is
+        refused: ``a_0`` is the cross-section magnitude, and its factors belong on
+        the cross section.
+    binEdges : dict
         ``Legendre order -> the incident-energy boundaries those factors are
-        stated on``. MF34's orders routinely differ in grid, which is why this
-        is per order rather than one grid for all of them.
-    coverageEdges
-        What to do where a factor block's coverage ends; see
-        :data:`COVERAGE_EDGES`. The default states the step the block implies;
-        ``"ramp"`` reproduces the shipped MF4 applier and is there for gates.
-    frameConversion
-        A :class:`~kika._legendre_frames.FrameConversion`
-        when the covariance the factors were drawn from is in a different frame
-        from the distribution (MF34 LCT ≠ MF4 LCT). At each incident energy the
-        factors then act on that frame's coefficients, and the change comes back
-        to this one; see :mod:`kika._legendre_frames`.
-        ``None``, the default, scales the coefficients as they stand.
+        stated on``, strictly ascending, in the unit of the distribution's
+        incident-energy axis (eV). It has exactly the orders of *factors*. MF34's
+        orders routinely differ in grid, which is why this is per order and not one
+        grid for all of them.
+    coverageEdges : {"step", "ramp"}
+        What happens where a factor block's coverage ends. ``"step"`` (the default)
+        inserts a repeated incident energy at every bin edge inside the
+        distribution's span, the outermost edge of each order included, so the last
+        bin's factor holds up to the edge and the evaluation resumes unperturbed
+        beyond it. ``"ramp"`` leaves out the outermost edges of each grid (and
+        every edge of a grid of two values), so no point is inserted there and the
+        change from the last factor to 1 is interpolated across the next interval;
+        it is the behaviour of the format-level MF4 applier.
+    frameConversion : kika._legendre_frames.FrameConversion, optional
+        Given when the covariance the factors were drawn from is in a different
+        frame from the distribution (MF34 LCT differing from MF4's). At each
+        incident energy the factors then act on that frame's coefficients, and
+        only the change is carried back to the distribution's frame; a node where
+        ``γ >= 1`` (an inelastic threshold) is left as the evaluation has it.
+        None, the default, scales the coefficients as they stand.
 
     Returns
     -------
-    (perturbed, diagnostics)
-        A node of the same kind, and ``per_order`` (min and max factor, and
-        ``n_scaled``: how many coefficients of that order were multiplied,
-        counting those outside the block's coverage whose factor is 1), ``n_inserted``, and
-        ``orders_absent`` -- the requested orders the distribution carries at no
-        energy. That last is a real case, not a defensive check: a file may
-        state a covariance for an order the evaluation itself stops short of,
-        and a caller should be told rather than have it silently dropped.
-        ``tabulated_from`` is the first incident energy of a tabulated region
-        (``None`` without one) and ``tabulated_uncovered`` the bins, per order,
-        that reach above it -- the part of the block an LTT=3 distribution
-        does not receive from this applier.
+    perturbed : XYs2d or Regions2d
+        A node of the same kind. A region the factors did not touch is kept by
+        identity.
+    diagnostics : dict
+        ``per_order``: for each order, ``min_factor``, ``max_factor`` and
+        ``n_scaled``, the number of coefficients of that order that were
+        multiplied (without ``frameConversion`` this counts those outside the
+        block's coverage, whose factor is 1; with it, only the incident energies
+        where some factor differs from 1). ``n_inserted``: incident energies
+        added. ``orders_absent``: the requested orders with ``n_scaled == 0``, such
+        as an order the evaluation stops short of (a file may state a covariance
+        for one, and a caller should be told). ``tabulated_from``: the first
+        incident energy of a tabulated region (None without one), and
+        ``tabulated_uncovered``: per order, ``n_bins``, ``fraction`` and
+        ``energy_max`` of the bins that reach above it, the part of the block an
+        LTT=3 distribution does not receive from this applier. With
+        *frameConversion*, ``frame`` holds ``direction``, ``awr``, ``q``,
+        ``n_converted``, ``n_degenerate`` and the pad statistics of the solve.
 
+    Raises
+    ------
+    ValueError
+        If *factors* contains order 0; *factors* and *binEdges* do not name the
+        same orders; an order's factors do not number one fewer than its edges; an
+        order's edges are not strictly ascending; *coverageEdges* is neither
+        string; or *angular* has no Legendre region (a table is perturbed by
+        ``applyTabulatedFactors``).
+    NotImplementedError
+        If a bin edge falls between two incident energies and the incident-energy
+        interpolation of the region is neither lin-lin nor flat, where the
+        coefficient vector at the edge would have to be interpolated.
+
+    Notes
+    -----
     **What this reproduces, and where it deliberately does not.** The arithmetic
     is ``_apply_factors_to_mf4_legendre``'s: the union of every order's interior
     bin edges becomes a repeated incident energy carrying the baseline vector,
@@ -572,7 +622,7 @@ def applyLegendreFactors(angular, factors, binEdges, *, coverageEdges="step",
     :func:`applyFactors` states for a cross section. The two-pass version has an
     exposure this one does not -- an energy the evaluation already wrote twice
     gets a third and a fourth copy there, where here it is left alone, which is
-    the case :func:`refineAtBinEdges` documents for MF3.
+    the case ``refineAtBinEdges`` documents for MF3.
 
     A perturbed distribution is **not renormalised and its positivity is not
     enforced**. The sum ``sum_l (2l+1)/2 a_l P_l(mu)`` can go negative for a
@@ -875,8 +925,10 @@ def applyTabulatedFactors(angular, factors, binEdges, *, coverageEdges="step",
     """Perturb the tabulated ``f(mu)`` of an angular distribution, order by order.
 
     The tables' counterpart of :func:`applyLegendreFactors`, with the same
-    arguments and the same diagnostics, so a caller dispatches on the region and
-    not on the shape of the answer. Per incident energy, the table is perturbed
+    arguments and the same diagnostics, so a caller dispatches on the region.
+    Each factor multiplies the Legendre coefficient ``a_l`` of the table (with
+    ``f(mu) = sum_l (2l+1)/2 a_l P_l(mu)``; a factor of 1 changes nothing, and it
+    is not applied as ``1 + f``). Per incident energy, the table is perturbed
     by :func:`~kika.nuclear_data.model.angular_tables.perturbTabulatedAngular`:
     project onto the orders the factors name, scale, and add the correction to
     the evaluator's own table on its own nodes. In energy, everything is
@@ -892,14 +944,19 @@ def applyTabulatedFactors(angular, factors, binEdges, *, coverageEdges="step",
 
     Parameters
     ----------
-    repair
+    angular, factors, binEdges, coverageEdges
+        As in :func:`applyLegendreFactors`, but *angular* holds tabulated ``f(mu)``
+        forms (the table of each incident energy over [-1, 1], lin-lin or
+        histogram in ``mu``), and order 0 is refused in the same way.
+    repair : callable, optional
         ``callable(mu, p, pPrime, info, pairs) -> (pPrime, event)`` or ``None``.
         Called for a node whose perturbed table went negative somewhere; returns
         the table to keep and a record of what it did (``None`` for nothing).
         Whether a sample may carry a negative probability is the sampler's
         decision, as it is for the Legendre applier, so the default leaves the
-        table as computed and only counts it. Its *info* carries ``frame``, so
-        a repair in another frame moves that frame's shifts.
+        table as computed and only counts it. Its *info* is that of
+        ``perturbTabulatedAngular`` and carries ``frame``, so a repair in another
+        frame moves that frame's shifts.
     frameConversion
         As in :func:`applyLegendreFactors`: the factors act on the coefficients
         of the covariance's frame. On a table that change is closed form
@@ -910,14 +967,34 @@ def applyTabulatedFactors(angular, factors, binEdges, *, coverageEdges="step",
 
     Returns
     -------
-    (perturbed, diagnostics)
-        ``per_order``, ``n_inserted`` and ``orders_absent`` as
-        :func:`applyLegendreFactors` has them -- the last always empty, since a
-        table holds every order implicitly -- and ``frame`` when there is a
-        conversion, plus ``min_p``,
-        ``n_negative_nodes`` (energies with any ``f' < 0`` before a repair),
+    perturbed : XYs2d or Regions2d
+        A node of the same kind; a region that was not tabulated is kept by
+        identity.
+    diagnostics : dict
+        ``per_order`` and ``n_inserted`` as :func:`applyLegendreFactors` has them
+        (``n_scaled`` counts the incident energies where the factor is not 1);
+        ``orders_absent``, always empty, since a table holds every order
+        implicitly; ``frame`` when there is a conversion; ``min_p`` (the least
+        value of any perturbed table after repair, None if none was perturbed);
+        ``n_negative_nodes`` (energies with any ``f' < 0`` before a repair);
         ``max_integral_change`` (the worst ``|int f' - int f|`` relative to
-        ``int f``, under the table's own law) and ``positivity_events``.
+        ``int f``, under the table's own law); and ``positivity_events`` (the
+        records the *repair* returned, each with the ``energy`` in eV).
+
+    Raises
+    ------
+    ValueError
+        If *factors* contains order 0, *factors* and *binEdges* do not name the
+        same orders, an order's factors and edges do not match in number, its
+        edges are not strictly ascending, *coverageEdges* is invalid, or *angular*
+        has no tabulated region (a Legendre one is perturbed by
+        :func:`applyLegendreFactors`). Also the refusals of
+        ``perturbTabulatedAngular`` (a table that does not span [-1, 1] or has a
+        law other than histogram and lin-lin).
+    NotImplementedError
+        If a bin edge falls between two tabulated incident energies and their
+        interpolation is not lin-lin or flat, or the two tables are not lin-lin in
+        ``mu``.
 
     **A limitation of the method, not a defect.** With a
     relative covariance the change is ``(c_l - 1) a_l``, which vanishes where

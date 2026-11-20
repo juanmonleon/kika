@@ -2,16 +2,15 @@
 
 Five laws are stated by a few energy-dependent parameters instead of a table.
 Their *shapes* and the integrals that normalise them live here, once, so that
-the ENDF reader (:mod:`kika.endf.classes.mf5.analytic`) and the model's §18.3
-nodes (:mod:`kika.nuclear_data.model.energy_spectra`) evaluate the same
+the ENDF reader (``kika.endf.classes.mf5.analytic``) and the model's §18.3
+nodes (``kika.nuclear_data.model.energy_spectra``) evaluate the same
 spectrum with the same arithmetic. It knows nothing of formats or units:
 energies are plain floats in whatever unit the caller keeps consistent (eV
-everywhere in kika).
+everywhere in kika). The numbers ``LF`` are those of ENDF-6 File 5.
 
-These are physics -- the evaporation, Watt and Madland-Nix fission-spectrum
-models -- so they live in the calculation layer, not in :mod:`kika.algebra`,
-which holds only the mathematics of tabulated functions. Until October 2026
-this module was ``kika.algebra.spectra``.
+These are physics (the evaporation, Watt and Madland-Nix fission-spectrum
+models), so they live in the calculation layer and not in :mod:`kika.algebra`,
+which holds only the mathematics of tabulated functions.
 
 =====================  ====  ===================================================
 law                    LF    unnormalised shape of E'
@@ -44,7 +43,21 @@ __all__ = [
 
 
 def maxwellian(e_out, theta: float) -> np.ndarray:
-    """LF=7 shape, ``sqrt(E') exp(-E'/theta)``. Zero for ``theta <= 0``."""
+    """LF=7 shape, ``sqrt(E') exp(-E'/theta)``, not normalised.
+
+    Parameters
+    ----------
+    e_out : array_like
+        Outgoing energies ``E'``, in the unit of *theta* (eV in kika).
+    theta
+        The temperature parameter, in the unit of *e_out*. The result is zero for
+        ``theta <= 0``.
+
+    Returns
+    -------
+    numpy.ndarray
+        The shape at each of *e_out*, as a float array of the same shape.
+    """
     e_out = np.asarray(e_out, dtype=float)
     if theta <= 0.0:
         return np.zeros(e_out.shape)
@@ -52,7 +65,24 @@ def maxwellian(e_out, theta: float) -> np.ndarray:
 
 
 def maxwellian_integral(hi: float, theta: float) -> float:
-    """``int_0^hi`` of :func:`maxwellian`: ``theta^1.5 [sqrt(pi)/2 erf(sqrt(y)) - sqrt(y) e^-y]``."""
+    """``int_0^hi`` of :func:`maxwellian`, in closed form.
+
+    The value is ``theta^1.5 [sqrt(pi)/2 erf(sqrt(y)) - sqrt(y) e^-y]`` with
+    ``y = hi/theta``.
+
+    Parameters
+    ----------
+    hi
+        Upper limit of the integral, in the unit of *theta*.
+    theta
+        The temperature parameter of the shape.
+
+    Returns
+    -------
+    float
+        The integral, in the unit of *theta* to the power 1.5. It is 0.0 when
+        ``theta <= 0`` or ``hi <= 0``.
+    """
     if theta <= 0.0 or hi <= 0.0:
         return 0.0
     y = hi / theta
@@ -61,7 +91,21 @@ def maxwellian_integral(hi: float, theta: float) -> float:
 
 
 def evaporation(e_out, theta: float) -> np.ndarray:
-    """LF=9 shape, ``E' exp(-E'/theta)``."""
+    """LF=9 shape, ``E' exp(-E'/theta)``, not normalised.
+
+    Parameters
+    ----------
+    e_out : array_like
+        Outgoing energies ``E'``, in the unit of *theta* (eV in kika).
+    theta
+        The temperature parameter, in the unit of *e_out*. The result is zero for
+        ``theta <= 0``.
+
+    Returns
+    -------
+    numpy.ndarray
+        The shape at each of *e_out*, as a float array of the same shape.
+    """
     e_out = np.asarray(e_out, dtype=float)
     if theta <= 0.0:
         return np.zeros(e_out.shape)
@@ -69,7 +113,23 @@ def evaporation(e_out, theta: float) -> np.ndarray:
 
 
 def evaporation_integral(hi: float, theta: float) -> float:
-    """``int_0^hi`` of :func:`evaporation`: ``theta^2 [1 - e^-y (1 + y)]``."""
+    """``int_0^hi`` of :func:`evaporation`, in closed form.
+
+    The value is ``theta^2 [1 - e^-y (1 + y)]`` with ``y = hi/theta``.
+
+    Parameters
+    ----------
+    hi
+        Upper limit of the integral, in the unit of *theta*.
+    theta
+        The temperature parameter of the shape.
+
+    Returns
+    -------
+    float
+        The integral, in the unit of *theta* squared. It is 0.0 when ``theta <= 0``
+        or ``hi <= 0``.
+    """
     if theta <= 0.0 or hi <= 0.0:
         return 0.0
     y = hi / theta
@@ -77,7 +137,23 @@ def evaporation_integral(hi: float, theta: float) -> float:
 
 
 def watt(e_out, a: float, b: float) -> np.ndarray:
-    """LF=11 shape, ``exp(-E'/a) sinh(sqrt(b E'))``."""
+    """LF=11 shape, ``exp(-E'/a) sinh(sqrt(b E'))``, not normalised.
+
+    Parameters
+    ----------
+    e_out : array_like
+        Outgoing energies ``E'``, in the unit of *a* (eV in kika).
+    a
+        The energy parameter of the exponential, in the unit of *e_out*.
+    b
+        The parameter inside the hyperbolic sine, in the inverse unit of *e_out*.
+        The result is zero for ``a <= 0`` or ``b < 0``.
+
+    Returns
+    -------
+    numpy.ndarray
+        The shape at each of *e_out*, as a float array of the same shape.
+    """
     e_out = np.asarray(e_out, dtype=float)
     if a <= 0.0 or b < 0.0:
         return np.zeros(e_out.shape)
@@ -85,7 +161,21 @@ def watt(e_out, a: float, b: float) -> np.ndarray:
 
 
 def watt_integral(hi: float, a: float, b: float) -> float:
-    """``int_0^hi`` of :func:`watt`, ENDF-6 §5.1.1.5's closed form."""
+    """``int_0^hi`` of :func:`watt`, by the closed form of ENDF-6 §5.1.1.5.
+
+    Parameters
+    ----------
+    hi
+        Upper limit of the integral, in the unit of *a*.
+    a, b
+        The parameters of the shape (*a* an energy, *b* its inverse).
+
+    Returns
+    -------
+    float
+        The integral, in the unit of *a* (the shape itself is dimensionless).
+        It is 0.0 when ``a <= 0``, ``b < 0`` or ``hi <= 0``.
+    """
     if a <= 0.0 or b < 0.0 or hi <= 0.0:
         return 0.0
     root = math.sqrt(a * b / 4.0)
@@ -123,9 +213,25 @@ def _madland_nix_one(e_out: np.ndarray, ef: float, tm: float) -> np.ndarray:
 def madland_nix(e_out, efl: float, efh: float, tm: float) -> np.ndarray:
     """LF=12, the Madland-Nix spectrum: normalised to 1 over ``[0, inf)``.
 
-    ``f(E') = [g(E', EFL) + g(E', EFH)] / 2`` -- the light and the heavy
+    ``f(E') = [g(E', EFL) + g(E', EFH)] / 2``: the light and the heavy
     fragment, each a triangular distribution of temperatures up to ``T_M``.
-    Zero for a non-positive ``T_M`` or fragment energy.
+
+    Parameters
+    ----------
+    e_out : array_like
+        Outgoing energies ``E'``, in the unit of *efl*. Negative values give zero.
+    efl, efh
+        The average kinetic energy per nucleon of the light and the heavy fragment
+        (``EFL`` and ``EFH`` of ENDF-6), in the unit of *e_out*.
+    tm
+        The maximum temperature ``T_M``, in the unit of *e_out*. The result is
+        zero everywhere when any of *tm*, *efl* or *efh* is not positive.
+
+    Returns
+    -------
+    numpy.ndarray
+        The density at each of *e_out*, in the inverse unit of *e_out*, as a float
+        array of the same shape.
     """
     e_out = np.asarray(e_out, dtype=float)
     if tm <= 0.0 or efl <= 0.0 or efh <= 0.0:
@@ -138,8 +244,19 @@ def madland_nix(e_out, efl: float, efh: float, tm: float) -> np.ndarray:
 def madland_nix_mean(efl: float, efh: float, tm: float) -> float:
     """``<E'>`` of :func:`madland_nix`: ``(EFL + EFH)/2 + 4/3 T_M``.
 
-    The closed form of the first moment, independent of the density above --
-    which is what makes it a check on it rather than a restatement.
+    The closed form of the first moment. It does not use the density, so it
+    serves as a check on it.
+
+    Parameters
+    ----------
+    efl, efh, tm
+        As in :func:`madland_nix`.
+
+    Returns
+    -------
+    float
+        The mean outgoing energy, in the unit of the arguments. No argument is
+        validated: the formula is applied as written.
     """
     return 0.5 * (efl + efh) + 4.0 * tm / 3.0
 
@@ -150,5 +267,18 @@ def madland_nix_upper(efh: float, tm: float, decades: float = 30.0) -> float:
     The tail falls like ``exp(-u1)`` with ``u1 = (sqrt(E') - sqrt(EFH))^2/T_M``,
     so ``u1 = decades * ln 10`` puts the density ~``10**-decades`` below its
     peak scale. Only a grid choice: the law has no upper bound of its own.
+
+    Parameters
+    ----------
+    efh, tm
+        As in :func:`madland_nix`.
+    decades
+        How many powers of ten the tail has fallen by at the returned energy.
+
+    Returns
+    -------
+    float
+        The energy ``(sqrt(efh) + sqrt(decades ln(10) tm))^2``, in the unit of
+        *efh*.
     """
     return (math.sqrt(efh) + math.sqrt(decades * math.log(10.0) * tm)) ** 2

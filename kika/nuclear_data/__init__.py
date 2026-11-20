@@ -1,7 +1,7 @@
 """Format-agnostic canonical representations of nuclear data.
 
 **These classes are deprecated.** kika's canonical model is
-:mod:`kika.nuclear_data.model`, which is shaped and named after GNDS-2.1. The
+``kika.nuclear_data.model``, which is shaped and named after GNDS-2.1. The
 four classes here — ``CrossSection``, ``AngularDistribution``,
 ``ResonanceParameters``, ``NuclideInfo`` — are now **façades** over it: their
 fields, their order, their defaults and their signatures are exactly what they
@@ -9,15 +9,14 @@ were, and their bodies read the file through the model. They are scheduled for
 removal in kika-nd 1.0.
 
 Three of the four route their ``from_endf`` through
-``kika.endf.model_adapter``. ``CrossSection`` does not, and the reason is
-measured rather than preferred: a model round trip in its constructor costs 2.5x
-and the legacy reconstructor (removed 2026-10-08) built one per MT per call,
-which the cluster ran per sample per temperature. It exposes :meth:`CrossSection.to_model`
-instead, so a caller who wants the model pays for it at the point of asking.
+``kika.endf.model_adapter``. ``CrossSection`` does not: a model round trip in
+its constructor costs 2.5x. It exposes
+:meth:`CrossSection.to_model`, so a caller who wants the model pays for it at the
+point of asking.
 
 **Nothing is imported until it is used.** The names below resolve through a
 module-level ``__getattr__`` (PEP 562), so ``import kika`` — which reaches this
-package eagerly via ``kika/__init__.py`` — no longer loads four modules and
+package eagerly via ``kika/__init__.py`` — does not load four modules and
 their numpy-heavy dependencies for callers that never touch them. The
 deprecation warning fires **once per name, on first access**: not per instance,
 which would put the ``warnings`` registry on the reconstruction hot path and
