@@ -56,15 +56,62 @@ def read_sdf(
     *,
     uncertainty_convention: Literal["absolute", "relative"] = "absolute",
 ) -> SDFData:
-    """Parse an SDF file returning an ``SDFData`` instance.
+    """Read an SDF file into an :class:`~kika.sensitivities.sdf.SDFData`.
+
+    Reads the SCALE layout in both of its dialects: the verbose one (TSUNAMI-3D), where
+    each profile has two metadata lines, five scalars, the sensitivities and their
+    uncertainties; and the compact one (TSUNAMI-1D), where each profile has one summary
+    line and the sensitivities only. Sensitivities are kept as written, per group.
+    Reading stops after the number of profiles of the third line, so a trailing
+    footer is ignored.
+
+    - Energies are written descending; the result is **ascending**. A file is taken as
+      in **eV** and divided by ``1e6`` to MeV, except a historical KIKA file (the title
+      line ends in ``MCNP to SCALE sdf <N>gr``), whose energies are taken as MeV.
+    - The response line is ``<r0> +/- <e0>`` with any text after; a file with no ``+/-``
+      gives ``e0 = 0.0``, not None. ``e0`` is stored as an absolute standard deviation.
+    - In the compact dialect there is no error block: ``error`` is all zeros and
+      ``error_known`` is False, with ``region`` 0 and ``unit`` from the header. In the
+      verbose one ``unit`` and ``region`` are the two integers of the first metadata
+      line.
+    - The five scalars of a verbose profile are recomputed from the groups and compared
+      with the stored ones; a discrepancy is logged as a warning (with file, ZAID and
+      MT) and nothing is raised. The groups are what is kept.
+    - The energy label of the result is the pair of numbers ``d.ddde+XX_d.ddde+XX`` in
+      the file name when it has one, otherwise the first and last boundary in MeV
+      formatted ``.2E`` and joined by ``_``.
 
     Parameters
     ----------
-    path : str
-        Path to SDF file.
+    path
+        File to read.
     uncertainty_convention : {"absolute", "relative"}
-        SCALE uses absolute standard deviations; "relative" supports files
-        written by historical KIKA versions.
+        How the uncertainties of the file are written. ``"absolute"`` (SCALE) takes
+        them, and ``e0``, as standard deviations. ``"relative"`` takes them as
+        fractions of the value, for files that historical KIKA versions wrote, and
+        stores ``|sensitivity| * uncertainty`` (and ``|r0| * e0``), with the
+        uncertainty as written in the file. Reading a historical KIKA file as
+        ``"absolute"`` is an error.
+
+    Returns
+    -------
+    ~kika.sensitivities.sdf.SDFData
+        With the title (the first line, without the historical suffix), ``r0`` and
+        ``e0``, the ascending grid in MeV, and one
+        :class:`~kika.sensitivities.sdf.SDFReactionData` per profile in file order,
+        with absolute uncertainties.
+
+    Raises
+    ------
+    FileNotFoundError
+        If *path* is not a file.
+    ValueError
+        If *uncertainty_convention* is not one of the two; the file is empty or lacks
+        or garbles a required line (groups, profiles, response, energy boundaries, a
+        profile header or its metadata and scalar lines); a count of numbers does not
+        match the groups or the profiles; or the file has the historical KIKA header and
+        *uncertainty_convention* is ``"absolute"``. The checks of
+        :class:`~kika.sensitivities.sdf.SDFData` also apply.
     """
     if uncertainty_convention not in {"absolute", "relative"}:
         raise ValueError("uncertainty_convention must be 'absolute' or 'relative'")
@@ -379,7 +426,30 @@ def read_sdf(
 
 
 def roundtrip_equal(path: str, tmp_dir: Optional[str] = None) -> bool:
-    """Return whether parse/write preserves the normalized SDF values."""
+    """Whether reading a file, writing it and reading it back gives the same values.
+
+    The file is read (as the historical KIKA dialect when its title line carries the
+    ``MCNP to SCALE sdf`` header, otherwise as SCALE), written with
+    :meth:`~kika.sensitivities.sdf.SDFData.write_file`, and read again. Profiles are
+    matched by ZAID, MT, unit and region, and compared with a relative tolerance of
+    ``1e-6`` (absolute ``1e-12`` for the sensitivities and uncertainties); the energy
+    grid, ``r0`` and ``e0`` with a relative ``1e-6`` and numpy's default absolute
+    tolerance. The title and the energy label are not compared.
+
+    Parameters
+    ----------
+    path
+        File to test.
+    tmp_dir : str, optional
+        Directory the copy is written to. None makes a new temporary directory, which
+        is not removed.
+
+    Returns
+    -------
+    bool
+        False when the written file is not found, the profile counts differ or a
+        value differs; True otherwise.
+    """
     import tempfile
 
     first_line = Path(path).read_text(encoding="utf-8").splitlines()[0]

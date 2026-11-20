@@ -22,7 +22,26 @@ def _validated_vector(values: Iterable[float], name: str, size: int) -> np.ndarr
 
 @dataclass
 class SensitivityReaction:
-    """One format-neutral multigroup sensitivity profile."""
+    """The groupwise sensitivities of one nuclide and reaction, with their uncertainty.
+
+    Built by hand, or taken from :attr:`SensitivityProfile.reactions`. It is not
+    checked until a :class:`SensitivityProfile` is made from it.
+
+    Attributes
+    ----------
+    zaid : int
+        ZAID of the nuclide.
+    mt : int
+        MT reaction number.
+    sensitivity : numpy.ndarray
+        Relative sensitivity of each group, per group (not per unit lethargy), in the
+        ascending order of the profile's grid.
+    uncertainty : numpy.ndarray, optional
+        **Absolute** one-sigma standard deviation of each group, non-negative. None
+        means the uncertainty is unknown, which is not the same as zero.
+    label : str, optional
+        Free label, for example the reaction name.
+    """
 
     zaid: int
     mt: int
@@ -31,6 +50,24 @@ class SensitivityReaction:
     label: Optional[str] = None
 
     def validated(self, n_groups: int) -> "SensitivityReaction":
+        """A checked copy, with float arrays of ``n_groups`` finite values.
+
+        Parameters
+        ----------
+        n_groups
+            Number of groups the arrays must have.
+
+        Returns
+        -------
+        SensitivityReaction
+            With ``zaid`` and ``mt`` as integers and copies of the arrays.
+
+        Raises
+        ------
+        ValueError
+            If *sensitivity* or *uncertainty* is not a one-dimensional vector of
+            ``n_groups`` finite values, or *uncertainty* has a negative value.
+        """
         sensitivity = _validated_vector(self.sensitivity, "sensitivity", n_groups)
         uncertainty = None
         if self.uncertainty is not None:
@@ -47,15 +84,48 @@ class SensitivityReaction:
 
     @property
     def key(self) -> Tuple[int, int]:
+        """The pair ``(zaid, mt)`` that names the profile within a profile."""
         return self.zaid, self.mt
 
 
 @dataclass
 class SensitivityProfile:
-    """Validated sensitivity data independent of SDF or database storage.
+    """Validated sensitivity profiles on one ascending energy grid.
 
-    Sensitivities are dimensionless relative coefficients. ``uncertainty`` is
-    the absolute one-sigma uncertainty on each sensitivity coefficient.
+    A user gets one from
+    :meth:`~kika.sensitivities.sdf.SDFData.to_sensitivity_profile` or builds one by
+    hand. Sensitivities are dimensionless relative coefficients, per group, and
+    ``uncertainty`` is the absolute one-sigma uncertainty on each of them.
+    :func:`~kika.sensitivities.condensation.condense_sensitivity_profile` coarsens the
+    grid.
+    Construction checks everything below and stores copies.
+
+    Attributes
+    ----------
+    energy_grid : numpy.ndarray
+        Group boundaries in *energy_unit*, ``n + 1`` finite, non-negative values,
+        strictly increasing.
+    reactions : tuple of SensitivityReaction
+        Validated profiles, each with ``n`` values, and no two with the same
+        ``(zaid, mt)``.
+    energy_unit : {"eV", "MeV"}
+        Unit of *energy_grid*.
+    response : float, optional
+        The response the sensitivities refer to, such as k-eff. Finite when given.
+    response_uncertainty : float, optional
+        **Absolute** one-sigma uncertainty of *response*, finite and non-negative.
+    label : str, optional
+        Free label.
+    metadata : mapping
+        Free information, copied to a ``dict``.
+
+    Raises
+    ------
+    ValueError
+        If *energy_grid* is not a one-dimensional strictly increasing grid of at
+        least two finite, non-negative values; *energy_unit* is not ``"eV"`` or
+        ``"MeV"``; a profile fails :meth:`SensitivityReaction.validated`; two profiles
+        share ``(zaid, mt)``; or *response* or *response_uncertainty* is not valid.
     """
 
     energy_grid: np.ndarray
@@ -96,13 +166,32 @@ class SensitivityProfile:
 
     @property
     def n_groups(self) -> int:
+        """Number of energy groups, one fewer than the boundaries of ``energy_grid``."""
         return len(self.energy_grid) - 1
 
     @property
     def reaction_map(self) -> Dict[Tuple[int, int], SensitivityReaction]:
+        """The profiles keyed by ``(zaid, mt)``, built anew at each access."""
         return {reaction.key: reaction for reaction in self.reactions}
 
     def grid_in(self, unit: EnergyUnit) -> np.ndarray:
+        """The group boundaries in *unit*, as a new array.
+
+        Parameters
+        ----------
+        unit : {"eV", "MeV"}
+            Unit to convert to, by a factor of ``1e6``.
+
+        Returns
+        -------
+        numpy.ndarray
+            ``n + 1`` boundaries, ascending.
+
+        Raises
+        ------
+        ValueError
+            If *unit* is not ``"eV"`` or ``"MeV"``.
+        """
         if unit not in ("eV", "MeV"):
             raise ValueError("unit must be 'eV' or 'MeV'")
         if unit == self.energy_unit:
