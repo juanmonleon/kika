@@ -21,6 +21,14 @@ Perturbing from the model
 .. autoclass:: kika.sampling.model_perturbation.HDF5Options
    :members:
 
+.. autoclass:: kika.sampling.run_log.RunLog
+   :members:
+
+.. autoexception:: kika.sampling.run_log.RunCancelled
+
+.. autoclass:: kika.sampling.perturbation_set.PerturbationSet
+   :members:
+
 Applying factors to model nodes
 -------------------------------
 

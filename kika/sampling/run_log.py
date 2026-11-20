@@ -61,7 +61,9 @@ class RunCancelled(Exception):
     """Raised by whoever drives a run to stop it at the next event.
 
     The run records a ``cancelled`` event, not an ``error``, and still writes
-    its log and report.
+    its log and report. Nothing in kika raises it by itself: a caller raises it,
+    for instance from the ``logger`` given to ``RunLog``, whose methods the log
+    calls on every event, and it propagates out of ``perturbFromModel``.
     """
 
 
@@ -155,7 +157,22 @@ class RunLog:
     logger
         An optional ``logging.Logger`` (or anything with ``info``/``warning``/
         ``error``). Every event is forwarded to it as its rendered line, so
-        the old interface keeps working for a caller that has one.
+        the old interface keeps working for a caller that has one. An
+        exception raised by the logger propagates out of the call that
+        recorded the event.
+    label
+        A name for the run (``perturbFromModel`` passes its ``labelPrefix``).
+        It is kept on the ``label`` attribute. The default is an empty string.
+
+    Attributes
+    ----------
+    events : list
+        The recorded ``Event`` objects, in order. An ``Event`` has ``kind``,
+        ``message``, ``at`` (ISO 8601 time), ``level``, ``subject``, ``sample``,
+        ``seconds`` and ``payload``.
+    stage : str or None
+        The stage under way: set by ``timed``, and by the pipeline between
+        timed blocks, so an exception raised outside one still says where.
     """
 
     def __init__(self, logger=None, *, label: str = "") -> None:
@@ -174,6 +191,40 @@ class RunLog:
     def event(self, kind: str, message: str, *, subject: Optional[str] = None,
               sample: Optional[int] = None, seconds: Optional[float] = None,
               level: str = "info", **payload) -> Event:
+        """Record one event and forward it to the logger, if any.
+
+        Parameters
+        ----------
+        kind
+            One of ``EVENT_KINDS``.
+        message
+            The text of the event.
+        subject
+            What the event is about (a block, a file); stored as a string.
+        sample
+            The sample number the event concerns.
+        seconds
+            How long the thing took, in seconds.
+        level
+            ``"info"``, ``"warning"`` or ``"error"``. For the kinds
+            ``"warning"`` and ``"error"`` an ``"info"`` level becomes that kind.
+        **payload
+            The numbers and names the event carries. They stay as given in
+            memory; ``to_dicts`` and ``write`` convert them to JSON (NumPy
+            values and arrays become Python ones, paths become strings, other
+            objects their ``str``).
+
+        Returns
+        -------
+        Event
+            The recorded event.
+
+        Raises
+        ------
+        ValueError
+            If *kind* is not in ``EVENT_KINDS`` or *level* is not one of the
+            three above.
+        """
         if kind not in EVENT_KINDS:
             raise ValueError(f"unknown event kind {kind!r}; known: {EVENT_KINDS}")
         if level not in LEVELS:
@@ -188,13 +239,52 @@ class RunLog:
         return event
 
     def note(self, message: str, **payload) -> Event:
+        """Record a ``"note"`` event: something true of the run that no file states.
+
+        Parameters
+        ----------
+        message
+            The text of the note.
+        **payload
+            Carried by the event, as in ``event``. A ``subject`` or ``sample``
+            keyword is passed on as such.
+
+        Returns
+        -------
+        Event
+            The recorded event.
+        """
         return self.event("note", message, **payload)
 
     def warning(self, message: str, *, subject=None, sample=None, **payload) -> Event:
+        """Record a ``"warning"`` event, at level ``"warning"``.
+
+        Parameters
+        ----------
+        message, subject, sample, **payload
+            As in ``event``.
+
+        Returns
+        -------
+        Event
+            The recorded event.
+        """
         return self.event("warning", message, subject=subject, sample=sample,
                           level="warning", **payload)
 
     def error(self, message: str, *, subject=None, sample=None, **payload) -> Event:
+        """Record an ``"error"`` event, at level ``"error"``. It does not raise.
+
+        Parameters
+        ----------
+        message, subject, sample, **payload
+            As in ``event``.
+
+        Returns
+        -------
+        Event
+            The recorded event.
+        """
         return self.event("error", message, subject=subject, sample=sample,
                           level="error", **payload)
 
@@ -206,7 +296,28 @@ class RunLog:
         Yields a dict the caller may fill with payload as it learns things;
         whatever is in it at exit is recorded. An exception inside becomes an
         ``error`` event naming the stage and is re-raised, so a run that died
-        says where.
+        says where. A ``RunCancelled`` is re-raised with no error event. The
+        ``stage`` attribute is set to *kind* on entry.
+
+        Parameters
+        ----------
+        kind, message, subject, sample
+            As in ``event``; the event is recorded at the end of the block with
+            ``seconds`` set to the time the block took.
+        **payload
+            Carried by the event, together with what the block put in the
+            yielded dict.
+
+        Yields
+        ------
+        dict
+            Initially empty; its entries join the event's payload.
+
+        Raises
+        ------
+        ValueError
+            If *kind* is not in ``EVENT_KINDS`` (when the block finishes without
+            an exception).
         """
         extra: Dict[str, Any] = {}
         self.stage = kind
@@ -229,8 +340,12 @@ class RunLog:
 
         A worker process keeps its own :class:`RunLog` and sends the events
         back; they are appended here with their own timestamps and forwarded
-        to the logger like anything recorded directly. Accepts
-        :class:`Event` objects or their ``to_dict`` form.
+        to the logger like anything recorded directly.
+
+        Parameters
+        ----------
+        events
+            An iterable of ``Event`` objects or of their ``to_dict`` form.
         """
         for item in events:
             event = item if isinstance(item, Event) else Event.from_dict(item)
@@ -259,6 +374,18 @@ class RunLog:
         return len(self.events)
 
     def of(self, kind: str) -> List[Event]:
+        """The events of one kind, in order; empty when there are none.
+
+        Parameters
+        ----------
+        kind
+            The ``kind`` to select (not validated).
+
+        Returns
+        -------
+        list
+            The matching ``Event`` objects.
+        """
         return [event for event in self.events if event.kind == kind]
 
     def problems(self) -> List[Event]:
@@ -267,9 +394,18 @@ class RunLog:
 
     @property
     def elapsed(self) -> float:
+        """Seconds since the log was created (wall clock, not the sum of events)."""
         return time.perf_counter() - self._started
 
     def summary(self) -> str:
+        """One line: the number of events, the count of each kind, and the problems.
+
+        Returns
+        -------
+        str
+            ``"N event(s): <count> <kind>, ..."``, with ``"; M warning(s)/error(s)"``
+            appended when some event is not at level ``"info"``.
+        """
         counts: Dict[str, int] = {}
         for event in self.events:
             counts[event.kind] = counts.get(event.kind, 0) + 1
@@ -285,6 +421,11 @@ class RunLog:
     # ------------------------------------------------------------------
 
     def to_dicts(self) -> List[Dict[str, Any]]:
+        """Every event as a JSON-ready dict, in order (what ``write`` puts in the log).
+
+        Each dict has the keys ``kind``, ``level``, ``at``, ``sample``,
+        ``subject``, ``seconds``, ``message`` and ``payload``.
+        """
         return [event.to_dict() for event in self.events]
 
     # ------------------------------------------------------------------
@@ -316,7 +457,10 @@ class RunLog:
         return head
 
     def report(self):
-        """The run's report (:class:`~kika.sampling.run_report.PerturbationReport`)."""
+        """The run's report, a ``PerturbationReport`` built from the events.
+
+        Its ``to_html`` renders the page that ``write`` saves as ``report.html``.
+        """
         from kika.sampling.run_report import PerturbationReport
 
         return PerturbationReport.from_log(self)
@@ -326,6 +470,20 @@ class RunLog:
 
         The events are written first: a report that cannot be rendered must not
         cost the run its log, so a rendering failure leaves a page that says so.
+        Existing files of those names are overwritten.
+
+        Parameters
+        ----------
+        directory
+            Where to write; created when missing.
+        stem
+            The log file is ``<stem>.log.jsonl``; the page is always
+            ``report.html``.
+
+        Returns
+        -------
+        tuple of pathlib.Path
+            ``(log path, report path)``.
         """
         directory = Path(directory)
         directory.mkdir(parents=True, exist_ok=True)
@@ -349,7 +507,19 @@ class RunLog:
 
     @classmethod
     def read(cls, path) -> "RunLog":
-        """A log back from its ``.jsonl``."""
+        """A log back from its ``.jsonl``.
+
+        Parameters
+        ----------
+        path
+            A log file written by ``write``. Blank lines are skipped.
+
+        Returns
+        -------
+        RunLog
+            A new log with the file's events. Its ``label`` is empty and it has
+            no logger.
+        """
         log = cls()
         for line in Path(path).read_text(encoding="utf-8").splitlines():
             if line.strip():

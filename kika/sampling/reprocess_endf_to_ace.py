@@ -414,29 +414,31 @@ def reprocess_endf_to_ace(
 
     Examples
     --------
-    # Process Fe-56 samples at a single temperature
-    reprocess_endf_to_ace(
-        output_dir="/path/to/output",
-        zaid=260560,
-        num_samples=100,
-        base_filename="260560",
-        temperatures=600.0,
-        njoy_exe="/usr/local/bin/njoy",
-        library_name="endfb81"
-    )
-    
-    # Process JEFF-4.0 library files (extensions are ignored)
-    reprocess_endf_to_ace(
-        output_dir="/path/to/output",
-        zaid=260560,
-        num_samples=50,
-        base_filename="jeff40_260560",
-        temperatures=[300.0, 600.0, 900.0],
-        njoy_exe="/usr/local/bin/njoy",
-        library_name="jeff40",
-        nprocs=4,
-        skip_existing=True
-    )
+    Process Fe-56 samples at a single temperature::
+
+        reprocess_endf_to_ace(
+            output_dir="/path/to/output",
+            zaid=260560,
+            num_samples=100,
+            base_filename="260560",
+            temperatures=600.0,
+            njoy_exe="/usr/local/bin/njoy",
+            library_name="endfb81"
+        )
+
+    Process JEFF-4.0 library files (extensions are ignored)::
+
+        reprocess_endf_to_ace(
+            output_dir="/path/to/output",
+            zaid=260560,
+            num_samples=50,
+            base_filename="jeff40_260560",
+            temperatures=[300.0, 600.0, 900.0],
+            njoy_exe="/usr/local/bin/njoy",
+            library_name="jeff40",
+            nprocs=4,
+            skip_existing=True
+        )
     """
     global _logger
     
