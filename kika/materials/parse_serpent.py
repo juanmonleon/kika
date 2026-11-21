@@ -13,6 +13,7 @@ Density convention:
     - ``sum``: density calculated from isotope fractions
 """
 
+import math
 import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
@@ -30,6 +31,32 @@ def _strip_comment(line: str) -> str:
     if idx >= 0:
         return line[:idx]
     return line
+
+
+def _uncommented(lines: List[str]) -> List[str]:
+    """*lines* with ``%`` comments and ``/* ... */`` blocks blanked, one line for one line."""
+    out = []
+    in_block = False
+    for line in lines:
+        kept = ""
+        rest = line
+        while rest:
+            if in_block:
+                end = rest.find("*/")
+                if end < 0:
+                    rest = ""
+                else:
+                    rest, in_block = rest[end + 2:], False
+                continue
+            comment, block = rest.find("%"), rest.find("/*")
+            if block < 0 or (0 <= comment < block):
+                kept += _strip_comment(rest)
+                rest = ""
+            else:
+                kept += rest[:block] + " "
+                rest, in_block = rest[block + 2:], True
+        out.append(kept)
+    return out
 
 
 def _tokens_from(lines: List[str], start_index: int):
@@ -117,7 +144,7 @@ def _read_serpent_material(
             name, raw = take(2)
             zaid, lib_suffix = _nuclide(name)
             raw_fraction = float(raw)
-            current_type = "wo" if raw_fraction < 0.0 else "ao"
+            current_type = "wo" if math.copysign(1.0, raw_fraction) < 0 else "ao"  # -0.0 is a weight fraction
             if fraction_type is None:
                 fraction_type = current_type
             elif fraction_type != current_type:
@@ -140,7 +167,7 @@ def _read_serpent_material(
 
 
 # Number of arguments of each option of the mat card; moder takes one pair per use.
-_OPTION_ARGS = {"tmp": 1, "tms": 1, "ettm": 1, "burn": 1, "vol": 1, "coeft": 1,
+_OPTION_ARGS = {"tmp": 1, "tms": 1, "ettm": 1, "burn": 1, "vol": 1, "mass": 1, "coeft": 1,
                 "coefs": 1, "tft": 2, "fix": 2, "moder": 2, "rgb": 3}
 
 
@@ -151,7 +178,7 @@ def _set_option(material: Material, key: str, args: List[str]) -> None:
         material.metadata["tms"] = float(args[0])
     elif key == "burn":
         material.metadata["burn"] = int(float(args[0]))
-    elif key in ("vol", "coeft"):
+    elif key in ("vol", "mass", "coeft"):
         material.metadata[key] = float(args[0])
     elif key == "coefs":
         material.metadata["coefs"] = args[0]
@@ -178,19 +205,18 @@ def _find_material_spans(
     Used by ``write_to_serpent`` for targeted replacement.
     """
     spans: List[Tuple[str, int, int]] = []
+    lines = _uncommented(lines)
     i = 0
     while i < len(lines):
-        stripped = _strip_comment(lines[i]).strip()
+        stripped = lines[i].strip()
         if not stripped:
             i += 1
             continue
         tokens = stripped.split()
-        if tokens[0].lower() == "mat" and len(tokens) >= 3:
-            mat_name = tokens[1]
+        if tokens[0].lower() == "mat":
             start = i
-            # Find where this material ends
-            _, end = _read_serpent_material(lines, i, mat_id=0)
-            spans.append((mat_name, start, end))
+            material, end = _read_serpent_material(lines, i, mat_id=0)
+            spans.append((material.name, start, end))
             i = end
         else:
             i += 1
@@ -210,8 +236,9 @@ def read_serpent_materials(
     ``metadata["serpent_density_sum"] = True``.
 
     A card runs, across lines, from ``mat`` to the first token that is neither one
-    of its options (``tmp``, ``tms``, ``ettm``, ``burn``, ``vol``, ``coeft``,
-    ``coefs``, ``tft``, ``fix``, ``moder``, ``rgb``) nor a nuclide and its fraction.
+    of its options (``tmp``, ``tms``, ``ettm``, ``burn``, ``vol``, ``mass``,
+    ``coeft``, ``coefs``, ``tft``, ``fix``, ``moder``, ``rgb``) nor a nuclide and its
+    fraction. ``%`` comments and ``/* ... */`` blocks are skipped.
     Nuclides are named ``92235.09c`` or ``U-235.09c``; a symbolic name is kept as
     its ZAID. Options that :meth:`~kika.materials.Material.to_serpent` does not
     write back are listed in the material's ``report``.
@@ -239,18 +266,19 @@ def read_serpent_materials(
     else:
         lines = list(source)
 
+    lines = _uncommented(lines)
     collection = MaterialCollection()
     mat_id = 1
     i = 0
 
     while i < len(lines):
-        stripped = _strip_comment(lines[i]).strip()
+        stripped = lines[i].strip()
         if not stripped:
             i += 1
             continue
 
         tokens = stripped.split()
-        if tokens[0].lower() == "mat" and len(tokens) >= 3:
+        if tokens[0].lower() == "mat":
             material, next_i = _read_serpent_material(lines, i, mat_id)
             collection.add_material(material)
             mat_id += 1

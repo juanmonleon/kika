@@ -86,3 +86,19 @@ def test_the_report_reads_a_serpent_xsdata_and_finds_name_clashes(tmp_path):
     assert all(m["status"] == "Failed" for m in report.materials)
     with pytest.raises(ValueError, match="cool_ant"):
         collection.to_serpent()
+
+
+def test_a_zero_weight_fraction_reads_back_as_a_weight_fraction():
+    material = Material(id=1)
+    material.add_nuclide("U235", 0.0, "wo")
+    material.add_nuclide("U238", 1.0, "wo")
+    material.set_density(19.0, "g/cc")
+    assert "-0.0" in material.to_mcnp() and "-0.0" in material.to_serpent()
+
+
+def test_a_material_that_cannot_be_written_fails_in_the_report_without_stopping_it():
+    collection = MaterialCollection({1: water(density=None, density_unit=None), 2: water(id=2)})
+    report = collection.emission_report("serpent")
+    assert [m["status"] for m in report.materials] == ["Failed", "Warning"]
+    assert "no density" in report.materials[0]["losses"][0]
+    assert [] not in collection

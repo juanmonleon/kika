@@ -1,3 +1,4 @@
+import math
 import re
 from typing import List, Optional, Tuple
 
@@ -215,7 +216,7 @@ def read_material(lines: List[str], start_index: int) -> Tuple[Optional[Material
             raise ValueError(
                 f"Material {material_id}: '{tok}' is neither a keyword nor a ZAID followed by its fraction"
             ) from None
-        current_type = "wo" if raw_fraction < 0.0 else "ao"
+        current_type = "wo" if math.copysign(1.0, raw_fraction) < 0 else "ao"  # -0.0 is a weight fraction
         if fraction_type is None:
             fraction_type = current_type
         elif fraction_type != current_type:

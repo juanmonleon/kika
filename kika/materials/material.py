@@ -669,6 +669,7 @@ class Material:
             raise ValueError(f"Unsupported density unit '{unit}'. Use 'g/cc', 'kg/m3', or 'atoms/b-cm'.")
         self.density = float(density)
         self.density_unit = normalized_unit
+        self.metadata.pop("serpent_density_sum", None)
 
     def set_temperature(self, temperature: float) -> None:
         """Set the material temperature in Kelvin.
@@ -1145,6 +1146,8 @@ class Material:
             mat_line += f" burn {self.metadata['burn']}"
         if self.metadata.get("vol") is not None:
             mat_line += f" vol {_num(self.metadata['vol'])}"
+        if self.metadata.get("mass") is not None:
+            mat_line += f" mass {_num(self.metadata['mass'])}"
         if self.metadata.get("fix") is not None:
             fix_id, fix_t = self.metadata["fix"]
             mat_line += f" fix {fix_id} {_num(fix_t)}"
@@ -1264,7 +1267,7 @@ class Material:
         """
         code = code.lower()
         losses = []
-        serpent_options = [k for k in ("rgb", "tms", "tft", "moder", "burn", "vol", "fix", "coefs", "coeft")
+        serpent_options = [k for k in ("rgb", "tms", "tft", "moder", "burn", "vol", "mass", "fix", "coefs", "coeft")
                            if self.metadata.get(k) is not None]
         if code == "mcnp":
             # Density and temperature belong to MCNP's cells, not its m card: not a loss.
@@ -1691,7 +1694,13 @@ class MaterialCollection:
         report = EmissionReport(code=code, library=str(library) if library is not None else None,
                                 clashes=clashes)
         for material in self.by_id.values():
-            getattr(material, f"to_{code}")()
+            try:
+                getattr(material, f"to_{code}")()
+            except ValueError as exc:
+                report.materials.append({"id": material.id, "name": material.name, "status": "Failed",
+                                         "losses": [f"not written: {exc}"], "missing": [],
+                                         "no_library": [], "read": []})
+                continue
             asked = material.library_tables(code)
             missing = [[s, t] for s, t in asked if t and tables is not None and t.lower() not in tables]
             no_library = sorted({s for s, t in asked if t is None})
@@ -1999,8 +2008,9 @@ class MaterialCollection:
                          output_filepath: Optional[str] = None) -> None:
         """Update materials in a Serpent input file.
 
-        Reads the original file, replaces material definitions with updated
-        versions, and preserves all non-material content.
+        Reads the original file, replaces each ``mat`` card whose name is the
+        :attr:`Material.serpent_name` of a material here, and preserves all other
+        content byte for byte.
 
         Parameters
         ----------
@@ -2018,7 +2028,7 @@ class MaterialCollection:
         eol = _line_ending(lines)
 
         spans = _find_material_spans(lines)
-        name_to_mat = self.by_name
+        name_to_mat = {material.serpent_name: material for material in self.by_id.values()}
 
         # Process in reverse to maintain line positions
         for mat_name, start, end in reversed(spans):
@@ -2040,6 +2050,6 @@ class MaterialCollection:
     def __contains__(self, key: Union[int, str]) -> bool:
         try:
             self[key]
-        except KeyError:
+        except (KeyError, TypeError):
             return False
         return True

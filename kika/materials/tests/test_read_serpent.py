@@ -48,3 +48,29 @@ def test_write_to_serpent_keeps_what_follows_the_material(tmp_path):
     data = path.read_bytes()
     assert b"% next: the geometry\r\n\r\nsurf 1 sph 0 0 0 10\r\n" in data
     assert data.count(b"\n") == data.count(b"\r\n")
+
+
+def test_block_comments_mass_and_a_card_split_across_lines():
+    lines = ["/* fuel pin", "mat fuel -1.0 */", "mat fuel", "  -10.4 mass 12.5 % grams",
+             "92235.09c /* enriched */ -0.04", "92238.09c -0.96"]
+    fuel = read_serpent_materials(lines).by_name["fuel"]
+    assert fuel.metadata["mass"] == 12.5 and fuel.density == 10.4
+    assert sorted(fuel.nuclide.keys()) == ["U235", "U238"]
+    assert " mass 12.5" in fuel.to_serpent()
+
+
+def test_write_to_serpent_finds_a_material_by_its_card_name(tmp_path):
+    from kika.materials import Material
+
+    path = tmp_path / "input"
+    path.write_text("mat cool_ant -1.0\n1001.09c 1\n")
+    material = Material(id=1, name="cool ant", density=1.0, density_unit="g/cc")
+    material.add_nuclide("H1", 2.0, "ao", library="09c")
+    MaterialCollection({1: material}).write_to_serpent(str(path))
+    assert "1001.09c" in path.read_text() and "2.0" in path.read_text()
+
+
+def test_setting_a_density_replaces_sum():
+    material = read_serpent_materials(["mat f sum", "1001.09c 1"]).by_name["f"]
+    material.set_density(0.5, "g/cc")
+    assert material.to_serpent().startswith("mat f -0.5")
