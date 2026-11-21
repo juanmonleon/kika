@@ -231,7 +231,7 @@ def _reactions(dosimeters: List[Dosimeter]) -> Dict[str, Dosimeter]:
 
 
 def _definiteness(label: str, matrix: np.ndarray):
-    """A note when *matrix* is negative only by round-off; a ValueError when it is not positive semi-definite."""
+    """``(smallest, largest)`` when *matrix* is negative only by round-off; a ValueError when it is not positive semi-definite."""
     if matrix.size == 0:
         return None
     eigenvalues = np.linalg.eigvalsh(matrix)
@@ -239,8 +239,7 @@ def _definiteness(label: str, matrix: np.ndarray):
     if smallest >= 0.0:
         return None
     if largest > 0.0 and -smallest / largest <= matrix.shape[0] * ROUNDOFF_RATIO:
-        return (f"The relative covariance of {label} has negative eigenvalues within round-off "
-                f"(smallest {smallest:.3g} against {largest:.3g}); it was used as it is.")
+        return smallest, largest
     raise ValueError(
         f"the relative covariance of {label} is not positive semi-definite: {int((eigenvalues < 0).sum())} "
         f"negative eigenvalues, the smallest {smallest:.3g} against a largest of {largest:.3g}. Repair it "
@@ -265,8 +264,14 @@ class _Layout:
         self.size = start
         self.prior_covariance = block_diag(*blocks)
         labels = ["the prior spectrum"] + [name for name in reactions if name in self.slices]
-        self.notes = tuple(note for note in (_definiteness(label, block) for label, block in zip(labels, blocks))
-                           if note)
+        rounded = [(label, found) for label, found in ((label, _definiteness(label, block))
+                                                       for label, block in zip(labels, blocks)) if found]
+        self.notes = ()
+        if rounded:
+            worst = max(-small / large for _, (small, large) in rounded)
+            self.notes = (f"{len(rounded)} of {len(blocks)} covariances have negative eigenvalues within "
+                          f"eigensolver round-off ({', '.join(label for label, _ in rounded)}); the largest "
+                          f"ratio to the largest eigenvalue is {worst:.2g}. They were used as they are.",)
 
 
 def _rates_and_jacobian(x, layout, n_groups, names, cells):
