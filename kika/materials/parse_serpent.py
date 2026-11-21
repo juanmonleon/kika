@@ -17,23 +17,11 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
-from .material import Material, MaterialCollection
-from .parse_mcnp import _parse_nuclide_token
+from .._utils import symbol_to_zaid
+from .material import Material, MaterialCollection, _symbol_of
 
 
-# Keywords that consume one or more arguments on the mat line
-_SINGLE_ARG_KEYWORDS = {"tmp", "tms", "ettm", "burn", "vol", "coeft"}
-_DOUBLE_ARG_KEYWORDS = {"tft", "fix"}
-_TRIPLE_ARG_KEYWORDS = {"rgb"}
-# moder consumes pairs: name ZA [name ZA ...]
-_MODER_KEYWORD = "moder"
-_COEFS_KEYWORD = "coefs"
-
-# Keywords that indicate we're still on the mat header (not nuclide data)
-_ALL_KEYWORDS = (
-    _SINGLE_ARG_KEYWORDS | _DOUBLE_ARG_KEYWORDS | _TRIPLE_ARG_KEYWORDS
-    | {_MODER_KEYWORD, _COEFS_KEYWORD}
-)
+_NUCLIDE_NAME = re.compile(r"^(\d+|[A-Za-z]{1,2}-\d+m?)(\.\w+)?$")
 
 
 def _strip_comment(line: str) -> str:
@@ -44,196 +32,142 @@ def _strip_comment(line: str) -> str:
     return line
 
 
-def _is_nuclide_line(tokens: List[str]) -> bool:
-    """Check if tokens represent a nuclide entry (zaid fraction)."""
-    if len(tokens) < 2:
-        return False
-    # First token should look like a ZAID (digits, optionally with .lib suffix)
-    first = tokens[0]
-    zaid_part = first.split(".")[0] if "." in first else first
+def _tokens_from(lines: List[str], start_index: int):
+    """``(token, line index)`` of every token from *start_index* on, comments removed."""
+    for i in range(start_index, len(lines)):
+        for token in _strip_comment(lines[i]).split():
+            yield token, i
+
+
+def _is_number(token: str) -> bool:
     try:
-        int(zaid_part)
-    except ValueError:
-        return False
-    # Second token should be a number
-    try:
-        float(tokens[1])
+        float(token)
     except ValueError:
         return False
     return True
 
 
+def _nuclide(name: str) -> Tuple[int, Optional[str]]:
+    """ZAID and library suffix of a Serpent nuclide name, ``92235.09c`` or ``U-235.09c``."""
+    base, _, lib = name.partition(".")
+    if not base.isdigit():
+        symbol, mass = base.split("-")
+        base = str(symbol_to_zaid(symbol.capitalize() + mass))
+    return int(base), lib or None
+
+
 def _read_serpent_material(
     lines: List[str], start_index: int, mat_id: int
 ) -> Tuple[Material, int]:
-    """Parse a single Serpent material card starting at *start_index*.
+    """Parse the Serpent ``mat`` card at *start_index*.
 
-    Parameters
-    ----------
-    lines : list of str
-        All lines from the input file (raw, with newlines).
-    start_index : int
-        Index of the line containing the ``mat`` keyword.
-    mat_id : int
-        Numeric ID to assign to the Material object.
+    The card runs, across lines, from ``mat`` to the first token that is neither one
+    of its options nor a nuclide followed by its fraction.
 
     Returns
     -------
     tuple of (Material, int)
-        Parsed Material and the index of the first line *after* this material.
+        Parsed Material and the index of the line after its last token.
     """
-    material = Material(id=mat_id)
+    stream = _tokens_from(lines, start_index)
+    tokens: List[Tuple[str, int]] = []
 
-    # Collect the mat header line (may span only one line in Serpent)
-    header_line = _strip_comment(lines[start_index]).strip()
-    tokens = header_line.split()
+    def peek(n: int) -> List[str]:
+        while len(tokens) < n:
+            nxt = next(stream, None)
+            if nxt is None:
+                break
+            tokens.append(nxt)
+        return [t for t, _ in tokens[:n]]
 
-    # tokens[0] == "mat", tokens[1] == name, tokens[2] == density
-    mat_name = tokens[1]
-    material.name = mat_name
-
-    # Parse density
-    density_token = tokens[2]
-    if density_token.lower() == "sum":
+    head = peek(3)
+    mat_name = head[1]
+    material = Material(id=mat_id, name=mat_name)
+    if head[2].lower() == "sum":
         material.metadata["serpent_density_sum"] = True
     else:
-        density_val = float(density_token)
+        density_val = float(head[2])
         if density_val < 0:
             material.set_density(abs(density_val), "g/cc")
         else:
             material.set_density(density_val, "atoms/b-cm")
+    pos = 3
+    last_line = tokens[2][1]
 
-    # Parse optional modifiers from the rest of the header tokens
-    idx = 3
-    while idx < len(tokens):
-        tok = tokens[idx].lower()
+    def take(n: int) -> List[str]:
+        nonlocal pos, last_line
+        got = peek(pos + n)[pos:pos + n]
+        if len(got) < n:
+            raise ValueError(f"Serpent material '{mat_name}': the input ends inside its card")
+        last_line = tokens[pos + n - 1][1]
+        pos += n
+        return got
 
-        if tok in _SINGLE_ARG_KEYWORDS:
-            if idx + 1 < len(tokens):
-                val = float(tokens[idx + 1])
-                if tok == "tmp":
-                    material.set_temperature(val)
-                elif tok in ("tms", "ettm"):
-                    material.metadata["tms"] = val
-                elif tok == "burn":
-                    material.metadata["burn"] = int(val)
-                elif tok == "vol":
-                    material.metadata["vol"] = val
-                elif tok == "coeft":
-                    material.metadata["coeft"] = val
-                idx += 2
-            else:
-                idx += 1
-            continue
-
-        if tok in _DOUBLE_ARG_KEYWORDS:
-            if idx + 2 < len(tokens):
-                val1 = tokens[idx + 1]
-                val2 = float(tokens[idx + 2])
-                if tok == "tft":
-                    material.metadata["tft"] = (float(val1), val2)
-                elif tok == "fix":
-                    material.metadata["fix"] = (val1, val2)
-                idx += 3
-            else:
-                idx += 1
-            continue
-
-        if tok in _TRIPLE_ARG_KEYWORDS:
-            if idx + 3 < len(tokens):
-                if tok == "rgb":
-                    r, g, b = int(tokens[idx + 1]), int(tokens[idx + 2]), int(tokens[idx + 3])
-                    material.metadata["rgb"] = (r, g, b)
-                idx += 4
-            else:
-                idx += 1
-            continue
-
-        if tok == _MODER_KEYWORD:
-            moder_list = material.metadata.get("moder", [])
-            if idx + 2 < len(tokens):
-                lib_name = tokens[idx + 1]
-                za = int(tokens[idx + 2])
-                moder_list.append((lib_name, za))
-                material.metadata["moder"] = moder_list
-                idx += 3
-            else:
-                idx += 1
-            continue
-
-        if tok == _COEFS_KEYWORD:
-            if idx + 1 < len(tokens):
-                material.metadata["coefs"] = tokens[idx + 1]
-                idx += 2
-            else:
-                idx += 1
-            continue
-
-        # Unknown token on the mat line — skip
-        idx += 1
-
-    # Now read nuclide lines
-    i = start_index + 1
-    inferred_fraction_type: Optional[str] = None
-
-    while i < len(lines):
-        raw = _strip_comment(lines[i]).strip()
-
-        if not raw:
-            i += 1
-            continue
-
-        line_tokens = raw.split()
-
-        # Stop if we hit another card keyword
-        if line_tokens[0].lower() in ("mat", "surf", "cell", "det", "src",
-                                       "set", "ene", "sens", "plot", "mesh",
-                                       "pin", "lat", "nest", "pbed", "umsh",
-                                       "trans", "utrans", "strans",
-                                       "ifc", "div", "dep", "include",
-                                       "therm", "branch", "coef"):
+    fraction_type: Optional[str] = None
+    while True:
+        ahead = peek(pos + 2)[pos:]
+        if not ahead:
             break
-
-        if not _is_nuclide_line(line_tokens):
-            # Could be continuation of unknown card, skip
-            i += 1
+        tok = ahead[0].lower()
+        if tok in _OPTION_ARGS and fraction_type is None:
+            args = take(1 + _OPTION_ARGS[tok])[1:]
+            _set_option(material, tok, args)
             continue
-
-        # Parse nuclide entries (possibly multiple per line)
-        j = 0
-        while j + 1 < len(line_tokens):
-            try:
-                zaid, lib_suffix = _parse_nuclide_token(line_tokens[j])
-            except ValueError:
-                j += 1
-                continue
-
-            try:
-                raw_fraction = float(line_tokens[j + 1])
-            except ValueError:
-                j += 1
-                continue
-
+        if len(ahead) == 2 and _NUCLIDE_NAME.match(ahead[0]) and _is_number(ahead[1]):
+            name, raw = take(2)
+            zaid, lib_suffix = _nuclide(name)
+            raw_fraction = float(raw)
             current_type = "wo" if raw_fraction < 0.0 else "ao"
-            if inferred_fraction_type is None:
-                inferred_fraction_type = current_type
-            elif inferred_fraction_type != current_type:
-                raise ValueError(
-                    f"Material '{mat_name}' has mixed atomic/weight fractions"
-                )
+            if fraction_type is None:
+                fraction_type = current_type
+            elif fraction_type != current_type:
+                raise ValueError(f"Material '{mat_name}' has mixed atomic/weight fractions")
+            if _symbol_of(zaid) in material.nuclide:
+                raise ValueError(f"Material '{mat_name}' lists {_symbol_of(zaid)} more than once")
+            material.add_nuclide(nuclide=zaid, fraction=abs(raw_fraction),
+                                 fraction_type=current_type, library=lib_suffix)
+            continue
+        break
 
-            material.add_nuclide(
-                nuclide=zaid,
-                fraction=abs(raw_fraction),
-                fraction_type=current_type,
-                library=lib_suffix,
-            )
-            j += 2
+    if fraction_type is None:
+        raise ValueError(
+            f"Serpent material '{mat_name}' has no nuclides: its card stops at "
+            f"'{ahead[0] if ahead else 'the end of the input'}', which is neither an option kika "
+            f"knows nor a nuclide and its fraction"
+        )
+    material.fraction_type = fraction_type
+    return material, last_line + 1
 
-        i += 1
 
-    material.fraction_type = inferred_fraction_type or "ao"
-    return material, i
+# Number of arguments of each option of the mat card; moder takes one pair per use.
+_OPTION_ARGS = {"tmp": 1, "tms": 1, "ettm": 1, "burn": 1, "vol": 1, "coeft": 1,
+                "coefs": 1, "tft": 2, "fix": 2, "moder": 2, "rgb": 3}
+
+
+def _set_option(material: Material, key: str, args: List[str]) -> None:
+    if key == "tmp":
+        material.set_temperature(float(args[0]))
+    elif key in ("tms", "ettm"):
+        material.metadata["tms"] = float(args[0])
+    elif key == "burn":
+        material.metadata["burn"] = int(float(args[0]))
+    elif key in ("vol", "coeft"):
+        material.metadata[key] = float(args[0])
+    elif key == "coefs":
+        material.metadata["coefs"] = args[0]
+    elif key == "tft":
+        material.metadata["tft"] = (float(args[0]), float(args[1]))
+    elif key == "fix":
+        material.metadata["fix"] = (args[0], float(args[1]))
+    elif key == "moder":
+        material.metadata.setdefault("moder", []).append((args[0], int(args[1])))
+    elif key == "rgb":
+        material.metadata["rgb"] = tuple(int(a) for a in args)
+    if key in ("ettm", "coeft", "coefs"):
+        material.report.lost(
+            f"Serpent material '{material.name}': option '{key}' is read but "
+            f"{'written back as tms' if key == 'ettm' else 'not written back'} by to_serpent"
+        )
 
 
 def _find_material_spans(
@@ -275,6 +209,13 @@ def read_serpent_materials(
     no density (``density`` stays None) and sets
     ``metadata["serpent_density_sum"] = True``.
 
+    A card runs, across lines, from ``mat`` to the first token that is neither one
+    of its options (``tmp``, ``tms``, ``ettm``, ``burn``, ``vol``, ``coeft``,
+    ``coefs``, ``tft``, ``fix``, ``moder``, ``rgb``) nor a nuclide and its fraction.
+    Nuclides are named ``92235.09c`` or ``U-235.09c``; a symbolic name is kept as
+    its ZAID. Options that :meth:`~kika.materials.Material.to_serpent` does not
+    write back are listed in the material's ``report``.
+
     Parameters
     ----------
     source : str, Path, or list of str
@@ -282,13 +223,15 @@ def read_serpent_materials(
 
     Returns
     -------
-    ~kika.mcnp.material.MaterialCollection
+    ~kika.materials.MaterialCollection
         Materials keyed by IDs assigned 1, 2, ... in file order.
 
     Raises
     ------
     ValueError
-        If a material mixes positive and negative nuclide fractions.
+        If a material mixes positive and negative nuclide fractions, lists a
+        nuclide twice, or has no nuclides (its card stops at an option kika does
+        not know).
     """
     if isinstance(source, (str, Path)):
         with open(source, "r", encoding="utf-8", errors="surrogateescape") as f:

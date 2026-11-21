@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-import warnings
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Union
 
 from .._constants import ATOMIC_MASS, ATOMIC_NUMBER_TO_SYMBOL, NATURAL_ABUNDANCE
 from .._utils import zaid_to_symbol, symbol_to_zaid
+from . import _zaid
+
+if TYPE_CHECKING:
+    from ..nuclear_data.model.conversion import ConversionReport
 
 # Density unit normalisation helpers.
 _DENSITY_UNIT_ALIASES: Dict[str, str] = {
@@ -74,6 +77,17 @@ def _validate_fraction_type(fraction_type: str) -> None:
         raise ValueError(f"Fraction type must be exactly 'ao' or 'wo', got '{fraction_type}'")
 
 
+def _new_report() -> "ConversionReport":
+    # Imported here: kika.materials loads without waking the nuclear-data model.
+    from ..nuclear_data.model.conversion import ConversionReport
+
+    return ConversionReport()
+
+
+def _symbol_of(zaid: int) -> str:
+    return zaid_to_symbol(_zaid.canonical(zaid))
+
+
 def _is_natural_zaid(zaid: int) -> bool:
     """Return True for natural elements (mass number exactly 0 -> ZAID ends with '000')."""
     return zaid > 1000 and zaid % 1000 == 0
@@ -101,13 +115,12 @@ class Nuclide:
     @property
     def element(self) -> Optional[str]:
         """Element symbol for atomic number ``zaid // 1000``, or None if unknown."""
-        atomic_number = self.zaid // 1000
-        return ATOMIC_NUMBER_TO_SYMBOL.get(atomic_number)
+        return ATOMIC_NUMBER_TO_SYMBOL.get(_zaid.identity(self.zaid)[0])
 
     @property
     def symbol(self) -> str:
         """Return the element-mass symbol (e.g., 'Fe56', 'U235')."""
-        return zaid_to_symbol(self.zaid)
+        return _symbol_of(self.zaid)
 
     @property
     def is_natural(self) -> bool:
@@ -218,7 +231,7 @@ class NuclideAccessor:
         """Get nuclide by symbol (str) or ZAID (int)."""
         if isinstance(key, int):
             # Convert ZAID to symbol
-            symbol = zaid_to_symbol(key)
+            symbol = _symbol_of(key)
         else:
             # Normalize string through ZAID conversion for consistency
             # This ensures 'Fe', 'fe', 'FE' all map to the same key
@@ -230,7 +243,7 @@ class NuclideAccessor:
         """Set nuclide by symbol (str) or ZAID (int)."""
         if isinstance(key, int):
             # Convert ZAID to symbol
-            symbol = zaid_to_symbol(key)
+            symbol = _symbol_of(key)
         else:
             # Normalize string through ZAID conversion
             zaid = symbol_to_zaid(key)
@@ -241,7 +254,7 @@ class NuclideAccessor:
         """Delete nuclide by symbol (str) or ZAID (int)."""
         if isinstance(key, int):
             # Convert ZAID to symbol
-            symbol = zaid_to_symbol(key)
+            symbol = _symbol_of(key)
         else:
             # Normalize string through ZAID conversion
             zaid = symbol_to_zaid(key)
@@ -252,7 +265,7 @@ class NuclideAccessor:
         """Check if nuclide exists by symbol (str) or ZAID (int)."""
         if isinstance(key, int):
             # Convert ZAID to symbol
-            symbol = zaid_to_symbol(key)
+            symbol = _symbol_of(key)
         else:
             # Normalize string through ZAID conversion
             try:
@@ -331,6 +344,18 @@ class Material:
         Material temperature if available in Kelvin.
     metadata : dict, optional
         Arbitrary metadata tags.
+    keywords : dict, optional
+        MCNP m-card keywords other than the libraries (``gas``, ``estep``, ``cond``,
+        ...), keyed in lower case and written back as read.
+    thermal_scattering : list of str, optional
+        S(alpha,beta) tables of the material as its MCNP ``mt`` card names them
+        (``'lwtr.20t'``).
+
+    Attributes
+    ----------
+    report : ~kika.nuclear_data.model.ConversionReport
+        What reading the material did beyond producing it: what was not kept and
+        what looked odd.
     """
 
     id: int
@@ -342,6 +367,9 @@ class Material:
     density_unit: Optional[str] = None
     temperature: Optional[float] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    keywords: Dict[str, str] = field(default_factory=dict)
+    thermal_scattering: List[str] = field(default_factory=list)
+    report: "ConversionReport" = field(default_factory=_new_report, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         _validate_fraction_type(self.fraction_type)
@@ -502,7 +530,7 @@ class Material:
             zaid = nuclide
 
         _validate_fraction_type(fraction_type)
-        symbol = zaid_to_symbol(zaid)
+        symbol = _symbol_of(zaid)
         others = [s for s in self.nuclide if s != symbol]
         if others and fraction_type != self.fraction_type:
             raise ValueError(
@@ -637,7 +665,7 @@ class Material:
         """
         # Convert to symbol if ZAID provided
         if isinstance(nuclide, int):
-            symbol = zaid_to_symbol(nuclide)
+            symbol = _symbol_of(nuclide)
         else:
             symbol = nuclide
 
@@ -753,49 +781,16 @@ class Material:
         self.density_unit = _normalize_density_unit(unit)
 
     def _get_effective_atomic_mass(self, zaid: int) -> float:
-        """Return the effective atomic mass, handling natural elements.
-
-        Parameters
-        ----------
-        zaid : int
-            ZAID identifier for which to retrieve mass.
-
-        Returns
-        -------
-        float
-            Atomic mass; for natural elements the abundance-weighted mean is used.
-        """
-        # Check if this is a natural element (ZAID mass number equals 0)
-        if _is_natural_zaid(zaid):
-            atomic_number = zaid // 1000
-            atomic_key = atomic_number * 1000  # e.g., 6000 for carbon
-
-            # Handle natural elements using abundance data
-            if atomic_key in NATURAL_ABUNDANCE:
-                natural_isotopes = NATURAL_ABUNDANCE[atomic_key]
-                weighted_mass = 0.0
-
-                for iso_zaid, abundance in natural_isotopes.items():
-                    # Get isotope mass from constants or approximate
-                    iso_mass = ATOMIC_MASS.get(iso_zaid, iso_zaid % 1000)
-                    weighted_mass += abundance * iso_mass
-
-                return weighted_mass
-
-        # For specific isotopes or fallback
-        atomic_number = zaid // 1000
-        mass_number = zaid % 1000
-
-        # Construct the isotope key
-        isotope_key = atomic_number * 1000 + mass_number
-
-        # Get atomic mass from constants or use a default approximation
-        atomic_mass = ATOMIC_MASS.get(isotope_key)
-        if atomic_mass is None:
-            # Fallback to approximate mass if exact isotope not found
-            atomic_mass = float(mass_number) if mass_number > 0 else 1.0
-
-        return atomic_mass
+        """Atomic mass of *zaid* in u (AME2020); the abundance-weighted mean for a natural element."""
+        z, a, _ = _zaid.identity(zaid)
+        if a == 0:
+            isotopes = NATURAL_ABUNDANCE.get(z * 1000)
+            if isotopes is None:
+                raise ValueError(f"{zaid_to_symbol(z * 1000)} has no natural isotopic composition in kika")
+            return sum(abundance * ATOMIC_MASS[iso] for iso, abundance in isotopes.items())
+        if z * 1000 + a not in ATOMIC_MASS:
+            raise ValueError(f"ZAID {zaid} has no atomic mass in AME2020")
+        return ATOMIC_MASS[z * 1000 + a]
 
     def to_weight_fraction(self) -> Material:
         """Convert atomic fractions to weight fractions, in place.
@@ -803,9 +798,8 @@ class Material:
         The stored fractions are always positive; ``fraction_type`` is what says they
         are atomic or weight. Each fraction ``x`` becomes ``x * m / sum(x * m)``, so
         the result sums to 1, with ``m`` the atomic mass of the nuclide (the
-        abundance-weighted mean for a natural element). Without a tabulated mass,
-        ``m`` is the mass number for an isotope and 1.0 for a natural element with
-        no abundance data. A material that is already ``'wo'`` is returned unchanged,
+        abundance-weighted mean for a natural element), from AME2020. A material
+        that is already ``'wo'`` is returned unchanged,
         without renormalising.
 
         Returns
@@ -816,7 +810,8 @@ class Material:
         Raises
         ------
         ValueError
-            If the total of ``x * m`` is zero or negative (for instance, no nuclides).
+            If the total of ``x * m`` is zero or negative (for instance, no nuclides),
+            or a nuclide has no mass (a natural element with no natural composition).
         """
         if self.is_weight:
             return self
@@ -842,9 +837,8 @@ class Material:
         The stored fractions are always positive; ``fraction_type`` is what says they
         are atomic or weight. Each fraction ``w`` becomes ``(w / m) / sum(w / m)``, so
         the result sums to 1, with ``m`` the atomic mass of the nuclide (the
-        abundance-weighted mean for a natural element). Without a tabulated mass,
-        ``m`` is the mass number for an isotope and 1.0 for a natural element with
-        no abundance data. A material that is already ``'ao'`` is returned unchanged,
+        abundance-weighted mean for a natural element), from AME2020. A material
+        that is already ``'ao'`` is returned unchanged,
         without renormalising.
 
         Returns
@@ -855,7 +849,8 @@ class Material:
         Raises
         ------
         ValueError
-            If the total of ``w / m`` is zero or negative (for instance, no nuclides).
+            If the total of ``w / m`` is zero or negative (for instance, no nuclides),
+            or a nuclide has no mass (a natural element with no natural composition).
         """
         if self.is_atomic:
             return self
@@ -863,9 +858,6 @@ class Material:
         atomic_sum = 0.0
         for symbol, nuclide in self.nuclide.items():
             atomic_mass = self._get_effective_atomic_mass(nuclide.zaid)
-            if atomic_mass <= 0:
-                mass_number = nuclide.zaid % 1000
-                atomic_mass = float(mass_number) if mass_number > 0 else 1.0
             atomic_sum += nuclide.fraction / atomic_mass
 
         if atomic_sum <= 0:
@@ -873,9 +865,6 @@ class Material:
 
         for symbol, nuclide in self.nuclide.items():
             atomic_mass = self._get_effective_atomic_mass(nuclide.zaid)
-            if atomic_mass <= 0:
-                mass_number = nuclide.zaid % 1000
-                atomic_mass = float(mass_number) if mass_number > 0 else 1.0
             nuclide.fraction = (nuclide.fraction / atomic_mass) / atomic_sum
 
         self.fraction_type = "ao"
@@ -1100,20 +1089,6 @@ class Material:
         """
         return f"{fraction:.6e}"
 
-    def _card_suffix(self, nuclide: Nuclide) -> str:
-        """The single suffix a nuclide's m-card entry carries: its neutron library when it has one."""
-        # Listing a nuclide once per library would count its atoms once per library.
-        chosen = "nlib" if "nlib" in nuclide.libs else sorted(nuclide.libs)[0]
-        dropped = {k: v for k, v in nuclide.libs.items() if k != chosen}
-        if dropped:
-            warnings.warn(
-                f"Material {self.id}: {nuclide.symbol} is written as {nuclide.zaid}."
-                f"{nuclide.libs[chosen]}; its other libraries {dropped} have no place on an "
-                f"MCNP m card and are not written",
-                stacklevel=3,
-            )
-        return nuclide.libs[chosen]
-
     def to_mcnp(self) -> str:
         """Serialise the material as an MCNP ``m`` card.
 
@@ -1136,6 +1111,7 @@ class Material:
         # Build main material line
         main_line = f"m{self.id}"
         lib_parts = [f"{k}={v}" for k, v in sorted(self.libs.items())]
+        lib_parts += [f"{k}={v}" for k, v in self.keywords.items()]
         if lib_parts:
             main_line += " " + " ".join(lib_parts)
 
@@ -1164,14 +1140,16 @@ class Material:
 
         sign = -1.0 if self.is_weight else 1.0
         for symbol, nuclide in sorted(self.nuclide.items()):
-            zaid = nuclide.zaid
-            # Get element symbol for comment
+            zaid = _zaid.mcnp(nuclide.zaid)
             nuclide_symbol = nuclide.symbol
 
-            zaid_lib = f"{zaid}.{self._card_suffix(nuclide)}" if nuclide.libs else str(zaid)
-            output_lines.append(
-                f"     {zaid_lib:<12} {self._format_fraction(sign * nuclide.fraction):>14}   $ {nuclide_symbol:<6}"
-            )
+            # One entry per data class: a .04p entry gives the photon table only, it adds no atoms.
+            for zaid_lib in [f"{zaid}.{lib}" for _, lib in sorted(nuclide.libs.items())] or [str(zaid)]:
+                output_lines.append(
+                    f"     {zaid_lib:<12} {self._format_fraction(sign * nuclide.fraction):>14}   $ {nuclide_symbol:<6}"
+                )
+        if self.thermal_scattering:
+            output_lines.append(f"mt{self.id} " + " ".join(self.thermal_scattering))
 
         return "\n".join(output_lines)
 
@@ -1249,7 +1227,7 @@ class Material:
         sign = -1.0 if self.is_weight else 1.0
 
         for symbol, nuclide in sorted(self.nuclide.items()):
-            zaid = nuclide.zaid
+            zaid = _zaid.mcnp(nuclide.zaid)
 
             lib_suffix = None
             if nuclide.libs:
@@ -1491,6 +1469,8 @@ class Material:
             density_unit=self.density_unit,
             temperature=self.temperature,
             metadata=deepcopy(self.metadata),
+            keywords=dict(self.keywords),
+            thermal_scattering=list(self.thermal_scattering),
         )
         return new_material
 
@@ -1632,7 +1612,9 @@ class MaterialCollection:
             return False
         if mat1.fraction_type != mat2.fraction_type:
             return False
-        if mat1.libs != mat2.libs or mat1.name != mat2.name:
+        if mat1.libs != mat2.libs or mat1.name != mat2.name or mat1.keywords != mat2.keywords:
+            return False
+        if mat1.thermal_scattering != mat2.thermal_scattering:
             return False
         if len(mat1.nuclide) != len(mat2.nuclide):
             return False
@@ -1687,7 +1669,11 @@ class MaterialCollection:
         Notes
         -----
         - A material is changed when its nuclides, fractions, fraction type, nuclide
-          or material libraries, or name differ from the card in the file.
+          or material libraries, keywords, name or S(alpha,beta) tables differ from
+          the card in the file.
+        - A material with ``thermal_scattering`` writes its ``mt`` card inside its
+          block and the file's own ``mt`` card for it goes; with none, the file's
+          ``mt`` card is left as it is.
         - Materials in the collection but not in the file are added after the last
           material card; materials in the file but not in the collection are left
           unchanged.
@@ -1698,7 +1684,7 @@ class MaterialCollection:
         >>> updated = collection.write_to_mcnp("input.i", "input_modified.i")
         >>> updated = collection.write_to_mcnp("input.i", force_rewrite=True)
         """
-        from .parse_mcnp import read_material
+        from .parse_mcnp import read_card, read_material
         from .._constants import MCNPY_HEADER, MCNPY_FOOTER
         import re
 
@@ -1714,6 +1700,17 @@ class MaterialCollection:
         else:
             ids_to_consider = set(mid for mid in material_ids if mid in self.by_id)
 
+        thermal_cards = {}  # mat_id -> (start, end, tables) of each mt card
+        i = 0
+        while i < len(lines):
+            if re.match(r"mt\d+(?=\s|$)", lines[i].strip().lower()):
+                text, end = read_card(lines, i)
+                tables = text.split()
+                thermal_cards[int(tables[0][2:])] = (i, end, tables[1:])
+                i = end
+            else:
+                i += 1
+
         # (mat_id, block start, block end, material read from the file)
         blocks = []
         i = 0
@@ -1722,50 +1719,59 @@ class MaterialCollection:
             if not match:
                 i += 1
                 continue
+            mat_id = int(match.group(1))
             existing, end = read_material(lines, i)
             start = i
             if start > 0 and "kika_mat_name:" in lines[start - 1].lower():
                 start -= 1
             if [l.strip() for l in lines[max(start - 3, 0):start]] == header:
                 start -= 3
+            if mat_id in thermal_cards and thermal_cards[mat_id][0] == end:
+                mt_end = thermal_cards[mat_id][1]
+                if [l.strip() for l in lines[mt_end:mt_end + 3]] == footer:
+                    end = mt_end  # an mt card kika wrote inside the block
             if [l.strip() for l in lines[end:end + 3]] == footer:
                 end += 3
-            blocks.append((int(match.group(1)), start, end, existing))
+            blocks.append((mat_id, start, end, existing))
             i = max(end, i + 1)
 
         def block_lines(material: Material) -> List[str]:
             text = MCNPY_HEADER + material.to_mcnp() + "\n" + MCNPY_FOOTER
             return [line + eol for line in text.splitlines()]
 
+        edits = []  # (start, end, replacement lines), applied from the bottom up
         materials_updated = []
-        for mat_id, start, end, existing in reversed(blocks):
+        for mat_id, start, end, existing in blocks:
             if mat_id not in ids_to_consider:
                 continue
             new_material = self.by_id[mat_id]
+            mt_card = thermal_cards.get(mat_id)
+            if new_material.thermal_scattering and mt_card:
+                existing.thermal_scattering = mt_card[2]
             if not force_rewrite and self._materials_equal(existing, new_material):
                 continue
-            lines[start:end] = block_lines(new_material)
+            replacement = block_lines(new_material)
+            if mt_card and start <= mt_card[0] < end and not new_material.thermal_scattering:
+                replacement[-3:-3] = lines[mt_card[0]:mt_card[1]]
+            edits.append((start, end, replacement))
+            if new_material.thermal_scattering and mt_card and not start <= mt_card[0] < end:
+                edits.append((mt_card[0], mt_card[1], []))
             materials_updated.append(mat_id)
 
         found = {mat_id for mat_id, _, _, _ in blocks}
         new_ids = sorted(ids_to_consider - found)
         if new_ids:
-            insert_at = len(lines)
-            if blocks:
-                # the replacements above moved the end of the last block
-                insert_at = blocks[-1][2]
-                shift = sum(
-                    len(block_lines(self.by_id[mid])) - (e - s)
-                    for mid, s, e, _ in blocks if mid in materials_updated
-                )
-                insert_at += shift
+            insert_at = blocks[-1][2] if blocks else len(lines)
             if insert_at > 0 and not lines[insert_at - 1].endswith(("\n", "\r")):
                 lines[insert_at - 1] += eol
             added = []
             for mat_id in new_ids:
                 added.extend(block_lines(self.by_id[mat_id]))
                 materials_updated.append(mat_id)
-            lines[insert_at:insert_at] = added
+            edits.append((insert_at, insert_at, added))
+
+        for start, end, replacement in sorted(edits, key=lambda e: (e[0], e[1]), reverse=True):
+            lines[start:end] = replacement
 
         _write_lines(output_filepath, lines)
         return sorted(materials_updated)

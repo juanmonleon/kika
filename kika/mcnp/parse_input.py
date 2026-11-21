@@ -3,7 +3,7 @@
 from .input import Input
 from .perturbations import Perturbation, Pert
 from kika.materials import Material, MaterialCollection
-from kika.materials.parse_mcnp import read_material
+from kika.materials.parse_mcnp import read_card, read_material
 import re
 
 def _read_PERT(lines, start_index):
@@ -114,12 +114,14 @@ def read_mcnp(file_path, pert_metadata=None):
     -------
     ~kika.mcnp.input.Input
         The PERT cards and the materials found, in ``perturbation.pert`` and
-        ``materials.by_id``. Both are empty when the deck has none.
+        ``materials.by_id``. Both are empty when the deck has none. A material's
+        ``mt`` card is in its ``thermal_scattering``.
 
     Raises
     ------
     ValueError
-        If a material card mixes positive and negative fractions.
+        If a material card mixes positive and negative fractions or lists a
+        nuclide twice, or an ``mt`` card names a material the deck does not define.
     FileNotFoundError
         If *file_path* does not exist.
     """
@@ -133,6 +135,7 @@ def read_mcnp(file_path, pert_metadata=None):
     i = 0
     current_zaid = None
     current_original_mat = None
+    thermal = {}
     while i < len(lines):
         line = lines[i].strip()
         # Detect kika:pert_zaid comment (new format with pert_mat, or old format without)
@@ -149,12 +152,20 @@ def read_mcnp(file_path, pert_metadata=None):
                 if current_original_mat is not None:
                     pert_obj.original_material = current_original_mat
                 inst.perturbation.pert[pert_obj.id] = pert_obj
+        elif re.match(r"mt(\d+)(?=\s|$)", line, re.IGNORECASE):
+            text, i = read_card(lines, i)
+            tables = text.split()
+            thermal[int(tables[0][2:])] = tables[1:]
         elif line[:1].lower() == "m":
             material_obj, i = read_material(lines, i)
             if material_obj:
                 inst.materials.by_id[material_obj.id] = material_obj
         else:
             i += 1
+    for mat_id, tables in thermal.items():
+        if mat_id not in inst.materials.by_id:
+            raise ValueError(f"mt{mat_id} names S(a,b) tables for a material the input does not define")
+        inst.materials.by_id[mat_id].thermal_scattering = tables
 
     # Apply explicit pert_metadata if provided
     if pert_metadata is not None:

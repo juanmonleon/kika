@@ -3,15 +3,23 @@ import pytest
 from kika.materials import Material, read_material
 
 
-def test_a_nuclide_with_neutron_and_photon_libraries_is_listed_once():
-    material = Material(id=1)
-    material.add_nuclide("Fe56", 1.0, "ao", library="80c")
-    material.nuclide["Fe56"].libs["plib"] = "12p"
-    with pytest.warns(UserWarning, match="12p"):
-        card = material.to_mcnp()
-    entries = [line for line in card.splitlines() if "26056" in line]
-    assert len(entries) == 1
-    assert "26056.80c" in entries[0]
+def test_neutron_and_photon_entries_of_a_nuclide_round_trip_as_one_nuclide():
+    card = ["m1 nlib=06c plib=02p", "\t6012  9.126127e-03", "\t6013.03c  1.022318e-04",
+            "\t6013.04p  1.022318e-04"]
+    material, _ = read_material(card, 0)
+    assert material.nuclide["C13"].libs == {"nlib": "03c", "plib": "04p"}
+    entries = [line.split()[0] for line in material.to_mcnp().splitlines() if "6013" in line]
+    assert entries == ["6013.03c", "6013.04p"]
+
+
+@pytest.mark.parametrize("card, message", [
+    ("m1 26056.80c 0.5 26056.80c 0.5", "more than once"),
+    ("m1 26056 0.5 26056.12p 0.5", "more than once"),
+    ("m1 26056.80c 0.5 26056.12p 0.4", "one amount per nuclide"),
+])
+def test_a_nuclide_listed_twice_for_the_same_data_is_refused(card, message):
+    with pytest.raises(ValueError, match=message):
+        read_material([card], 0)
 
 
 def test_adding_a_nuclide_of_the_other_fraction_type_is_refused():

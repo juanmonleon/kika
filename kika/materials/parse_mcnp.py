@@ -1,7 +1,7 @@
 import re
 from typing import List, Optional, Tuple
 
-from .material import Material
+from .material import Material, _symbol_of
 
 
 def _parse_nuclide_token(token: str) -> Tuple[int, Optional[str]]:
@@ -65,6 +65,60 @@ def _parse_kika_density_comment(line: str) -> Tuple[Optional[float], Optional[fl
     return None, None
 
 
+_LIB_KEYWORDS = {"nlib", "plib", "pnlib", "elib", "hlib", "alib", "slib", "tlib", "dlib", "ylib"}
+_OTHER_KEYWORDS = {"gas", "estep", "hstep", "cond", "refi", "refc", "refs"}
+
+
+def _is_comment(line: str) -> bool:
+    low = line.strip().lower()
+    return low == "c" or low.startswith("c ") or low.startswith("c\t")
+
+
+def read_card(lines: List[str], start_index: int) -> Tuple[str, int]:
+    """The text of the MCNP card that starts at *start_index*, with ``$`` comments, ``&``
+    and comment lines inside it removed, and the index after its last line.
+
+    A line continues the card when the previous one ends in ``&``, when it starts
+    with five blanks or a tab, or when it starts with a number. A blank line ends it.
+    """
+    texts = [lines[start_index].split("$", 1)[0].strip()]
+    continued = texts[0].endswith("&")
+    end = i = start_index + 1
+    while i < len(lines):
+        raw = lines[i].rstrip("\r\n")
+        if not raw.strip():
+            break
+        if _is_comment(raw):
+            i += 1
+            continue
+        body = raw.split("$", 1)[0]
+        if not (continued or raw.startswith("     ") or raw.startswith("\t")
+                or re.match(r"\s*\d", body)):
+            break
+        texts.append(body.strip())
+        continued = texts[-1].endswith("&")
+        i += 1
+        end = i
+    text = " ".join(t[:-1] if t.endswith("&") else t for t in texts)
+    return re.sub(r"\s*=\s*", "=", text), end
+
+
+def _check_repeat(material: Material, zaid: int, library: Optional[str], fraction: float) -> None:
+    """Refuse a second entry for a nuclide unless it names the same amount under another data class."""
+    symbol = _symbol_of(zaid)
+    if symbol not in material.nuclide:
+        return
+    nuclide = material.nuclide[symbol]
+    lib_key = material._infer_lib_key_from_suffix(library) if library else None
+    if lib_key is None or not nuclide.libs or lib_key in nuclide.libs:
+        raise ValueError(f"Material {material.id} lists {symbol} more than once for the same data")
+    if fraction != nuclide.fraction:
+        raise ValueError(
+            f"Material {material.id} gives {symbol} {nuclide.fraction} and {fraction} under different "
+            f"data classes; kika keeps one amount per nuclide"
+        )
+
+
 def read_material(lines: List[str], start_index: int) -> Tuple[Optional[Material], int]:
     """Read and parse a material card from MCNP input lines.
 
@@ -76,9 +130,16 @@ def read_material(lines: List[str], start_index: int) -> Tuple[Optional[Material
     A negative ZAID fraction is a weight fraction (``'wo'``) and a positive one an
     atomic fraction (``'ao'``); the stored fraction is the absolute value, and the
     material's ``fraction_type`` is the one the card uses (``'ao'`` when it has no
-    nuclides). Continuation lines (``&`` at the end of the line, or a following
-    line that starts with a number) are read as part of the card. The ``KIKA_DENSITY`` mass density
-    is stored in g/cc; the atomic density in the comment is not used.
+    nuclides). The card continues on lines that start with five blanks, a tab or a
+    number, or after a line ending in ``&``; comment lines inside it are skipped and
+    a blank line ends it. The library keywords (``nlib``, ``plib``, ``pnlib``,
+    ``elib``, ``hlib``, ``alib``, ``slib``, ``tlib``, ``dlib``) go to ``libs`` and
+    the other keywords to ``keywords``, both written back by
+    :meth:`~kika.materials.Material.to_mcnp`. A ZAID keeps the form the card gives
+    it; isomers in the LANL (``95642``) or NEA (``95342``) form are recognised. The
+    ``KIKA_DENSITY`` mass density is stored in g/cc; the atomic density in the
+    comment is not used. The ``mt`` card is a separate card: see
+    :func:`~kika.mcnp.parse_input.read_mcnp`.
 
     Parameters
     ----------
@@ -89,181 +150,80 @@ def read_material(lines: List[str], start_index: int) -> Tuple[Optional[Material
 
     Returns
     -------
-    tuple of (~kika.mcnp.material.Material or None, int)
+    tuple of (~kika.materials.Material or None, int)
         The material, or None if the line at *start_index* is not an ``m<n>`` card,
         and the index of the first line not read.
 
     Raises
     ------
     ValueError
-        If the card mixes positive and negative fractions.
+        If the card mixes positive and negative fractions, lists a nuclide twice
+        for the same data class (a ``.03c`` and a ``.04p`` entry with the same
+        amount are one nuclide with two libraries), or holds a token that is
+        neither a keyword nor a ZAID and its fraction.
     """
-    i = start_index
+    first = lines[start_index].strip()
+    match = re.match(r"^m(\d+)(?=\s|$)", first, re.IGNORECASE)
+    if not match:
+        return None, start_index + 1
 
-    # Check for KIKA material name comment in preceding lines
     material_name: Optional[str] = None
-
-    # Look backwards for a KIKA_MAT_NAME comment (at most 3 lines back)
     for back_offset in range(1, min(4, start_index + 1)):
-        prev_idx = start_index - back_offset
-        if prev_idx < 0:
-            break
-        prev_line = lines[prev_idx].strip()
-        # Stop if we hit another material or non-comment content
-        if prev_line and not prev_line.lower().startswith('c ') and not prev_line.lower().startswith('c\t'):
+        prev_line = lines[start_index - back_offset].strip()
+        if prev_line and not _is_comment(prev_line):
             break
         name = _parse_kika_name_comment(prev_line)
         if name is not None:
             material_name = name
             break
 
-    line = lines[i].strip()
-    card_lines: List[str] = []
-    original_first_line = line  # Keep for density parsing
-
-    while line.endswith("&"):
-        card_lines.append(line.rstrip("&").strip())
-        i += 1
-        if i < len(lines):
-            line = lines[i].strip()
-        else:
-            break
-    card_lines.append(line)
-    full_line = " ".join(card_lines)
-
-    # Parse density from the first line before stripping comments
-    mass_density, atomic_density = _parse_kika_density_comment(original_first_line)
-
-    if "$" in full_line:
-        full_line = full_line.split("$")[0].strip()
-
-    tokens = full_line.split()
-    match = re.match(r"^m(\d+)", tokens[0], re.IGNORECASE)
-    if not match:
-        return None, i + 1
-
+    text, end = read_card(lines, start_index)
     material_id = int(match.group(1))
-    material_obj = Material(id=material_id)
-
-    # Set name if found
-    if material_name:
-        material_obj.name = material_name
-
-    # Set density if found
+    material_obj = Material(id=material_id, name=material_name)
+    mass_density, _ = _parse_kika_density_comment(first)
     if mass_density is not None:
         material_obj.set_density(mass_density, "g/cc")
 
-    inferred_fraction_type: Optional[str] = None
-    idx = 1
+    tokens = text.split()[1:]
+    fraction_type: Optional[str] = None
+    idx = 0
     while idx < len(tokens):
         tok = tokens[idx]
-        lower_tok = tok.lower()
-
-        if lower_tok.startswith("nlib="):
-            material_obj.libs["nlib"] = tok.split("=", 1)[1]
+        if "=" in tok:
+            key, value = tok.split("=", 1)
+            key = key.lower()
+            if key in _LIB_KEYWORDS:
+                material_obj.libs[key] = value
+            elif key == "lib":
+                lib_key = material_obj._infer_lib_key_from_suffix(value)
+                if lib_key is None:
+                    raise ValueError(f"Material {material_id}: 'lib={value}' names no library class")
+                material_obj.libs[lib_key] = value
+            else:
+                if key not in _OTHER_KEYWORDS:
+                    material_obj.report.warn(
+                        f"m{material_id}: keyword '{key}' is not an MCNP m-card keyword kika "
+                        f"knows; it is kept and written back as read"
+                    )
+                material_obj.keywords[key] = value
             idx += 1
             continue
-        if lower_tok.startswith("plib="):
-            material_obj.libs["plib"] = tok.split("=", 1)[1]
-            idx += 1
-            continue
-        if lower_tok.startswith("ylib="):
-            material_obj.libs["ylib"] = tok.split("=", 1)[1]
-            idx += 1
-            continue
-        if lower_tok.startswith("lib="):
-            lib_value = tok.split("=", 1)[1]
-            lib_key = material_obj._infer_lib_key_from_suffix(lib_value)
-            if lib_key is not None:
-                material_obj.libs[lib_key] = lib_value
-            idx += 1
-            continue
-
-        # At this point we should be reading ZAID/fraction pairs.
-        nuclide_spec = tok
         try:
-            zaid, specific_lib = _parse_nuclide_token(nuclide_spec)
-        except ValueError:
-            idx += 1
-            continue
-
-        if idx + 1 >= len(tokens):
-            break
-
-        try:
+            zaid, specific_lib = _parse_nuclide_token(tok)
             raw_fraction = float(tokens[idx + 1])
-        except ValueError:
-            idx += 1
-            continue
-
+        except (ValueError, IndexError):
+            raise ValueError(
+                f"Material {material_id}: '{tok}' is neither a keyword nor a ZAID followed by its fraction"
+            ) from None
         current_type = "wo" if raw_fraction < 0.0 else "ao"
-        if inferred_fraction_type is None:
-            inferred_fraction_type = current_type
-        elif inferred_fraction_type != current_type:
+        if fraction_type is None:
+            fraction_type = current_type
+        elif fraction_type != current_type:
             raise ValueError(f"Material {material_id} has mixed atomic/weight fractions")
-
+        _check_repeat(material_obj, zaid, specific_lib, abs(raw_fraction))
         material_obj.add_nuclide(nuclide=zaid, fraction=abs(raw_fraction),
-                                  fraction_type=current_type, library=specific_lib)
+                                 fraction_type=current_type, library=specific_lib)
         idx += 2
 
-    i += 1
-    last_data_line = i  # Track the last line with actual material data
-
-    while i < len(lines):
-        line = lines[i].strip()
-
-        if line.lower().startswith("c ") or line.lower() == "c" or not line:
-            i += 1
-            continue
-
-        if "$" in line:
-            line = line.split("$")[0].strip()
-
-        if not line:
-            i += 1
-            continue
-
-        if not re.match(r"^\s*\d+", line):
-            break
-
-        if re.match(r"^m\d+", line, re.IGNORECASE):
-            break
-
-        parts = line.split()
-        idx = 0
-        has_data = False  # Track if this line has material data
-
-        while idx < len(parts):
-            nuclide_spec = parts[idx]
-            try:
-                zaid, specific_lib = _parse_nuclide_token(nuclide_spec)
-            except ValueError:
-                idx += 1
-                continue
-
-            if idx + 1 >= len(parts):
-                break
-
-            try:
-                raw_fraction = float(parts[idx + 1])
-            except ValueError:
-                idx += 1
-                continue
-
-            current_type = "wo" if raw_fraction < 0.0 else "ao"
-            if inferred_fraction_type is None:
-                inferred_fraction_type = current_type
-            elif inferred_fraction_type != current_type:
-                raise ValueError(f"Material {material_id} has mixed atomic/weight fractions")
-
-            material_obj.add_nuclide(nuclide=zaid, fraction=abs(raw_fraction),
-                                      fraction_type=current_type, library=specific_lib)
-            has_data = True
-            idx += 2
-
-        i += 1
-        if has_data:
-            last_data_line = i  # Update to current position after processing data line
-
-    material_obj.fraction_type = inferred_fraction_type or "ao"
-    return material_obj, last_data_line
+    material_obj.fraction_type = fraction_type or "ao"
+    return material_obj, end
