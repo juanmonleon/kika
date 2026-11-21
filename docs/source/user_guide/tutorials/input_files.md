@@ -117,10 +117,13 @@ print(steel.to_mcnp())
 
 ```text
 m500 nlib=80c
-     24000         -2.000000e-01   $ Cr
-     26000         -7.000000e-01   $ Fe
-     28058         -1.000000e-01   $ Ni58
+     24000                            -0.2   $ Cr
+     26000                            -0.7   $ Fe
+     28058                            -0.1   $ Ni58
 ```
+
+Numbers are written in their shortest exact form, so reading the card back gives the
+same floats, and kika reads every card back before it returns it.
 
 `expand_natural_elements` replaces natural elements with their isotopes, by natural
 abundance. Given element symbols it expands only those:
@@ -141,13 +144,17 @@ print(steel.to_mcnp())
 ```
 
 ```text
-m500 nlib=80c  $ KIKA_DENSITY: 7.900000e+00 g/cc, 8.614467e-02 atoms/b-cm
-     24050         -8.347373e-03   $ Cr50
+m500 nlib=80c  $ KIKA_DENSITY: 7.9 g/cc, 0.08614467451440182 atoms/b-cm
+     24050           -0.008347373245436626   $ Cr50
      ...
-     28058         -1.000000e-01   $ Ni58
+     28058                            -0.1   $ Ni58
 ```
 
-`to_serpent` writes the same material as a Serpent `mat` card.
+`to_serpent` writes the same material as a Serpent `mat` card and `to_openmc` as an
+OpenMC `<material>`; `MaterialCollection.to_openmc` gives a whole `materials.xml`.
+`MaterialCollection.emission_report(code, library=...)` says, per material, what the
+cards of that code leave out and which tables the given xsdir, xsdata or
+`cross_sections.xml` lacks.
 
 ## Writing materials back to an input file
 
