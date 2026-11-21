@@ -55,15 +55,16 @@ def _level(suite, pid: str) -> int:
     return int(level)
 
 
-def _production(suite, mt: int, lfs: int):
+def _production(suite, mt: int, lfs: Optional[int], product: Optional[str]):
     found = [p for p in suite.productions
              if p.label.startswith(f"MT{int(mt)} ")
-             and any(product.pid != "photon" and _level(suite, product.pid) == int(lfs)
-                     for product in p.outputChannel.products)]
+             and (product is None or p.label == f"MT{int(mt)} {product}")
+             and (lfs is None or any(out.pid != "photon" and _level(suite, out.pid) == int(lfs)
+                                     for out in p.outputChannel.products))]
     if len(found) != 1:
         names = [p.label for p in suite.productions if p.label.startswith(f"MT{int(mt)} ")]
-        raise KeyError(f"MT{mt} LFS={lfs} names {len(found)} productions (those of MT{mt}: {names}); "
-                       f"it must name exactly one")
+        raise KeyError(f"MT{mt} LFS={lfs} product={product} names {len(found)} productions (those of "
+                       f"MT{mt}: {names}); it must name exactly one")
     return found[0]
 
 
@@ -83,7 +84,7 @@ def _relative(matrix, edges, x, y, laws):
 
 
 def dosimeter_from_suite(suite, mt: int, lfs: Optional[int] = None, name: Optional[str] = None,
-                         form: str = "eval") -> Dosimeter:
+                         form: str = "eval", product: Optional[str] = None) -> Dosimeter:
     """The dosimeter of one reaction, or of one final state of a production, and its covariance.
 
     Parameters
@@ -95,14 +96,19 @@ def dosimeter_from_suite(suite, mt: int, lfs: Optional[int] = None, name: Option
         The ENDF MT number of the reaction.
     lfs : int, optional
         The final state of the product (0 the ground state, 1 the first isomer...).
-        None reads the reaction (MF3 and MF33); a value reads the production of that
-        state (MF10 and MF40).
+        None reads the reaction (MF3 and MF33), unless *product* is given; a value
+        reads the production of that state (MF10 and MF40).
     name : str, optional
         The dosimeter's label; ``"<target> MT<mt>"``, or the production's label, by
         default.
     form : str
         The label of the cross-section form: ``'eval'`` for the evaluated table,
         ``'recon'`` for one reconstructed from resonance parameters.
+    product : str, optional
+        The product of the production, as its label names it after the MT (``"Sc46"``
+        in ``"MT5 Sc46"``): the way to choose among the MT5 productions of an
+        element, where several products have the same final state. Reads MF10 and
+        MF40, with *lfs* as a further check when given.
 
     Returns
     -------
@@ -114,8 +120,8 @@ def dosimeter_from_suite(suite, mt: int, lfs: Optional[int] = None, name: Option
     Raises
     ------
     KeyError
-        If the reaction or the form is absent, or *mt* and *lfs* do not name exactly
-        one production.
+        If the reaction or the form is absent, or *mt*, *lfs* and *product* do not
+        name exactly one production.
     TypeError
         If the form is not a tabulated function (reconstruct resonances first).
     ValueError
@@ -124,7 +130,7 @@ def dosimeter_from_suite(suite, mt: int, lfs: Optional[int] = None, name: Option
         ``mixed`` or ``sum``), or *lfs* is None and *mt* has no MF33 covariance but
         has productions (the final state has to be named).
     """
-    if lfs is None:
+    if lfs is None and product is None:
         suite.cross_section(mt, form)
         x, y, pairs = suite.reactionByENDF_MT(mt).crossSection[form].toEndfRegions()
         label = name if name is not None else f"{getattr(suite, 'target', '?')} MT{mt}"
@@ -135,7 +141,7 @@ def dosimeter_from_suite(suite, mt: int, lfs: Optional[int] = None, name: Option
                              f"with their MF40): a dosimetry reaction to a final state is one of those; "
                              f"pass lfs= to read it")
     else:
-        production = _production(suite, mt, lfs)
+        production = _production(suite, mt, lfs, product)
         chosen = production.crossSection[form]
         if type(chosen).__name__ == "Reference":
             raise ValueError(f"{production.label} is an MF9 production (a multiplicity times the "

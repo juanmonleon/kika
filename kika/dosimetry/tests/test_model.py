@@ -109,3 +109,14 @@ def test_a_final_state_that_names_no_production_raises():
 def test_an_mt_with_productions_and_no_mf33_asks_for_the_final_state():
     with pytest.raises(ValueError, match="pass lfs="):
         dosimeter_from_suite(kika.read(NB93), 4)
+
+
+def test_a_product_names_the_production_where_final_states_would_not():
+    suite = kika.read(Path(kika.__file__).parent / "endf" / "tests" / "data" / "micro_mn54_b81_mf40.endf")
+    by_product = dosimeter_from_suite(suite, 17, product="Mn52_e1")
+    by_state = dosimeter_from_suite(suite, 17, lfs=1)
+    assert by_product.name == by_state.name == "MT17 Mn52_e1"
+    np.testing.assert_array_equal(by_product.cross_section, by_state.cross_section)
+    np.testing.assert_array_equal(by_product.relative_covariance, by_state.relative_covariance)
+    with pytest.raises(KeyError, match="product=Mn52_e1"):
+        dosimeter_from_suite(suite, 17, lfs=0, product="Mn52_e1")

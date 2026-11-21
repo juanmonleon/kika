@@ -220,3 +220,53 @@ def test_a_reaction_without_covariance_is_named_in_the_notes():
     exact = Dosimeter("exact", FINE, 0.5 / (1 + np.exp(-(FINE - 3e6) / 3e5)), 2)
     result = adjust_spectrum(prior, [exact], [1.1 * response_cells(prior, exact).sum()], [[0.04**2]])
     assert any("No covariance for exact" in note for note in result.notes)
+
+
+def test_a_free_normalization_leaves_the_level_to_the_data():
+    prior = SpectrumPrior(EDGES, _flux(), _prior_covariance())
+    dosimeters = [_dosimeter(t) for t in THRESHOLDS]
+    rates = np.array([response_cells(prior, d).sum() for d in dosimeters])
+    measured = rates * np.exp([0.1, -0.05, 0.2, 0.15, -0.1, 0.05])
+    V = np.diag(np.full(6, 0.04**2))
+    free = adjust_spectrum(prior, dosimeters, measured, V, free_normalization=True)
+    far = SpectrumPrior(EDGES, 1e7 * _flux(), _prior_covariance())
+    free_far = adjust_spectrum(far, dosimeters, measured, V, free_normalization=True)
+    scaled = adjust_spectrum(prior, dosimeters, 1.3 * measured, V, free_normalization=True)
+
+    assert free.dof == 5 and free_far.normalization == pytest.approx(1e-7 * free.normalization, rel=1e-9)
+    np.testing.assert_allclose(free_far.flux, free.flux, rtol=1e-8)
+    np.testing.assert_allclose(free_far.log_covariance, free.log_covariance, rtol=1e-6, atol=1e-12)
+    np.testing.assert_allclose(scaled.flux, 1.3 * free.flux, rtol=1e-6)
+    assert scaled.chi2 == pytest.approx(free.chi2, rel=1e-6)
+    np.testing.assert_allclose(free.prior_rates, free.normalization * rates, rtol=1e-12)
+    assert any("Free normalization" in note for note in free.notes)
+
+
+def test_a_free_normalization_needs_two_dosimeters():
+    prior = SpectrumPrior(EDGES, _flux(), _prior_covariance())
+    with pytest.raises(ValueError, match="two dosimeters"):
+        adjust_spectrum(prior, [_dosimeter(2.8e6)], [1.0], [[0.01]], free_normalization=True)
+
+
+def test_a_covered_foil_shares_the_bare_reactions_parameters():
+    from kika.dosimetry import covered
+
+    prior = SpectrumPrior(EDGES, _flux(), _prior_covariance())
+    bare = _dosimeter(2.8e6, name="Ni58p")
+    half = covered(bare, ([1e5, 2e7], [0.5, 0.5]), name="Ni58p Cd")
+    assert half.reaction == "Ni58p"
+    rate = response_cells(prior, bare).sum()
+    assert response_cells(prior, half).sum() == pytest.approx(0.5 * rate, rel=1e-6)
+    v = 0.04**2
+    both = adjust_spectrum(prior, [bare, half], [1.10 * rate, 0.5 * 1.20 * rate], np.diag([v, v]))
+    once = adjust_spectrum(prior, [bare], [np.sqrt(1.10 * 1.20) * rate], [[v / 2]])
+    assert list(both.cross_section_factors) == ["Ni58p"]
+    np.testing.assert_allclose(both.flux, once.flux, rtol=1e-5)
+
+
+def test_dosimeters_of_one_reaction_with_different_covariances_are_refused():
+    prior = SpectrumPrior(EDGES, _flux(), _prior_covariance())
+    a = _dosimeter(2.8e6, name="A")
+    b = Dosimeter("B", a.energies, a.cross_section, 2, a.covariance_edges, 2 * a.relative_covariance, reaction="A")
+    with pytest.raises(ValueError, match="different covariances"):
+        adjust_spectrum(prior, [a, b], [1.0, 1.0], np.eye(2) * 0.01)

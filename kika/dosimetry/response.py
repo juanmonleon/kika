@@ -116,6 +116,11 @@ class Dosimeter:
         The relative covariance of the cross section averaged over each interval,
         ``len(covariance_edges) - 1`` square, symmetric. Given with
         *covariance_edges* or not at all.
+    reaction : str, optional
+        The reaction whose cross-section parameters the adjustment uses for this
+        dosimeter; *name* by default. Two dosimeters of one reaction (a foil bare
+        and one covered, :func:`covered`) share those parameters, so they must
+        state the same covariance.
 
     Raises
     ------
@@ -130,9 +135,12 @@ class Dosimeter:
     laws: np.ndarray = 2
     covariance_edges: Optional[np.ndarray] = None
     relative_covariance: Optional[np.ndarray] = None
+    reaction: Optional[str] = None
 
     def __post_init__(self):
         x, y, laws = validate(self.energies, self.cross_section, self.laws)
+        if self.reaction is None:
+            object.__setattr__(self, "reaction", self.name)
         if (self.covariance_edges is None) != (self.relative_covariance is None):
             raise ValueError("covariance_edges and relative_covariance go together")
         edges, cov = None, None
