@@ -312,6 +312,16 @@ class _Events:
         return any(e["kind"] == kind for e in self.events)
 
 
+def _conditioning_mode(ev) -> Optional[str]:
+    """``"auto"``, ``"explicit"`` or ``"none"``; a run without repairs records it at the pre-flight."""
+    for kind in ("conditioned", "inspected"):
+        for e in ev.of(kind, subject=False):
+            mode = (e["payload"] or {}).get("mode")
+            if mode:
+                return mode
+    return None
+
+
 def _engine(ev) -> str:
     """Who rebuilt the resonance region, as a person names it."""
     done = ev.first("reconstructed")
@@ -705,14 +715,13 @@ def _drawing(ev, options) -> List[str]:
     if 35 in _quantities(ev):
         out.append("Fission-spectrum bands are drawn linearly as changes of probability, whatever "
                    "the space: their covariance is absolute and each row sums to zero.")
-    cond = ev.first("conditioned", subject=False)
-    mode = (cond or {}).get("payload", {}).get("mode")
+    mode = _conditioning_mode(ev)
     if mode == "auto":
         out.append("Repairs to the covariance chosen by the pre-flight: only what makes a block "
                    "drawable, saved as conditioning_plan.json.")
-    elif mode == "plan":
+    elif mode == "explicit":
         out.append("Repairs to the covariance taken from the plan passed to the run.")
-    elif mode in ("none", "off"):
+    elif mode == "none":
         out.append("No repairs to the covariance: every block drawn as stated.")
     if options.get("crossSectionSums"):
         mode = options.get("sumBlocks")
@@ -793,7 +802,11 @@ def _files(ev, options, ended) -> List[Dict[str, Any]]:
     what = {"factors.parquet": "every factor of every sample, one table",
             "conditioning_plan.json": "the repairs applied; edit it and pass it back to change them"}
     for e in ev.of("written"):
-        out.append({"name": e["subject"], "what": what.get(e["subject"], e["message"]),
+        refused = (e["payload"] or {}).get("refused")
+        out.append({"name": e["subject"],
+                    "what": ("the repairs recommended for the blocks that can be repaired, the "
+                             "refusal in its notes; edit it or the request and pass it back")
+                    if refused else what.get(e["subject"], e["message"]),
                     "bytes": (e["payload"] or {}).get("bytes")})
     if options.get("outputDir") and ended:
         if ev.has("finished"):
@@ -875,15 +888,34 @@ def _failure(ev, error, failed_stage) -> Dict[str, Any]:
         short = "the covariance cannot be drawn"
         lead = ("The pre-flight found a covariance block that cannot be drawn and that no repair "
                 "can make drawable. The block and what is wrong with it are below.")
+        outOfLog = [e for e in blocking if (e["payload"] or {}).get("code") == "log_domain"]
+        explained = {(e["payload"] or {}).get("block") for e in outOfLog}
+        blocking = outOfLog + [e for e in blocking if e not in outOfLog and not (
+            (e["payload"] or {}).get("check") == "finiteness"
+            and (e["payload"] or {}).get("block") in explained)]
+        mts = sorted({mt for e in outOfLog for mt in (e["payload"] or {}).get("reactions") or ()})
+        mfs = sorted({mf for e in outOfLog for mf in (e["payload"] or {}).get("mfs") or ()})
+        if outOfLog:
+            lead = ("The file states a relative covariance of -1 or below, and a log-normal draw "
+                    "takes ln(1 + C), which has no value there. No repair applies to such an "
+                    "entry; the entries are below.")
+        if any(e["kind"] == "written" and (e["payload"] or {}).get("refused")
+               for e in ev.events):
+            lead += (" The repairs the other blocks would need are saved as "
+                     "conditioning_plan.json.")
         fixes.append(("Leave those reactions out",
-                      "Ask for every reaction except the ones in the block named below. The rest "
-                      "is drawn as usual; the reactions left out stay as evaluated, so their "
-                      "uncertainty is missing from the results."))
-        if any((e["payload"] or {}).get("check") == "finiteness" for e in blocking):
+                      (f"Ask for every reaction except {', '.join(f'MT{mt}' for mt in mts)}. "
+                       if mts else "Ask for every reaction except the ones in the block named "
+                                   "below. ")
+                      + "The rest is drawn as usual; the reactions left out stay as evaluated, "
+                        "so their uncertainty is missing from the results."))
+        if outOfLog or any((e["payload"] or {}).get("check") == "finiteness" for e in blocking):
+            space = ("{" + ", ".join(f'{mf}: "linear"' for mf in mfs) + "}") if mfs else None
             fixes.append(("Draw that quantity in linear space",
-                          "A factor is then 1 + y, which needs no logarithm, so entries that have "
-                          "no value in log space are no obstacle. Factors can then reach zero or "
-                          "below; the run warns about each one."))
+                          (f"Pass space={space}. " if space else "")
+                          + "A factor is then 1 + y, which needs no logarithm, so entries that "
+                            "have no value in log space are no obstacle. Factors can then reach "
+                            "zero or below; the run warns about each one."))
     return {"stage": failed_stage, "stageTitle": _stage_title(failed_stage),
             "exception": exception, "message": message, "short": short, "lead": lead,
             "sample": error.get("sample"),
