@@ -1,58 +1,100 @@
 API Reference
 =============
 
-This section provides detailed documentation of the KIKA API.
+The documentation of every public function and class of kika, generated from the code
+and grouped by what it is for.
 
-Package Overview
-----------------
+The model and its algebra
+-------------------------
 
-KIKA is structured into several subpackages:
-
-* **kika.mcnp**: For MCNP input files (materials, PERT cards) and tally output: MCTAL files and FMESH mesh tallies (MESHTAL, HDF5 runtape)
-* **kika.sensitivities**: For sensitivity analysis and SDF file generation
-* **kika.ace**: For parsing ACE format nuclear data files
-* **kika.cov**: For covariance matrix handling and visualization
-* **kika.UQ**: For strict sensitivity/covariance alignment, sandwich propagation, and c-k
-* **kika.benchmarks**: For DICE/ICSBEP SQLite profiles and benchmark ranking
-* **kika.endf**: For reading Evaluated Nuclear Data Files (ENDF)
-* **kika.energy_grids**: Predefined energy group structures
-* **kika.sampling** and **kika.nuclear_data.model**: Drawing realisations from a covariance and applying them to an evaluation
-
-Module Reference
-----------------
+The canonical model that every format is read into, the front door to read and write any format, and the mathematics of tabulated functions.
 
 .. toctree::
    :maxdepth: 2
-   
-   input
-   mctal
-   sensitivities
-   ace
-   cov
-   uq
-   benchmarks
+
    model
-   endf
-   sampling
-   sampling-core
    nuclear-data
    algebra
-   energy-grids
-   utils-energy-folding
+
+Evaluated-data formats
+----------------------
+
+Reading, checking and writing each format.
+
+.. toctree::
+   :maxdepth: 2
+
+   endf
    endf-checks-and-dcs
    gnds
-   processing
-   processing-doppler
-   processing-resonances
-   cov-assembly
-   uq-tmc
-   njoy
+   ace
    hdf5
-   tsl
    g4ndl
-   plotting
-   exfor
-   sinbad
+   tsl
+
+Processing
+----------
+
+Reconstruction, broadening and the files a transport code reads, by kika or through NJOY.
+
+.. toctree::
+   :maxdepth: 2
+
+   processing
+   processing-resonances
+   processing-doppler
+   njoy
+
+Covariances, sampling and uncertainty
+-------------------------------------
+
+Covariance matrices, drawing realisations from them, sensitivities and the propagation of uncertainty.
+
+.. toctree::
+   :maxdepth: 2
+
+   cov
+   cov-assembly
+   sampling
+   sampling-core
+   sensitivities
+   uq
+   uq-tmc
+
+Transport codes
+---------------
+
+Inputs and outputs of MCNP and Serpent, material compositions and weight windows.
+
+.. toctree::
+   :maxdepth: 2
+
+   input
+   mctal
    serpent
    materials
    wwinp
+
+Experiments and benchmarks
+--------------------------
+
+Measured data from EXFOR, and the criticality and shielding benchmark collections.
+
+.. toctree::
+   :maxdepth: 2
+
+   exfor
+   benchmarks
+   sinbad
+
+Energy grids and plotting
+-------------------------
+
+Group structures, folding on an energy grid, and the plotting helpers.
+
+.. toctree::
+   :maxdepth: 2
+
+   energy-grids
+   utils-energy-folding
+   plotting

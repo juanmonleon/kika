@@ -134,18 +134,26 @@ epub_exclude_files = sorted(
 
 # -- Drafts wiring -----------------------------------------------------------
 
-# The architecture overview opens its section; everything else follows by name.
+# Each part opens with its index page, which holds its chapters and pages.
 _DRAFTS_TOCTREE = """
 
 .. toctree::
    :maxdepth: 2
-   :caption: Drafts (under review)
-   :glob:
+   :caption: Drafts of the manual (under review)
 
    drafts/architecture/index
-   drafts/architecture/**
+   drafts/methods/formats/index
    drafts/methods/index
-   drafts/methods/**
+   drafts/methods/notation
+"""
+
+_DRAFTS_GUIDE_TOCTREE = """
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Drafts of the user guide (under review)
+   :glob:
+
    drafts/user_guide/**
 """
 
@@ -160,11 +168,11 @@ it may change before it is.
 def _wireDrafts(app, docname, source):
     """Add the drafts section to the root toctree, and the banner to each draft."""
     if docname == "index":
-        source[0] += _DRAFTS_TOCTREE
+        source[0] += _DRAFTS_TOCTREE + _DRAFTS_GUIDE_TOCTREE
     elif docname == "pdf_index":
         # The PDF is the manual of methods and architecture (WRITING_MANUAL §2):
         # the user-guide drafts stay online.
-        source[0] += _DRAFTS_TOCTREE.replace("   drafts/user_guide/**\n", "")
+        source[0] += _DRAFTS_TOCTREE
     elif docname.startswith("drafts/"):
         lines = source[0].split("\n")
         title = next((i for i, line in enumerate(lines) if line.startswith("# ")), -1)

@@ -16,6 +16,15 @@ then the doors and consumers.
 `kika/tests/test_read_front_door.py`.
 ```
 
+```{toctree}
+:hidden:
+
+layers
+canonical-model
+format-adapters
+algebra-layer
+```
+
 ## The structure
 
 kika reads several nuclear-data formats: ENDF (Evaluated Nuclear Data File), GNDS

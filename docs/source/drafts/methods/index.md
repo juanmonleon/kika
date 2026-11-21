@@ -3,7 +3,18 @@
 Every capability of kika, grouped by what it is for, with the page that documents it.
 How kika is built is in {doc}`../architecture/index`; how to use it, in the user guide.
 
-## Reading and writing data
+```{toctree}
+:hidden:
+
+algebra/index
+processing/index
+checks/index
+covariance/index
+sampling/index
+uq/index
+```
+
+**Reading and writing data**
 
 The formats kika reads into its model and writes back, with what each reading assumes,
 refuses and loses:
@@ -19,12 +30,12 @@ refuses and loses:
 
 The symbols every page shares are defined once in {doc}`notation`.
 
-## Mathematics of tabulated data
+**Mathematics of tabulated data**
 
 - {doc}`algebra/tabulated-functions`: the interpolation laws, exact integrals and group
   averages, linearisation, sums and the Gaussian fold every other method rests on.
 
-## Processing
+**Processing**
 
 - {doc}`processing/resonance-reconstruction`: cross-sections from resolved resonance
   parameters (SLBW, MLBW, Reich-Moore, R-Matrix Limited).
@@ -50,20 +61,20 @@ The symbols every page shares are defined once in {doc}`notation`.
 - {doc}`processing/photonuclear-tables`: photonuclear ACE tables.
 - {doc}`processing/njoy`: running NJOY with a fixed, checked chain.
 
-## Checking evaluated data
+**Checking evaluated data**
 
 - {doc}`checks/data-checks`: what is checked in every file but the covariances (MF 1-28),
   against the format, mathematics and physics.
 - {doc}`covariance/covariance-checks`: what is checked in the covariance files.
 
-## Covariances
+**Covariances**
 
 - {doc}`covariance/covariance-checks`: what is checked in a covariance section as written.
 - {doc}`covariance/conditioning-and-psd`: the pre-flight and the repairs before a draw.
 - {doc}`covariance/multigroup-collapse`: collapsing MF 34 and relative covariances onto
   group structures.
 
-## Sampling and perturbation
+**Sampling and perturbation**
 
 - {doc}`sampling/perturbation-pipeline`: the whole scheme, from a covariance to written
   realisations.
@@ -77,7 +88,7 @@ The symbols every page shares are defined once in {doc}`notation`.
 - {doc}`perturbation/fission-spectrum-perturbation`: the prompt fission neutron spectrum
   from MF 35.
 
-## Sensitivity and uncertainty quantification
+**Sensitivity and uncertainty quantification**
 
 - {doc}`uq/sensitivities`: first-order sensitivities from MCNP PERT and Serpent, SDF files.
 - {doc}`uq/sandwich`: propagation by the sandwich rule.
@@ -85,7 +96,7 @@ The symbols every page shares are defined once in {doc}`notation`.
 - {doc}`uq/total-monte-carlo`: Total Monte Carlo and the separation of nuclear-data and
   statistical variance.
 
-## Not documented yet
+**Not documented yet**
 
 - **The EXFOR-to-ENDF evaluation pipeline** (`scripts/` of the repository: energy grid,
   Legendre fits with model averaging, Monte Carlo covariances, adaptive multigroup collapse,
