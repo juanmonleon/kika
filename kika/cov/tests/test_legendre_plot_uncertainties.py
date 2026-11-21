@@ -60,7 +60,9 @@ def test_an_empty_sequence_means_every_available_order(legendreCovariance):
 
 
 def test_absolute_uncertainties_relabel_the_axis(legendreCovariance):
-    figure = legendreCovariance.plot_uncertainties(
+    covariance = legendreCovariance.copy()
+    covariance.legendre_coefficients[(26056, 2, 1)] = [0.5, 0.4, 0.3]
+    figure = covariance.plot_uncertainties(
         isotope=26056, mt=2, legendre_coeffs=1, uncertainty_type="absolute"
     )
     assert figure.axes[0].get_ylabel() == "Absolute Uncertainty"

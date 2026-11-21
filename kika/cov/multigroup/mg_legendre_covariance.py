@@ -413,11 +413,11 @@ class MultigroupLegendreCovariance:
         those of ``a_col_l``. The grid, as stored and not converted, is
         ``energy_grid`` of the result. The axes ``x_edges`` and ``y_edges`` are not
         energies: each block's edges are the grid (or its ``log10`` when *scale*
-        is log, a non-positive edge taken as 1e-300) minus its first value, so the
-        axis starts at 0, and successive blocks follow end to end. The
-        uncertainty drawn above the heatmap is ``100 * sqrt(|variance|)`` per group, taken from the
-        absolute matrices when the object has them (it always does after
-        :func:`~kika.cov.multigroup.MF34_to_MG`), else from the relative ones.
+        is log, a non-positive first edge placed one decade below the smallest
+        positive one) minus its first value, so the axis starts at 0, and
+        successive blocks follow end to end. The uncertainty drawn above the
+        heatmap is the relative one in percent, ``100 * sqrt(|variance|)`` of the
+        relative matrices, per group.
 
         Parameters
         ----------
@@ -536,7 +536,8 @@ class MultigroupLegendreCovariance:
 
         def _transform(edges: np.ndarray) -> np.ndarray:
             if scale_normalized == "log":
-                return np.log10(np.maximum(edges, 1e-300))
+                from kika.cov.cross_section_covariance import _log_edges
+                return _log_edges(edges)
             return edges.astype(float)
 
         edges_tx = _transform(edges_cropped)
@@ -585,8 +586,7 @@ class MultigroupLegendreCovariance:
             ranges_idx[row_l] = (0, G_cropped)
             ranges_idx[col_l] = (0, G_cropped)
 
-        # Uncertainty percent from absolute covariance if available, else relative
-        cov_for_unc = filtered.absolute_covariance_matrix if filtered.absolute_matrices else filtered.covariance_matrix
+        cov_for_unc = filtered.covariance_matrix
         uncertainty_data = {}
         for l_val in legendre_list:
             t = (isotope, mt, l_val)

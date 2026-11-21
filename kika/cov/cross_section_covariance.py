@@ -661,8 +661,8 @@ class CrossSectionCovariance:
 
         Only blocks with *isotope* on both axes are candidates for removal; blocks of
         other isotopes are kept. The result is a copy of the kept blocks with the
-        shared ``num_groups`` and ``energy_grid``; its ``energy_unit`` is the default
-        ``'eV'`` and its ``metadata`` is empty, whatever this object holds.
+        shared ``num_groups``, ``energy_grid`` and ``energy_unit``, and a copy of
+        ``metadata``.
 
         Parameters
         ----------
@@ -693,6 +693,8 @@ class CrossSectionCovariance:
         new = CrossSectionCovariance(
             num_groups=self.num_groups,
             energy_grid=list(self.energy_grid) if self.energy_grid is not None else None,
+            energy_unit=self.energy_unit,
+            metadata=dict(self.metadata),
         )
         # copy retained covariance matrices
         for idx, (ir, rr, ic, rc, M) in enumerate(zip(
@@ -1319,8 +1321,8 @@ class CrossSectionCovariance:
         CrossSectionCovariance
             New object with this object's ``num_groups`` and ``energy_grid``,
             the kept blocks (matrices shared, not copied) and the kept
-            cross-section vectors (copied). Its ``energy_unit`` is the default
-            ``'eV'`` and its ``metadata`` is empty.
+            cross-section vectors (copied), with this object's ``energy_unit``
+            and a copy of its ``metadata``.
         """
 
         # ---- 1. indices with the requested isotope on both axes ----
@@ -1363,6 +1365,8 @@ class CrossSectionCovariance:
         nuevo = CrossSectionCovariance(
             num_groups=self.num_groups,
             energy_grid=self.energy_grid.copy() if self.energy_grid is not None else None,
+            energy_unit=self.energy_unit,
+            metadata=dict(self.metadata),
         )
 
         # copy matrices that survive the filters
@@ -1414,8 +1418,8 @@ class CrossSectionCovariance:
         CrossSectionCovariance
             New object with this object's ``num_groups`` and ``energy_grid``, the
             blocks of the isotope (matrices shared, not copied) and its
-            cross-section vectors (copied). Its ``energy_unit`` is the default
-            ``'eV'`` and its ``metadata`` is empty.
+            cross-section vectors (copied), with this object's ``energy_unit``
+            and a copy of its ``metadata``.
         """
         # Indices where both row and column isotopes match the requested isotope
         idxs = [
@@ -1427,6 +1431,8 @@ class CrossSectionCovariance:
         new_cov = CrossSectionCovariance(
             num_groups=self.num_groups,
             energy_grid=self.energy_grid.copy() if self.energy_grid is not None else None,
+            energy_unit=self.energy_unit,
+            metadata=dict(self.metadata),
         )
 
         for i in idxs:
@@ -1459,7 +1465,8 @@ class CrossSectionCovariance:
         Returns
         -------
         CrossSectionCovariance
-            Filtered CrossSectionCovariance containing only matrices involving the specified isotopes
+            Filtered CrossSectionCovariance containing only matrices involving the specified isotopes,
+            with this object's ``energy_unit`` and a copy of its ``metadata``
         """
         isotope_set = set(isotopes)
         idxs = [
@@ -1471,6 +1478,8 @@ class CrossSectionCovariance:
         new_cov = CrossSectionCovariance(
             num_groups=self.num_groups,
             energy_grid=self.energy_grid.copy() if self.energy_grid else None,
+            energy_unit=self.energy_unit,
+            metadata=dict(self.metadata),
         )
 
         for i in idxs:
@@ -1516,7 +1525,7 @@ class CrossSectionCovariance:
             New object with the blocks selected (matrices shared, not copied)
             and the cross-section vectors whose MT is in *mts* (and whose
             isotope is *isotope*, if given; copied). It keeps this object's
-            ``energy_unit``; ``metadata`` is empty.
+            ``energy_unit`` and a copy of its ``metadata``.
         """
         mt_set = set(mts)
         idxs = [
@@ -1547,6 +1556,7 @@ class CrossSectionCovariance:
             num_groups=ng,
             energy_grid=eg,
             energy_unit=self.energy_unit,
+            metadata=dict(self.metadata),
         )
 
         for i in idxs:
@@ -1929,9 +1939,10 @@ class CrossSectionCovariance:
         """
         Get relative uncertainty (standard deviation / mean) for a specific isotope and reaction.
         
-        The covariance matrices store relative covariances, so the square root of the
-        diagonal elements directly gives relative uncertainties (as fractions).
-        
+        The square root of the diagonal of the block ``(zaid, mt)``: as stored for a
+        relative block (a missing flag counts as relative), divided by the stored
+        cross section for an absolute one.
+
         Parameters
         ----------
         zaid : int
@@ -1939,8 +1950,10 @@ class CrossSectionCovariance:
         mt : int
             Reaction MT number
         energy_mev : float, optional
-            Specific energy in MeV. If provided, returns uncertainty at that energy.
-            If None, returns array of uncertainties for all energy groups.
+            Specific energy in MeV, whatever ``energy_unit`` is (the grid is
+            converted). If provided, returns the uncertainty of the group
+            ``[E_i, E_i+1)`` holding it (the last boundary belongs to the last
+            group). If None, returns array of uncertainties for all energy groups.
         
         Returns
         -------
@@ -1952,7 +1965,9 @@ class CrossSectionCovariance:
         Raises
         ------
         ValueError
-            If the specified (zaid, mt) pair is not found in the covariance data
+            If the specified (zaid, mt) pair is not found in the covariance data,
+            the block is absolute and no cross section is stored for it, there is
+            no energy grid, or *energy_mev* is outside the grid.
         """
         # Filter to get only this isotope's data
         try:
@@ -1989,54 +2004,32 @@ class CrossSectionCovariance:
                     mat_is_relative = iso_covmat.is_relative[mi]
                 break
 
-        if not mat_is_relative and (zaid, mt) in self.cross_sections:
-            # Absolute covariance: divide by cross section to get relative
+        if not mat_is_relative:
+            if (zaid, mt) not in self.cross_sections:
+                raise ValueError(
+                    f"ZAID={zaid}, MT={mt}: the covariance is absolute and no cross "
+                    f"section is stored for it, so it has no relative uncertainty."
+                )
             xs = np.asarray(self.cross_sections[(zaid, mt)], dtype=float)
             with np.errstate(divide='ignore', invalid='ignore'):
                 uncertainties = uncertainties / np.abs(xs)
                 uncertainties = np.nan_to_num(uncertainties, nan=0.0, posinf=0.0, neginf=0.0)
-        
-        # If specific energy requested, find the corresponding group
+
         if energy_mev is not None:
             if self.energy_grid is None:
                 raise ValueError("No energy grid available in covariance data")
-            
-            energy_grid = np.array(self.energy_grid)
-            
-            # Detect units: if first value > 1000, assume eV, otherwise MeV
-            if energy_grid[0] > 1000:
-                # Grid is in eV, convert input energy to eV
-                energy_to_match = energy_mev * 1e6
-            else:
-                # Grid is already in MeV
-                energy_to_match = energy_mev
-            
-            # Find the bin index (energy grid has G+1 boundaries for G groups)
-            group_idx = None
-            for i in range(len(energy_grid) - 1):
-                if energy_grid[i] <= energy_to_match < energy_grid[i+1]:
-                    group_idx = i
-                    break
-            
-            # Check upper boundary edge case
-            if group_idx is None:
-                tolerance = 1e-3 if energy_grid[0] <= 1000 else 1e3
-                if abs(energy_to_match - energy_grid[-1]) < tolerance:
-                    group_idx = len(energy_grid) - 2
-            
-            if group_idx is None:
-                if energy_grid[0] > 1000:
-                    raise ValueError(
-                        f"Energy {energy_mev} MeV ({energy_to_match:.4e} eV) is outside "
-                        f"covariance energy range: {energy_grid[0]/1e6:.4f} - "
-                        f"{energy_grid[-1]/1e6:.4f} MeV"
-                    )
-                else:
-                    raise ValueError(
-                        f"Energy {energy_mev} MeV is outside covariance energy range: "
-                        f"{energy_grid[0]:.4f} - {energy_grid[-1]:.4f} MeV"
-                    )
-            
+            energy_grid_mev = np.asarray(
+                _rescale_energy_grid(list(self.energy_grid), self.energy_unit, 'MeV'),
+                dtype=float,
+            )
+            group_idx = int(np.searchsorted(energy_grid_mev, energy_mev, side='right')) - 1
+            if group_idx == len(energy_grid_mev) - 1 and np.isclose(energy_mev, energy_grid_mev[-1]):
+                group_idx -= 1
+            if not 0 <= group_idx < len(energy_grid_mev) - 1:
+                raise ValueError(
+                    f"Energy {energy_mev} MeV is outside the covariance energy range: "
+                    f"{energy_grid_mev[0]:.4e} - {energy_grid_mev[-1]:.4e} MeV"
+                )
             return float(uncertainties[group_idx])
         
         # Return all uncertainties
@@ -2067,8 +2060,7 @@ class CrossSectionCovariance:
         ``(nuclide, mt)``, as a percentage (1σ). A relative block gives it
         directly; an absolute block is divided by the cross section stored for
         the reaction, and has no curve if there is none (a warning is logged).
-        The x-axis is the energy grid as stored and is labelled "Energy (MeV)"
-        whatever ``energy_unit`` is.
+        The x-axis is the energy grid as stored, labelled with ``energy_unit``.
 
         Parameters
         ----------

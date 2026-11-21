@@ -733,6 +733,39 @@ def _write_coverx_text(data: CrossSectionCovariance, file_path: str, title: str 
             _write_e15_values(f, flat)
 
 
+def _as_relative(data):
+    """*data* itself if every block is relative (a missing flag counts), else a copy made relative."""
+    flags = list(data.is_relative) + [True] * (len(data.matrices) - len(data.is_relative))
+    if all(flags):
+        return data
+    if isinstance(data, LegendreCovariance):
+        raise ValueError(
+            "the file holds relative covariances and this MF34 covariance has absolute "
+            "(LB=0) blocks; there is no a_L here to convert them"
+        )
+    relative = data.copy()
+    for i, is_relative in enumerate(flags):
+        if is_relative:
+            continue
+        row = (relative.isotope_rows[i], relative.reaction_rows[i])
+        col = (relative.isotope_cols[i], relative.reaction_cols[i])
+        xs_row, xs_col = relative.cross_sections.get(row), relative.cross_sections.get(col)
+        if xs_row is None or xs_col is None:
+            raise ValueError(
+                f"the file holds relative covariances and block {row} x {col} is "
+                f"absolute with no stored cross section to convert it"
+            )
+        scale = np.outer(np.asarray(xs_row, dtype=float), np.asarray(xs_col, dtype=float))
+        if np.any(scale == 0.0):
+            raise ValueError(
+                f"the file holds relative covariances and block {row} x {col} is "
+                f"absolute over a zero cross section"
+            )
+        relative.matrices[i] = np.asarray(relative.matrices[i], dtype=float) / scale
+    relative.is_relative = [True] * len(relative.matrices)
+    return relative
+
+
 def write_coverx(
     data: CrossSectionCovariance, file_path: str, fmt: str = 'binary',
     title: str = '', endian: str = '>',
@@ -743,9 +776,10 @@ def write_coverx(
     The file holds its group boundaries in eV, descending: an ascending grid is
     reversed on output, together with both axes of every matrix and the
     cross-section vectors, and an ``energy_unit`` of ``'MeV'`` is converted to
-    eV. Matrix values are written as stored. ``is_relative`` is neither read nor
-    converted, so the caller is responsible for the matrices being the kind
-    (relative or absolute) the reading code expects.
+    eV. The file holds relative covariances: a relative block (or one with no
+    flag) is written as stored, an absolute one divided by the outer product of
+    the stored cross sections of its row and column reactions. *data* is not
+    modified.
 
     Parameters
     ----------
@@ -769,12 +803,16 @@ def write_coverx(
     ------
     TypeError
         If *data* is a :class:`~kika.cov.LegendreCovariance`.
+    ValueError
+        If an absolute block has no stored cross section for its row or column
+        reaction, or one of them is zero.
     """
     if isinstance(data, LegendreCovariance):
         raise TypeError(
             "COVERX format does not support MF34 (angular distribution) covariances. "
             "Use write_covfil() instead."
         )
+    data = _as_relative(data)
     if fmt == 'text':
         _write_coverx_text(data, file_path, title=title)
     else:
@@ -1285,8 +1323,10 @@ def write_boxer(
 
     The energy grid is written in the order held (no reordering), in eV (an
     ``energy_unit`` of ``'MeV'`` is converted, with a warning). Each matrix is
-    written as a covariance (ITYPE 3) with its values as stored; ``is_relative``
-    is neither read nor converted. For every diagonal block (same isotope and
+    written as a relative covariance (ITYPE 3): a relative block (or one with no
+    flag) as stored, an absolute one divided by the outer product of the stored
+    cross sections of its row and column reactions (*data* is not modified).
+    For every diagonal block (same isotope and
     MT on both axes) the file also gets a standard-deviation vector, the square
     root of the diagonal with negative entries taken as zero, and every
     cross-section vector found for a reaction of a matrix is written once.
@@ -1310,13 +1350,16 @@ def write_boxer(
     TypeError
         If *data* is a :class:`~kika.cov.LegendreCovariance`.
     ValueError
-        If an isotope maps to a MAT above 99999 (the field has five characters).
+        If an isotope maps to a MAT above 99999 (the field has five characters),
+        or an absolute block has no stored cross section for its row or column
+        reaction, or one of them is zero.
     """
     if isinstance(data, LegendreCovariance):
         raise TypeError(
             "BOXER format does not support MF34 (angular distribution) covariances. "
             "Use write_covfil() instead."
         )
+    data = _as_relative(data)
 
     # Check for MAT overflow (BOXER I5 field: max 99999)
     bad_zaids = set()
@@ -1732,7 +1775,8 @@ def read_covfil(file_path: str, energy_unit: str = 'eV') -> Union[CrossSectionCo
     block belongs to the Legendre orders ``l_row`` and ``l_col`` of its
     section; the frame is ``"unknown"`` (the file does not say). The grouped
     Legendre coefficients (MF3 sections with MT = 250 + L, L of 1 or more) go to
-    ``legendre_coefficients`` of the result.
+    ``legendre_coefficients`` of the result under ``(zaid, mt, L)``, with *mt*
+    the reaction of the MF34 blocks.
 
     Parameters
     ----------
@@ -1757,7 +1801,8 @@ def read_covfil(file_path: str, energy_unit: str = 'eV') -> Union[CrossSectionCo
         If no valid covariance matrices were found, or the covariance section
         of the file is neither MF33 nor MF34.
     ValueError
-        If *energy_unit* is not ``'eV'`` or ``'MeV'``.
+        If *energy_unit* is not ``'eV'`` or ``'MeV'``, or an MF34 file holds
+        Legendre coefficients and blocks of more than one reaction.
     """
     with open(file_path, 'r') as f:
         lines = f.readlines()
@@ -1812,16 +1857,23 @@ def read_covfil(file_path: str, energy_unit: str = 'eV') -> Union[CrossSectionCo
                 matrix=matrix, energy_grid=energy_grid,
                 is_relative=True, frame="unknown",
             )
-        # Store grouped Legendre coefficients from MF3 sections
-        # NJOY convention: MT = 250 + L (MT251→a_1, MT252→a_2, …)
-        for (zaid, mt_xs), values in xs_dict.items():
-            l_order = mt_xs - 250
-            if l_order >= 1:
-                mf34.legendre_coefficients[(zaid, mt_xs, l_order)] = values
         if mf34.num_matrices == 0:
             raise EmptyParsingError(
                 f"No valid data was extracted from the NJOY covariance matrix file: {file_path}"
             )
+        coefficient_sections = {
+            key: values for key, values in xs_dict.items() if key[1] - 250 >= 1
+        }
+        if coefficient_sections:
+            reactions = set(mf34.reaction_rows) | set(mf34.reaction_cols)
+            if len(reactions) != 1:
+                raise ValueError(
+                    f"{file_path}: MF3 sections 251+ hold the a_L of one reaction, "
+                    f"but the MF34 blocks cover MTs {sorted(reactions)}"
+                )
+            (reaction,) = reactions
+            for (zaid, mt_xs), values in coefficient_sections.items():
+                mf34.legendre_coefficients[(zaid, reaction, mt_xs - 250)] = values
         return mf34
 
     else:
@@ -2083,19 +2135,24 @@ def write_covfil(
     ValueError
         If an isotope maps to a MAT above 9999 (the field has four
         characters), if the rows span more than one isotope (a COVFIL holds one
-        material), or if an MF34 object has columns of another isotope.
+        material), if an MF34 object has columns of another isotope or an
+        absolute (LB=0) block, or if an absolute MF33 block has no stored cross
+        section for its row or column reaction, or one of them is zero.
 
     Notes
     -----
     The grid is written in the order held, in eV (an ``energy_unit`` of
     ``'MeV'`` is converted, with a warning): for an MF34 object it is the grid
-    of its first matrix. Matrix values are written as stored and ``is_relative``
-    is neither read nor converted; NJOY covariance tapes hold relative
-    covariances. Each section is filed under the MAT of the first row isotope.
+    of its first matrix. NJOY covariance tapes hold relative covariances: a
+    relative block (or one with no flag) is written as stored, an absolute MF33
+    block divided by the outer product of the stored cross sections of its row
+    and column reactions (*data* is not modified). Each section is filed under
+    the MAT of the first row isotope.
     Cross-section vectors are written only for that isotope and only for an MF33
     object. The ``legendre_coefficients`` of an MF34 object are not written.
     """
     is_mf33 = isinstance(data, CrossSectionCovariance)
+    data = _as_relative(data)
     meta = getattr(data, 'metadata', None) or {}
     if temperature is None:
         temperature = float(meta.get('temperature') or 0.0)
