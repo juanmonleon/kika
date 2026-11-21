@@ -36,6 +36,7 @@ from .remote import (
     LibraryNotFoundError,
     NetworkError,
     CacheError,
+    ChecksumMismatchError,
 )
 
 __all__ = [
@@ -94,4 +95,5 @@ __all__ = [
     "LibraryNotFoundError",
     "NetworkError",
     "CacheError",
+    "ChecksumMismatchError",
 ]

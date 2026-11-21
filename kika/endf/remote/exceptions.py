@@ -75,6 +75,26 @@ class AccessBlockedError(NetworkError):
         )
 
 
+class ChecksumMismatchError(ENDFRemoteError):
+    """A file's SHA-256 is not the one it should have.
+
+    Raised when a cached file no longer hashes to what was recorded when it entered
+    the cache, and when a file does not match the ``sha256`` the caller pinned.
+    ``path`` is the file checked when it is on disk, None for downloaded bytes.
+    """
+
+    def __init__(self, label: str, expected: str, actual: str, path=None):
+        self.label = label
+        self.expected = expected
+        self.actual = actual
+        self.path = path
+        where = f" ({path})" if path is not None else ""
+        super().__init__(
+            f"{label}{where}: SHA-256 is {actual}, expected {expected}. "
+            "Download it again with force_download=True, or check the pinned hash."
+        )
+
+
 class CacheError(ENDFRemoteError):
     """A file could not be written to the local download cache.
 

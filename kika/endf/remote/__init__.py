@@ -34,12 +34,13 @@ Cache structure:
         cache_metadata.json
 """
 
+import hashlib
 import shutil
 import tempfile
 from pathlib import Path
 
 from ..read_endf import read_endf
-from .cache import clear_cache, get_cache, get_cache_info
+from .cache import clear_cache, file_sha256, get_cache, get_cache_info
 from .catalog import (
     Catalog,
     CatalogEntry,
@@ -52,6 +53,7 @@ from .constants import list_available_libraries
 from .exceptions import (
     AccessBlockedError,
     CacheError,
+    ChecksumMismatchError,
     ENDFRemoteError,
     IsotopeNotFoundError,
     LibraryNotFoundError,
@@ -79,6 +81,11 @@ def _generate_filename(isotope: str | int, library: str, particle: str = "n") ->
     return f"{symbol}{a}{state}_{canonical_lib}_{particle}.endf"
 
 
+def _check_pinned(label: str, expected: str | None, actual: str, path: Path | None = None) -> None:
+    if expected is not None and actual != expected.lower():
+        raise ChecksumMismatchError(label, expected.lower(), actual, path)
+
+
 def download_endf(
     isotope: str | int,
     save_to: str | Path,
@@ -86,6 +93,7 @@ def download_endf(
     particle: str = "n",
     force_download: bool = False,
     timeout: float = 30.0,
+    sha256: str | None = None,
 ) -> Path:
     """
     Download an ENDF file and save it to a specific location.
@@ -119,6 +127,9 @@ def download_endf(
         True skips the cache lookup and downloads again, replacing the cached file.
     timeout : float
         Request timeout in seconds.
+    sha256 : str, optional
+        The SHA-256 (hex) the file must have, cached or downloaded. Nothing is
+        written to ``save_to`` when it does not match.
 
     Returns
     -------
@@ -143,6 +154,9 @@ def download_endf(
         challenge.
     CacheError
         If the file cannot be written to the cache.
+    ChecksumMismatchError
+        If the file does not have the pinned ``sha256``, or a cached file no longer
+        has the hash recorded when it was cached.
 
     Examples
     --------
@@ -180,7 +194,7 @@ def download_endf(
     if not force_download:
         cached_path = cache_instance.get(zaid, canonical_lib, particle)
         if cached_path:
-            # Copy from cache to destination
+            _check_pinned(str(isotope), sha256, file_sha256(cached_path), cached_path)
             shutil.copy2(cached_path, save_path)
             return save_path
 
@@ -193,6 +207,7 @@ def download_endf(
         use_cache=True,  # Still cache it for future use
         force_download=force_download,
     )
+    _check_pinned(str(isotope), sha256, hashlib.sha256(content).hexdigest())
 
     # Write to destination
     save_path.write_bytes(content)
@@ -209,6 +224,7 @@ def download_entry(
     save_to: str | Path | None = None,
     force_download: bool = False,
     timeout: float = 60.0,
+    sha256: str | None = None,
 ) -> Path:
     """Fetch one catalogue entry into the cache and return the cached path.
 
@@ -216,7 +232,10 @@ def download_entry(
     the exact file the IAEA lists (any library, any sub-library, thermal
     scattering included) and does not need a MAT table to find it. The cached
     file is the deliverable — an app can point at it directly and never copy
-    the bytes — and ``save_to`` additionally writes a copy where asked.
+    the bytes — and ``save_to`` additionally writes a copy where asked. With
+    ``sha256`` the cached file must have that hash (hex), or
+    :class:`~kika.endf.remote.exceptions.ChecksumMismatchError` is raised and
+    nothing is copied.
 
     Examples
     --------
@@ -229,6 +248,7 @@ def download_entry(
     cached = client.cached_path(entry)
     if cached is None:  # pragma: no cover - the put above makes this unreachable
         raise CacheError(f"{entry.filename} did not land in the cache")
+    _check_pinned(entry.filename, sha256, file_sha256(cached), cached)
     if save_to is not None:
         save_path = Path(save_to)
         if save_path.is_dir() or str(save_to).endswith(("/", "\\")):
@@ -258,6 +278,7 @@ def fetch_endf(
     force_download: bool = False,
     timeout: float = 30.0,
     save_to: str | Path | None = None,
+    sha256: str | None = None,
 ):
     """
     Download and parse an ENDF file from IAEA Nuclear Data Service.
@@ -288,6 +309,9 @@ def fetch_endf(
         - A full file path: "./data/Fe56.endf"
         - A directory: "./data/" (filename will be auto-generated)
         The file is saved in addition to normal caching behavior.
+    sha256 : str, optional
+        The SHA-256 (hex) the file must have, cached or downloaded; checked
+        before it is saved or parsed.
 
     Returns
     -------
@@ -302,6 +326,9 @@ def fetch_endf(
         If the isotope is not found in the specified library
     NetworkError
         If the download fails due to network issues
+    ChecksumMismatchError
+        If the file does not have the pinned ``sha256``, or a cached file no longer
+        has the hash recorded when it was cached.
 
     Examples
     --------
@@ -334,6 +361,7 @@ def fetch_endf(
     if cache and not force_download:
         cached_path = cache_instance.get(zaid, canonical_lib, particle)
         if cached_path:
+            _check_pinned(str(isotope), sha256, file_sha256(cached_path), cached_path)
             # If save_to requested, copy the cached file there
             if save_to:
                 save_path = Path(save_to)
@@ -354,6 +382,7 @@ def fetch_endf(
         use_cache=cache,
         force_download=force_download,
     )
+    _check_pinned(str(isotope), sha256, hashlib.sha256(content).hexdigest())
 
     # If save_to requested, save the content there
     if save_to:
@@ -415,6 +444,7 @@ __all__ = [
     "NetworkError",
     "AccessBlockedError",
     "CacheError",
+    "ChecksumMismatchError",
     # For advanced usage
     "IAEAClient",
     "parse_isotope",

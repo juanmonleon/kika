@@ -1,11 +1,21 @@
 """Local file cache for downloaded ENDF files."""
 
+import hashlib
 import json
 from datetime import datetime
 from pathlib import Path
 
 from .constants import get_cache_dir, normalize_library_name
-from .exceptions import CacheError
+from .exceptions import CacheError, ChecksumMismatchError
+
+
+def file_sha256(path: Path) -> str:
+    """The SHA-256 of a file's bytes, as a hex string."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 class ENDFCache:
@@ -81,11 +91,29 @@ class ENDFCache:
         -------
         Path or None
             Path to cached file if it exists, None otherwise
+
+        Raises
+        ------
+        ChecksumMismatchError
+            If the file no longer has the SHA-256 recorded when it was cached. A
+            file cached before hashes were recorded is returned unchecked.
         """
         cache_path = self._get_cache_path(zaid, library, particle)
-        if cache_path.exists():
-            return cache_path
-        return None
+        if not cache_path.exists():
+            return None
+        recorded = self.sha256(zaid, library, particle)
+        if recorded is not None:
+            actual = file_sha256(cache_path)
+            if actual != recorded:
+                raise ChecksumMismatchError(
+                    f"{normalize_library_name(library)}/{particle}/{zaid}", recorded, actual, cache_path
+                )
+        return cache_path
+
+    def sha256(self, zaid: int | str, library: str, particle: str = "n") -> str | None:
+        """The SHA-256 recorded when the file entered the cache, or None if there is none."""
+        key = f"{normalize_library_name(library)}/{particle}/{zaid}"
+        return self._load_metadata().get(key, {}).get("sha256")
 
     def put(
         self, zaid: int | str, library: str, content: bytes, particle: str = "n"
@@ -126,6 +154,7 @@ class ENDFCache:
             "library": canonical_lib,
             "particle": particle,
             "size_bytes": len(content),
+            "sha256": hashlib.sha256(content).hexdigest(),
             "cached_at": datetime.now().isoformat(),
             "path": str(cache_path),
         }
