@@ -34,7 +34,7 @@ def _dosimeter(threshold, sd=0.04, name=None):
     cov_edges = np.geomspace(1e5, 2e7, 9)
     ell = np.log(np.sqrt(cov_edges[:-1] * cov_edges[1:]))
     cov = sd**2 * np.exp(-0.5 * ((ell[:, None] - ell[None, :]) / 1.5) ** 2)
-    return Dosimeter(name or f"thr{threshold:.0e}", FINE, sigma, 2, cov_edges, cov)
+    return Dosimeter(name or f"thr{threshold:.2e}", FINE, sigma, 2, cov_edges, cov)
 
 
 def test_cells_add_up_to_the_rate_by_direct_integration():
@@ -130,11 +130,16 @@ def test_malformed_measurements_are_refused(measured, cov):
         adjust_spectrum(prior, [_dosimeter(2.8e6)], measured, cov)
 
 
-def test_a_prior_flux_that_is_not_positive_is_refused():
+def test_a_group_of_zero_prior_flux_stays_zero_and_carries_no_parameter():
     flux = _flux()
-    flux[4] = 0.0
-    with pytest.raises(ValueError, match="group 4"):
-        SpectrumPrior(EDGES, flux, _prior_covariance())
+    flux[25:] = 0.0
+    prior = SpectrumPrior(EDGES, flux, _prior_covariance())
+    d = _dosimeter(2.8e6)
+    result = adjust_spectrum(prior, [d], [1.2 * response_cells(prior, d).sum()], [[0.04**2]])
+    assert np.all(result.flux[25:] == 0.0) and np.all(result.log_covariance[25:] == 0.0)
+    assert result.flux[:25].sum() > flux.sum()
+    with pytest.raises(ValueError, match="zero in every group"):
+        SpectrumPrior(EDGES, np.zeros(30), _prior_covariance())
 
 
 def test_no_convergence_raises(monkeypatch):
@@ -146,14 +151,34 @@ def test_no_convergence_raises(monkeypatch):
         adjust_spectrum(prior, dosimeters, rates * 1.3, np.diag(np.full(6, 0.04**2)))
 
 
-def test_the_folded_cross_section_covariance_is_the_interval_shares_sandwich():
+def test_two_measurements_of_one_reaction_share_its_parameters():
+    prior = SpectrumPrior(EDGES, _flux(), _prior_covariance())
+    d = _dosimeter(2.8e6, name="Ni58p")
+    rate = response_cells(prior, d).sum()
+    v = 0.04**2
+    twice = adjust_spectrum(prior, [d, d], [1.10 * rate, 1.20 * rate], np.diag([v, v]))
+    once = adjust_spectrum(prior, [d], [np.sqrt(1.10 * 1.20) * rate], [[v / 2]])
+    assert list(twice.cross_section_factors) == ["Ni58p"]
+    np.testing.assert_allclose(twice.flux, once.flux, rtol=1e-10)
+    np.testing.assert_allclose(twice.cross_section_factors["Ni58p"], once.cross_section_factors["Ni58p"], rtol=1e-10)
+    np.testing.assert_allclose(twice.log_covariance, once.log_covariance, rtol=1e-8, atol=1e-14)
+
+
+def test_two_reactions_of_one_name_with_different_data_are_refused():
+    prior = SpectrumPrior(EDGES, _flux(), _prior_covariance())
+    with pytest.raises(ValueError, match="different data"):
+        adjust_spectrum(prior, [_dosimeter(2.8e6, name="X"), _dosimeter(4.5e6, name="X")],
+                        [1.0, 1.0], np.eye(2) * 0.01)
+
+
+def test_the_posterior_correlates_flux_and_cross_sections():
     prior = SpectrumPrior(EDGES, _flux(), _prior_covariance())
     dosimeters = [_dosimeter(t) for t in THRESHOLDS]
-    cells = [response_cells(prior, d) for d in dosimeters]
-    x = np.random.default_rng(5).normal(scale=0.1, size=30)
-    _, _, folded = adjust_module._linearise(x, cells, [d.cell_covariance for d in dosimeters])
-    for i, (c, d) in enumerate(zip(cells, dosimeters)):
-        moved = c * np.exp(x)[:, None]
-        share = moved.sum(axis=0)[:-1] / moved.sum()
-        assert folded[i, i] == pytest.approx(share @ d.relative_covariance @ share, rel=1e-12)
-    assert np.count_nonzero(folded - np.diag(np.diag(folded))) == 0
+    rates = np.array([response_cells(prior, d).sum() for d in dosimeters])
+    result = adjust_spectrum(prior, dosimeters, rates * 1.1, np.diag(np.full(6, 0.04**2)))
+    name = dosimeters[2].name
+    assert result.cross_section_factors[name].shape == (8,)
+    assert result.flux_cross_section_log_covariance[name].shape == (30, 8)
+    assert np.min(result.flux_cross_section_log_covariance[name]) < 0
+    prior_sd = np.sqrt(np.diag(dosimeters[2].relative_covariance))
+    assert np.all(np.sqrt(np.diag(result.cross_section_log_covariance[name])) <= prior_sd + 1e-15)

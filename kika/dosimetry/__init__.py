@@ -8,8 +8,10 @@ adjusted spectrum, its covariance and the consistency of the measurements.
 """
 from .response import BARN_CM2, Dosimeter, SpectrumPrior, response_cells
 from .adjust import AdjustmentNotConverged, SpectrumAdjustment, adjust_spectrum
+from .model import dosimeter_from_suite
 
 __all__ = [
     "BARN_CM2", "Dosimeter", "SpectrumPrior", "response_cells",
     "AdjustmentNotConverged", "SpectrumAdjustment", "adjust_spectrum",
+    "dosimeter_from_suite",
 ]

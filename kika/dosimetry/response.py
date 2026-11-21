@@ -53,8 +53,10 @@ class SpectrumPrior:
     edges : array_like
         Group boundaries in eV, strictly increasing: ``n + 1`` values.
     flux : array_like
-        The flux integrated over each group, ``n`` positive values, in the unit the
-        rates will be in (for example cm-2 s-1).
+        The flux integrated over each group, ``n`` values, in the unit the rates
+        will be in (for example cm-2 s-1). A group of zero flux (above the source,
+        or one a tally never scored) is not adjusted and stays zero; at least one
+        group must be positive.
     relative_covariance : array_like
         ``n x n``, symmetric: the covariance of ``phi_g / phi_g`` (to first order,
         of ``ln phi_g``). It may be singular. It holds every uncertainty of the
@@ -67,8 +69,9 @@ class SpectrumPrior:
     Raises
     ------
     ValueError
-        If a shape does not match, a flux is not positive, the covariance is not
-        symmetric, or *fine_shape* is not a valid table.
+        If a shape does not match, a flux is negative or not finite, no flux is
+        positive, the covariance is not symmetric, or *fine_shape* is not a valid
+        table.
     """
 
     edges: np.ndarray
@@ -81,8 +84,10 @@ class SpectrumPrior:
         flux = np.asarray(self.flux, dtype=float)
         if flux.shape != (edges.size - 1,):
             raise ValueError(f"flux must have {edges.size - 1} values, got shape {flux.shape}")
-        if not np.all(flux > 0):
-            raise ValueError(f"flux must be positive in every group; group {int(np.argmin(flux > 0))} is not")
+        if not np.all(np.isfinite(flux)) or np.any(flux < 0):
+            raise ValueError("flux must be finite and not negative in every group")
+        if not np.any(flux > 0):
+            raise ValueError("flux is zero in every group")
         cov = _symmetric("relative_covariance", np.asarray(self.relative_covariance, dtype=float), flux.size)
         fine_shape = None if self.fine_shape is None else validate(*self.fine_shape)
         object.__setattr__(self, "edges", edges)
@@ -175,7 +180,7 @@ def response_cells(prior: SpectrumPrior, dosimeter: Dosimeter) -> np.ndarray:
     Raises
     ------
     ValueError
-        If the prior's fine spectrum has no weight in a group.
+        If the prior's fine spectrum has no weight in a group of positive flux.
     """
     groups = prior.edges
     cov_edges = np.zeros(0) if dosimeter.covariance_edges is None else dosimeter.covariance_edges
@@ -187,8 +192,11 @@ def response_cells(prior: SpectrumPrior, dosimeter: Dosimeter) -> np.ndarray:
         weight = prior.fine_shape
     pieces = product_group_integrals(sigma, weight, cuts)
     norm = group_integrals(*weight, groups)
-    if np.any(norm <= 0):
-        raise ValueError(f"the prior's fine spectrum has no weight in group {int(np.argmin(norm > 0))}")
+    empty = (norm <= 0) & (prior.flux > 0)
+    if np.any(empty):
+        raise ValueError(f"the prior's fine spectrum has no weight in group {int(np.argmax(empty))}, "
+                         f"whose flux is positive")
+    norm = np.where(norm > 0, norm, 1.0)
 
     lower = cuts[:-1]
     g = np.searchsorted(groups, lower, side="right") - 1

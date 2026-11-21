@@ -1,23 +1,23 @@
-"""Generalized least-squares adjustment of a group spectrum to measured dosimeter rates.
+"""Generalized least-squares adjustment of a group spectrum and its dosimetry cross sections.
 
-The parameters are ``x_g = ln(phi_g / phi_g^prior)``, the data the logarithms of
-the measured rates. The model ``ln R_i(x)`` is not linear in ``x``, so the update
-is iterated (Gauss-Newton) to the maximum of the posterior. The first iteration
-agrees to first order with Perey's one-step STAY'SL adjustment, which is linear in
-relative deviations; it is not equal to it (here the residual is ``ln(M/C)`` and
-the flux ``phi exp(x)``). The
-cross sections are not adjusted: their relative covariance is folded into that of
-the data, ``V + F C_sigma F^T`` with ``F`` the share of each rate in each
-covariance interval at the current spectrum. Each step is
-:func:`kika.algebra.linear_update`.
+The parameters are ``ln(phi_g / phi_g^prior)`` for every group with a positive
+prior flux, and ``ln(sigma_k / sigma_k^prior)`` for every covariance interval of
+every reaction; the data are the logarithms of the measured rates, whose
+covariance is that of the measurements alone. Flux and cross sections are
+adjusted together, so the posterior holds their correlation. The model
+``ln R_i(x)`` is not linear in ``x``, so the update is iterated (Gauss-Newton) to
+the maximum of the posterior; each step is :func:`kika.algebra.linear_update`.
+The first iteration agrees to first order with Perey's one-step STAY'SL
+adjustment, which is linear in relative deviations; it is not equal to it (here
+the residual is ``ln(M/C)`` and the flux ``phi exp(x)``).
 
-The adjusted flux ``phi^prior exp(x)`` is the median of the log-normal posterior,
-not its mean.
+Adjusted values ``prior x exp(x)`` are medians of the log-normal posterior, not
+means. A group with zero prior flux is not a parameter: it stays zero.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Sequence, Tuple
+from dataclasses import dataclass, field
+from typing import Dict, List, Sequence, Tuple
 
 import numpy as np
 from scipy.linalg import block_diag
@@ -28,7 +28,7 @@ from .response import Dosimeter, SpectrumPrior, response_cells
 
 __all__ = ["AdjustmentNotConverged", "SpectrumAdjustment", "adjust_spectrum"]
 
-#: A Gauss-Newton step below this in every ``ln phi_g`` ends the iteration.
+#: A Gauss-Newton step below this in every parameter ends the iteration.
 STEP_TOLERANCE = 1e-12
 
 #: Gauss-Newton steps allowed before the adjustment is declared not converged.
@@ -41,7 +41,7 @@ class AdjustmentNotConverged(RuntimeError):
 
 @dataclass(frozen=True)
 class SpectrumAdjustment:
-    """The adjusted spectrum, its covariance and how well the dosimeters agree with the prior.
+    """The adjusted spectrum and cross sections, their covariances, and how well the dosimeters agree.
 
     Returned by :func:`adjust_spectrum`.
 
@@ -52,9 +52,11 @@ class SpectrumAdjustment:
     prior_flux : numpy.ndarray
         The prior group fluxes.
     flux : numpy.ndarray
-        The adjusted group fluxes (posterior median), in the prior's unit.
+        The adjusted group fluxes (posterior median), in the prior's unit; zero
+        where the prior is zero.
     log_covariance : numpy.ndarray
-        The posterior covariance of ``ln phi_g``, ``n x n``.
+        The posterior covariance of ``ln phi_g``, ``n x n``; zero rows and columns
+        for groups of zero prior flux.
     one_step_flux : numpy.ndarray
         The flux after the first Gauss-Newton iteration alone; it agrees with a linear
         one-step adjustment to first order.
@@ -62,7 +64,7 @@ class SpectrumAdjustment:
         The dosimeters, in the order of every per-dosimeter array.
     measured_rates, prior_rates, adjusted_rates : numpy.ndarray
         The measured rates and the rates of the prior and of the adjusted
-        spectrum, per target atom and per unit time of the flux.
+        spectrum and cross sections, per target atom and per unit time of the flux.
     chi2 : float
         The chi-square of the last linearisation, with *dof* degrees of freedom:
         at convergence, the minimum of the posterior objective.
@@ -75,6 +77,15 @@ class SpectrumAdjustment:
         The chi-square lost by leaving each dosimeter out.
     iterations : int
         The Gauss-Newton steps taken.
+    cross_section_factors : dict
+        Reaction name to the adjusted over prior cross section on each of its
+        covariance intervals (posterior median), for every reaction with a
+        covariance.
+    cross_section_log_covariance : dict
+        Reaction name to the posterior covariance of the logarithms of those factors.
+    flux_cross_section_log_covariance : dict
+        Reaction name to the posterior covariance between ``ln phi_g`` (rows) and
+        the logarithms of its factors (columns).
     """
 
     edges: np.ndarray
@@ -91,6 +102,9 @@ class SpectrumAdjustment:
     standardized_residuals: np.ndarray
     chi2_drop: np.ndarray
     iterations: int
+    cross_section_factors: Dict[str, np.ndarray] = field(default_factory=dict)
+    cross_section_log_covariance: Dict[str, np.ndarray] = field(default_factory=dict)
+    flux_cross_section_log_covariance: Dict[str, np.ndarray] = field(default_factory=dict)
 
     def integral(self, weights) -> Tuple[float, float]:
         """``sum_g w_g phi_g`` of the adjusted flux and its standard deviation.
@@ -144,27 +158,72 @@ class SpectrumAdjustment:
         return self.integral(np.arange(self.flux.size) >= where[0])
 
 
-def _linearise(x, cells, sigma_covariances):
-    scale = np.exp(x)[:, None]
-    parts = [c * scale for c in cells]
-    rates = np.array([p.sum() for p in parts])
-    group_share = np.vstack([p.sum(axis=1) for p in parts]) / rates[:, None]
-    interval_share = [p.sum(axis=0) / r for p, r in zip(parts, rates)]
-    folded = block_diag(*[s @ cov @ s for s, cov in zip(interval_share, sigma_covariances)])
-    return rates, group_share, folded
+def _reactions(dosimeters: List[Dosimeter]) -> Dict[str, Dosimeter]:
+    """One entry per reaction name; two dosimeters of one name must hold the same data."""
+    out: Dict[str, Dosimeter] = {}
+    for d in dosimeters:
+        first = out.setdefault(d.name, d)
+        if first is d:
+            continue
+        same = (np.array_equal(first.energies, d.energies) and np.array_equal(first.cross_section, d.cross_section)
+                and np.array_equal(first.laws, d.laws)
+                and np.array_equal(first.cell_covariance, d.cell_covariance)
+                and (first.covariance_edges is None) == (d.covariance_edges is None)
+                and (d.covariance_edges is None or np.array_equal(first.covariance_edges, d.covariance_edges)))
+        if not same:
+            raise ValueError(f"two dosimeters are named {d.name!r} but hold different data; "
+                             f"one name is one reaction, whose cross-section parameters they share")
+    return out
+
+
+class _Layout:
+    """Where each parameter sits: the positive-flux groups, then each reaction's intervals."""
+
+    def __init__(self, prior: SpectrumPrior, reactions: Dict[str, Dosimeter]):
+        self.groups = np.flatnonzero(prior.flux > 0)
+        self.slices: Dict[str, slice] = {}
+        start = self.groups.size
+        blocks = [prior.relative_covariance[np.ix_(self.groups, self.groups)]]
+        for name, d in reactions.items():
+            k = d.cell_covariance.shape[0] - 1
+            if k:
+                self.slices[name] = slice(start, start + k)
+                blocks.append(d.cell_covariance[:k, :k])
+                start += k
+        self.size = start
+        self.prior_covariance = block_diag(*blocks)
+
+
+def _rates_and_jacobian(x, layout, n_groups, names, cells):
+    phi_scale = np.ones(n_groups)
+    phi_scale[layout.groups] = np.exp(x[:layout.groups.size])
+    rates = np.empty(len(cells))
+    G = np.zeros((len(cells), layout.size))
+    for i, (name, c) in enumerate(zip(names, cells)):
+        sigma_scale = np.ones(c.shape[1])
+        where = layout.slices.get(name)
+        if where is not None:
+            sigma_scale[:-1] = np.exp(x[where])
+        part = c * phi_scale[:, None] * sigma_scale[None, :]
+        rates[i] = part.sum()
+        G[i, :layout.groups.size] = part.sum(axis=1)[layout.groups] / rates[i]
+        if where is not None:
+            G[i, where] = part.sum(axis=0)[:-1] / rates[i]
+    return rates, G
 
 
 def adjust_spectrum(prior: SpectrumPrior, dosimeters: Sequence[Dosimeter], measured_rates,
                     measured_covariance) -> SpectrumAdjustment:
-    """Adjust a group spectrum to measured dosimeter rates, with every covariance.
+    """Adjust a group spectrum and the dosimetry cross sections to measured rates, with every covariance.
 
     Parameters
     ----------
     prior : SpectrumPrior
         The calculated spectrum with its relative covariance.
     dosimeters : sequence of Dosimeter
-        The reactions measured, with their cross sections and relative covariances.
-        Different dosimeters' cross sections are taken as uncorrelated.
+        One per measured rate. Dosimeters of the same name are the same reaction
+        (two foils, or one foil bare and covered) and share its cross-section
+        parameters; different reactions' cross sections are taken as uncorrelated.
     measured_rates : array_like
         One positive rate per dosimeter, per target atom and per unit time of the
         prior's flux (saturation rates, with every decay, burn-up and cover
@@ -176,14 +235,15 @@ def adjust_spectrum(prior: SpectrumPrior, dosimeters: Sequence[Dosimeter], measu
     Returns
     -------
     SpectrumAdjustment
-        The adjusted spectrum and its covariance, the rates before and after, and
-        the consistency diagnostics.
+        The adjusted spectrum and cross sections with their covariances, the rates
+        before and after, and the consistency diagnostics.
 
     Raises
     ------
     ValueError
         If there is not one positive rate per dosimeter, the covariance shape does
-        not match, or a dosimeter has no response in the prior spectrum.
+        not match, a dosimeter has no response in the prior spectrum, or two
+        dosimeters of one name hold different data.
     numpy.linalg.LinAlgError
         If the predictive covariance of the rates is not positive definite.
     AdjustmentNotConverged
@@ -200,46 +260,66 @@ def adjust_spectrum(prior: SpectrumPrior, dosimeters: Sequence[Dosimeter], measu
     if V.shape != (m, m):
         raise ValueError(f"measured_covariance must be {m} x {m}, got {V.shape}")
 
+    reactions = _reactions(dosimeters)
     cells = [response_cells(prior, d) for d in dosimeters]
     for d, c in zip(dosimeters, cells):
         if not c.sum() > 0:
             raise ValueError(f"{d.name} has no response in the prior spectrum")
-    sigma_covariances = [d.cell_covariance for d in dosimeters]
+    names = [d.name for d in dosimeters]
+    layout = _Layout(prior, reactions)
     n = prior.flux.size
-    x0 = np.zeros(n)
+    x0 = np.zeros(layout.size)
     x = x0.copy()
     data = np.log(measured)
     prior_rates = np.array([c.sum() for c in cells])
+
+    def flux_of(params):
+        out = np.zeros(n)
+        out[layout.groups] = prior.flux[layout.groups] * np.exp(params[:layout.groups.size])
+        return out
+
     one_step = None
     update: LinearUpdate
     for iteration in range(1, MAX_ITERATIONS + 1):
-        rates, G, folded = _linearise(x, cells, sigma_covariances)
-        update = linear_update(x0, prior.relative_covariance, G, data - np.log(rates) + G @ (x - x0),
-                               V + folded)
+        rates, G = _rates_and_jacobian(x, layout, n, names, cells)
+        update = linear_update(x0, layout.prior_covariance, G, data - np.log(rates) + G @ (x - x0), V)
         step = float(np.max(np.abs(update.mean - x)))
         x = update.mean
         if one_step is None:
-            one_step = prior.flux * np.exp(x)
+            one_step = flux_of(x)
         if step < STEP_TOLERANCE:
             break
     else:
         raise AdjustmentNotConverged(
-            f"no convergence in {MAX_ITERATIONS} Gauss-Newton steps (last step {step:.3g} in ln phi)")
+            f"no convergence in {MAX_ITERATIONS} Gauss-Newton steps (last step {step:.3g})")
 
-    adjusted_rates = _linearise(x, cells, sigma_covariances)[0]
+    g = layout.groups
+    log_covariance = np.zeros((n, n))
+    log_covariance[np.ix_(g, g)] = update.covariance[:g.size, :g.size]
+    factors, sigma_cov, cross_cov = {}, {}, {}
+    for name, where in layout.slices.items():
+        factors[name] = np.exp(x[where])
+        sigma_cov[name] = update.covariance[where, where]
+        block = np.zeros((n, where.stop - where.start))
+        block[g] = update.covariance[:g.size, where]
+        cross_cov[name] = block
+
     return SpectrumAdjustment(
         edges=prior.edges,
         prior_flux=prior.flux,
-        flux=prior.flux * np.exp(x),
-        log_covariance=update.covariance,
+        flux=flux_of(x),
+        log_covariance=log_covariance,
         one_step_flux=one_step,
-        names=tuple(d.name for d in dosimeters),
+        names=tuple(names),
         measured_rates=measured,
         prior_rates=prior_rates,
-        adjusted_rates=adjusted_rates,
+        adjusted_rates=_rates_and_jacobian(x, layout, n, names, cells)[0],
         chi2=update.chi2,
         dof=update.dof,
         standardized_residuals=update.standardized_residuals,
         chi2_drop=update.chi2_drop,
         iterations=iteration,
+        cross_section_factors=factors,
+        cross_section_log_covariance=sigma_cov,
+        flux_cross_section_log_covariance=cross_cov,
     )
