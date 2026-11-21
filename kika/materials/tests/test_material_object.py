@@ -29,6 +29,7 @@ def test_to_dict_is_json_and_from_dict_gives_the_material_back():
     ).by_name["fuel"]
     mcnp, _ = read_material(["m2 1001.80c 2 8016.80c 1 gas=1 hlib=70h"], 0)
     mcnp.thermal_scattering = ["lwtr.20t"]
+    mcnp.set_density(1.0, "g/cc")
     for material in (serpent, mcnp):
         data = json.loads(json.dumps(material.to_dict()))
         again = Material.from_dict(data)

@@ -4,7 +4,7 @@ import html
 import json
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Tuple, Union
 
 from .._constants import ATOMIC_MASS, ATOMIC_NUMBER_TO_SYMBOL, N_AVOGADRO, NATURAL_ABUNDANCE
 from .._utils import zaid_to_symbol, symbol_to_zaid
@@ -97,6 +97,11 @@ def _atomic_mass(zaid: int) -> float:
     if z * 1000 + a not in ATOMIC_MASS:
         raise ValueError(f"ZAID {zaid} has no atomic mass in AME2020")
     return ATOMIC_MASS[z * 1000 + a]
+
+
+def _num(value: float) -> str:
+    """*value* in the shortest form that reads back as the same float."""
+    return repr(float(value))
 
 
 def _symbol_of(zaid: int) -> str:
@@ -1028,84 +1033,66 @@ class Material:
 
         return self
 
-    def _format_fraction(self, fraction: float) -> str:
-        """Format a fraction value for MCNP output.
-
-        Parameters
-        ----------
-        fraction : float
-            Fraction value to format.
-
-        Returns
-        -------
-        str
-            Formatted fraction in scientific notation.
-        """
-        return f"{fraction:.6e}"
-
     def to_mcnp(self) -> str:
-        """Serialise the material as an MCNP ``m`` card.
+        """Serialise the material as an MCNP ``m`` card (and its ``mt`` card).
 
         The output includes MCNP comments with:
         - Material name (if set) as a comment before the material card
         - Density in both g/cc and atoms/b-cm (if set) as a comment after libraries
         - Nuclide symbol after each fraction line
 
+        Numbers are written in their shortest exact form, and the card is read back
+        with :func:`~kika.materials.read_material` before it is returned: every
+        nuclide, fraction and library must come back as they are here. Density and
+        temperature go on MCNP's cells, so the card carries the density as a comment
+        only. What the card cannot hold is listed by :meth:`emission_losses`.
+
         Returns
         -------
         str
             MCNP material card formatted as a multi-line string.
+
+        Raises
+        ------
+        RuntimeError
+            If the card does not read back as this material (a defect in kika).
         """
         output_lines = []
-
-        # Add material name as comment if present
         if self.name:
             output_lines.append(f"c KIKA_MAT_NAME: {self.name}")
 
-        # Build main material line
         main_line = f"m{self.id}"
         lib_parts = [f"{k}={v}" for k, v in sorted(self.libs.items())]
         lib_parts += [f"{k}={v}" for k, v in self.keywords.items()]
         if lib_parts:
             main_line += " " + " ".join(lib_parts)
 
-        # Add density comment if density is set
         if self.density is not None and self.density_unit is not None:
-            try:
-                density_gcc = self.density_in("g/cc")
-                atomic_density = self._calculate_atomic_density()
-                if atomic_density is not None:
-                    main_line += f"  $ KIKA_DENSITY: {density_gcc:.6e} g/cc, {atomic_density:.6e} atoms/b-cm"
-                else:
-                    main_line += f"  $ KIKA_DENSITY: {density_gcc:.6e} g/cc"
-            except (ValueError, TypeError):
-                # Conversion to g/cc may fail for atoms/b-cm without sufficient
-                # composition data — output what we have
-                if self.density_unit == "atoms/b-cm":
-                    mass_density = self._calculate_mass_density()
-                    if mass_density is not None:
-                        main_line += f"  $ KIKA_DENSITY: {mass_density:.6e} g/cc, {self.density:.6e} atoms/b-cm"
-                    else:
-                        main_line += f"  $ KIKA_DENSITY: {self.density:.6e} atoms/b-cm"
-                else:
-                    main_line += f"  $ KIKA_DENSITY: {self.density:.6e} {self.density_unit}"
-
+            mass_density = self._calculate_mass_density()
+            atomic_density = self._calculate_atomic_density()
+            parts = []
+            if mass_density is not None:
+                parts.append(f"{_num(mass_density)} g/cc")
+            if atomic_density is not None:
+                parts.append(f"{_num(atomic_density)} atoms/b-cm")
+            if parts:
+                main_line += "  $ KIKA_DENSITY: " + ", ".join(parts)
         output_lines.append(main_line)
 
         sign = -1.0 if self.is_weight else 1.0
         for symbol, nuclide in sorted(self.nuclide.items()):
             zaid = _zaid.mcnp(nuclide.zaid)
-            nuclide_symbol = nuclide.symbol
-
             # One entry per data class: a .04p entry gives the photon table only, it adds no atoms.
             for zaid_lib in [f"{zaid}.{lib}" for _, lib in sorted(nuclide.libs.items())] or [str(zaid)]:
                 output_lines.append(
-                    f"     {zaid_lib:<12} {self._format_fraction(sign * nuclide.fraction):>14}   $ {nuclide_symbol:<6}"
+                    f"     {zaid_lib:<12} {_num(sign * nuclide.fraction):>24}   $ {nuclide.symbol:<6}"
                 )
         if self.thermal_scattering:
             output_lines.append(f"mt{self.id} " + " ".join(self.thermal_scattering))
 
-        return "\n".join(output_lines)
+        text = "\n".join(output_lines)
+        self._check_written("mcnp", text)
+        return text
 
     def to_serpent(self) -> str:
         """Serialise the material as a Serpent material card.
@@ -1115,89 +1102,181 @@ class Material:
             mat <name> <density> [rgb R G B] [tmp <T>] [moder <lib> <ZA>]
                 <zaid>.<lib> <fraction>
 
-        The material name is used if set, otherwise ``'mat<id>'``.
-        Density uses negative values for mass density (g/cc) and positive
-        for atomic density (atoms/b-cm), following Serpent convention.
+        The card is named :attr:`serpent_name`. Density uses negative values for
+        mass density (g/cc) and positive for atomic density (atoms/b-cm), following
+        Serpent convention, or ``sum`` when the material was read with it. A nuclide
+        carries its neutron library (its own, or the material's ``nlib``); Serpent
+        has no place for the others. Numbers are written in their shortest exact
+        form and the card is read back before it is returned. What the card cannot
+        hold is listed by :meth:`emission_losses`.
 
         Returns
         -------
         str
             Serpent material card formatted as a multi-line string.
+
+        Raises
+        ------
+        ValueError
+            If the material has no density and was not read with ``sum``.
+        RuntimeError
+            If the card does not read back as this material (a defect in kika).
         """
-        output_lines = []
-
-        mat_name = self.name if self.name else f"mat{self.id}"
-        mat_name = mat_name.replace(" ", "_")
-
-        # Density: preserve original unit
         if self.metadata.get("serpent_density_sum"):
             density_str = "sum"
-        elif self.density is not None and self.density_unit is not None:
-            if self.density_unit == "atoms/b-cm":
-                density_str = f"{self.density:.6e}"
-            else:
-                density_gcc = self._mass_density_gcc()
-                if density_gcc is not None:
-                    density_str = f"{-density_gcc:.6e}"
-                else:
-                    density_str = f"{-self.density:.6e}"
+        elif self.density is None or self.density_unit is None:
+            raise ValueError(f"Material {self.id} has no density, which a Serpent mat card needs")
+        elif self.density_unit == "atoms/b-cm":
+            density_str = _num(self.density)
         else:
-            density_str = "-1.000000e+00"
+            density_str = _num(-self._mass_density_gcc())
 
-        mat_line = f"mat {mat_name} {density_str}"
-
-        # Serpent modifiers
+        mat_line = f"mat {self.serpent_name} {density_str}"
         if self.metadata.get("rgb"):
             r, g, b = self.metadata["rgb"]
             mat_line += f" rgb {r} {g} {b}"
-
         if self.temperature is not None:
-            mat_line += f" tmp {self.temperature:.1f}"
-
+            mat_line += f" tmp {_num(self.temperature)}"
         if self.metadata.get("tms") is not None:
-            mat_line += f" tms {self.metadata['tms']:.1f}"
-
+            mat_line += f" tms {_num(self.metadata['tms'])}"
         if self.metadata.get("tft") is not None:
             tmin, tmax = self.metadata["tft"]
-            mat_line += f" tft {tmin:.1f} {tmax:.1f}"
-
-        if self.metadata.get("moder"):
-            for lib_name, za in self.metadata["moder"]:
-                mat_line += f" moder {lib_name} {za}"
-
+            mat_line += f" tft {_num(tmin)} {_num(tmax)}"
+        for lib_name, za in self.metadata.get("moder") or []:
+            mat_line += f" moder {lib_name} {za}"
         if self.metadata.get("burn") is not None:
             mat_line += f" burn {self.metadata['burn']}"
-
         if self.metadata.get("vol") is not None:
-            mat_line += f" vol {self.metadata['vol']:.6e}"
-
+            mat_line += f" vol {_num(self.metadata['vol'])}"
         if self.metadata.get("fix") is not None:
             fix_id, fix_t = self.metadata["fix"]
-            mat_line += f" fix {fix_id} {fix_t:.1f}"
+            mat_line += f" fix {fix_id} {_num(fix_t)}"
+        output_lines = [mat_line]
 
-        output_lines.append(mat_line)
-
-        # Output nuclides
         sign = -1.0 if self.is_weight else 1.0
+        for symbol, nuclide in sorted(self.nuclide.items()):
+            output_lines.append(f"{self._serpent_table(nuclide):<12} {_num(sign * nuclide.fraction):>24}")
 
+        text = "\n".join(output_lines)
+        self._check_written("serpent", text)
+        return text
+
+    @property
+    def serpent_name(self) -> str:
+        """The name of the Serpent card: ``name`` with spaces as ``_``, or ``mat<id>``."""
+        return (self.name or f"mat{self.id}").replace(" ", "_")
+
+    def _serpent_table(self, nuclide: Nuclide) -> str:
+        lib = nuclide.libs.get("nlib") or self.libs.get("nlib")
+        zaid = _zaid.mcnp(nuclide.zaid)
+        return f"{zaid}.{lib}" if lib else str(zaid)
+
+    def _check_written(self, code: str, text: str) -> None:
+        """Read *text* back and raise if it is not this material."""
+        from .parse_mcnp import read_material
+        from .parse_serpent import read_serpent_materials
+
+        lines = text.splitlines()
+        if code == "mcnp":
+            back, _ = read_material(lines, 1 if self.name else 0)
+            mt = lines[-1].split()[1:] if self.thermal_scattering else []
+            same = (back.libs == self.libs and back.keywords == self.keywords
+                    and {s: n.libs for s, n in back.nuclide.items()}
+                    == {s: n.libs for s, n in self.nuclide.items()}
+                    and mt == self.thermal_scattering)
+        else:
+            back = read_serpent_materials(lines).by_id[1]
+            if self.metadata.get("serpent_density_sum"):
+                density = None
+            elif self.density_unit == "atoms/b-cm":
+                density = self.density
+            else:
+                density = self._mass_density_gcc()
+            same = back.temperature == self.temperature and back.density == density
+        fractions = {s: n.fraction for s, n in self.nuclide.items()}
+        same = (same and {s: n.fraction for s, n in back.nuclide.items()} == fractions
+                and (not fractions or back.fraction_type == self.fraction_type))
+        if not same:
+            raise RuntimeError(
+                f"kika wrote material {self.id} as a {code} card that does not read back as "
+                f"the material; this is a defect in kika. The card:\n{text}"
+            )
+
+    def emission_losses(self, code: str) -> List[str]:
+        """What this material holds that its *code* card does not.
+
+        Parameters
+        ----------
+        code
+            ``'mcnp'`` or ``'serpent'``.
+
+        Returns
+        -------
+        list of str
+            One sentence per thing left out, empty when the card holds it all.
+
+        Raises
+        ------
+        ValueError
+            If *code* is neither.
+        """
+        code = code.lower()
+        losses = []
+        serpent_options = [k for k in ("rgb", "tms", "tft", "moder", "burn", "vol", "fix", "coefs", "coeft")
+                           if self.metadata.get(k) is not None]
+        if code == "mcnp":
+            # Density and temperature belong to MCNP's cells, not its m card: not a loss.
+            if self.metadata.get("serpent_density_sum"):
+                losses.append("the Serpent density 'sum' has no MCNP equivalent")
+            if serpent_options:
+                losses.append(f"Serpent options not written: {', '.join(serpent_options)}")
+        elif code == "serpent":
+            for key in ("coefs", "coeft"):
+                if self.metadata.get(key) is not None:
+                    losses.append(f"Serpent option '{key}' is not written back")
+            if self.keywords:
+                losses.append(f"MCNP keywords not written: {', '.join(sorted(self.keywords))}")
+            if self.thermal_scattering:
+                losses.append(f"S(alpha,beta) tables {', '.join(self.thermal_scattering)} not written: "
+                              f"Serpent takes them on therm cards and moder")
+            other = sorted({k for n in self.nuclide.values() for k in n.libs if k != "nlib"}
+                           | {k for k in self.libs if k != "nlib"})
+            if other:
+                losses.append(f"libraries other than the neutron one not written: {', '.join(other)}")
+        else:
+            raise ValueError(f"Unknown code '{code}': use 'mcnp' or 'serpent'")
+        return losses
+
+    def library_tables(self, code: str) -> List[Tuple[str, Optional[str]]]:
+        """``(nuclide symbol, table name)`` of every table the *code* card asks for.
+
+        Parameters
+        ----------
+        code
+            ``'mcnp'`` or ``'serpent'``.
+
+        Returns
+        -------
+        list of tuple
+            The table name is ``ZAID.suffix`` as the code looks it up (an S(alpha,beta)
+            table of the ``mt`` card is its own symbol), or None when the card gives no
+            suffix and the material no default, so the code picks one itself.
+        """
+        serpent = code.lower() == "serpent"
+        tables: List[Tuple[str, Optional[str]]] = []
         for symbol, nuclide in sorted(self.nuclide.items()):
             zaid = _zaid.mcnp(nuclide.zaid)
-
-            lib_suffix = None
-            if nuclide.libs:
-                lib_suffix = nuclide.libs.get('nlib', next(iter(nuclide.libs.values()), None))
-            elif self.libs:
-                lib_suffix = self.libs.get('nlib', next(iter(self.libs.values()), None))
-
-            if lib_suffix:
-                zaid_str = f"{zaid}.{lib_suffix}"
+            if serpent:
+                table = self._serpent_table(nuclide)
+                tables.append((symbol, table if "." in table else None))
+            elif nuclide.libs:
+                tables.extend((symbol, f"{zaid}.{lib}") for lib in sorted(nuclide.libs.values()))
             else:
-                zaid_str = str(zaid)
-
-            fraction_str = f"{sign * nuclide.fraction:.6e}"
-            output_lines.append(f"{zaid_str:<12} {fraction_str:>14}")
-
-        return "\n".join(output_lines)
+                lib = self.libs.get("nlib")
+                tables.append((symbol, f"{zaid}.{lib}" if lib else None))
+        if not serpent:
+            tables.extend((t, t) for t in self.thermal_scattering)
+        return tables
 
     def _effective_avg_atomic_mass(self) -> Optional[float]:
         """Return the effective average atomic mass for this material.
@@ -1467,8 +1546,78 @@ class MaterialCollection:
         -------
         str
             All material cards concatenated with blank lines between them.
+
+        Raises
+        ------
+        ValueError
+            If two materials would get the same card name (see
+            :attr:`Material.serpent_name`).
         """
+        clashes = self._serpent_name_clashes()
+        if clashes:
+            raise ValueError(f"Serpent card names given to more than one material: {'; '.join(clashes)}")
         return "\n\n".join(material.to_serpent() for material in self.by_id.values())
+
+    def _serpent_name_clashes(self) -> List[str]:
+        owners: Dict[str, List[int]] = {}
+        for material in self.by_id.values():
+            owners.setdefault(material.serpent_name, []).append(material.id)
+        return [f"{name} (materials {', '.join(map(str, ids))})" for name, ids in owners.items() if len(ids) > 1]
+
+    def emission_report(self, code: str, library=None) -> "EmissionReport":
+        """What writing these materials for *code* leaves out, and what the library lacks.
+
+        Every card is written (so read back, see :meth:`Material.to_mcnp`), each
+        material's :meth:`Material.emission_losses` are listed with what reading it
+        reported, and, with *library*, every table the cards ask for
+        (:meth:`Material.library_tables`) is looked up in it.
+
+        Parameters
+        ----------
+        code
+            ``'mcnp'`` or ``'serpent'``.
+        library
+            Path of the MCNP ``xsdir`` or Serpent ``xsdata`` the input will run
+            with; None skips the table check.
+
+        Returns
+        -------
+        ~kika.materials.report.EmissionReport
+            ``.status``, ``.to_html()``, ``.save(path)``.
+
+        Raises
+        ------
+        ValueError
+            If *code* is neither.
+        """
+        from .report import EmissionReport, read_library_tables
+
+        code = code.lower()
+        if code not in ("mcnp", "serpent"):
+            raise ValueError(f"Unknown code '{code}': use 'mcnp' or 'serpent'")
+        tables = read_library_tables(library) if library is not None else None
+        clashes = self._serpent_name_clashes() if code == "serpent" else []
+        clashing = {name.split(" (")[0] for name in clashes}
+        report = EmissionReport(code=code, library=str(library) if library is not None else None,
+                                clashes=clashes)
+        for material in self.by_id.values():
+            material.to_mcnp() if code == "mcnp" else material.to_serpent()
+            asked = material.library_tables(code)
+            missing = [[s, t] for s, t in asked if t and tables is not None and t.lower() not in tables]
+            no_library = sorted({s for s, t in asked if t is None})
+            read = (material.report.losses + material.report.approximations
+                    + material.report.unsupported + material.report.warnings)
+            losses = material.emission_losses(code)
+            if missing or (code == "serpent" and material.serpent_name in clashing):
+                status = "Failed"
+            elif losses or no_library or read:
+                status = "Warning"
+            else:
+                status = "OK"
+            report.materials.append({"id": material.id, "name": material.name, "status": status,
+                                     "losses": losses, "missing": missing,
+                                     "no_library": no_library, "read": list(read)})
+        return report
 
     def to_file(self, filepath: str, material_ids: Optional[List[int]] = None,
                 header: bool = True) -> None:
