@@ -1,0 +1,522 @@
+ ENDF/B-VIII.1                                                         0  0
+ 2.505400+4 5.347699+1          1          0          0          12522 1451
+ 0.000000+0 0.000000+0          0          0          0          62522 1451
+ 1.000000+0 2.000000+8          1          0         10          82522 1451
+ 0.000000+0 0.000000+0          0          0        466          52522 1451
+ 25-Mn- 54  NRG       EVAL-DEC15 A.J. Koning and D. Rochman       2522 1451
+ TENDL-2015           DIST-AUG24 REV1-NOV19            20240830   2522 1451
+---- ENDF/B-VIII.1    MATERIAL 2522         REVISION 1            2522 1451
+----- INCIDENT-NEUTRON DATA                                       2522 1451
+------ ENDF-6                                                     2522 1451
+                                                                  2522 1451
+TENDL-2015 (TALYS Evaluated Nuclear Data Library)                 2522 1451
+                                                                  2522 1451
+Mn054 neutron general purpose library                             2522 1451
+                                                                  2522 1451
+Author: A.J. Koning and D. Rochman, NRG - IAEA - PSI              2522 1451
+                                                                  2522 1451
+The TENDL team: A.J. Koning, D. Rochman, S.C. van der Marck,      2522 1451
+                J. Ch. Sublet, M. Fleming, J. Kopecky, S. Pomp,   2522 1451
+                H. Sjostrand, R. Forrest, E. Bauge,               2522 1451
+                H. Henriksson, O. Cabellos, S. Goriely,           2522 1451
+                J. Leppanen, H. Leeb, A. Plompen, R. Mills,       2522 1451
+                S. Hilaire, P. Romain, B. Morillon, H. Duarte     2522 1451
+                                                                  2522 1451
+Ref.: A.J. Koning and D. Rochman,                                 2522 1451
+      Modern nuclear data evaluation with the TALYS code system,  2522 1451
+      Nucl. Data Sheets 113, 2841 (2012).                         2522 1451
+                                                                  2522 1451
+************** G E N E R A L   I N F O R M A T I O N *************2522 1451
+                                                                  2522 1451
+This evaluated data file is based on a software system built      2522 1451
+around the nuclear model code TALYS [kon07], version 1.74. It is  2522 1451
+part of a large collection of isotopic evaluations, all created by2522 1451
+running the system with either adjusted or default input          2522 1451
+parameters. This means that the data in the entire collection have2522 1451
+been tested in detail for many isotopes against individual        2522 1451
+experimental data, while for other isotopes it is only as good as 2522 1451
+the global quality of TALYS at the moment. The mutual quality of  2522 1451
+all individual data files is however consistent: The same set of  2522 1451
+nuclear models is used and, equally important, the same ENDF-6    2522 1451
+formatting procedures for each isotope. The data file has been    2522 1451
+created automatically using the ENDF-6 format generator TEFAL.    2522 1451
+                                                                  2522 1451
+The resulting data file provides a complete representation of     2522 1451
+nuclear data needed for transport, activation, damage, heating,   2522 1451
+radioactivity, and shielding applications over the incident       2522 1451
+neutron energy range from 1.e-11 to 200. MeV.                     2522 1451
+                                                                  2522 1451
+All transport and activation data for neutrons, charged particles,2522 1451
+photons and residual nuclides are filed. This includes cross      2522 1451
+sections, angular distributions, double-differential spectra,     2522 1451
+isomeric production, discrete and continuum photon production     2522 1451
+cross sections, residual production cross sections and recoils.   2522 1451
+This general purpose evaluation can thus be used as both          2522 1451
+transport and activation library.                                 2522 1451
+                                                                  2522 1451
+A complete set of covariance data is included, which is stored    2522 1451
+in MF31-40.                                                       2522 1451
+                                                                  2522 1451
+**** N U C L I D E    S P E C I F I C   I N F O R M A T I O N ****2522 1451
+                                                                  2522 1451
+                      Resonance Range                             2522 1451
+                                                                  2522 1451
+  --------------------------------------------------------------- 2522 1451
+  --------------------------------------------------------------- 2522 1451
+                                                                  2522 1451
+  General methodology: The global approach considered in this     2522 1451
+          work is presented in the following paper: Modern        2522 1451
+          nuclear data evaluation with the TALYS code system,     2522 1451
+          A.J. Koning and D. Rochman, Nuclear Data Sheets 113     2522 1451
+          (2012) 2841.                                            2522 1451
+                                                                  2522 1451
+  MF2:  Resolved resonance range  (RRR)                           2522 1451
+       The RRR was generated with TARES-1.31, compiled on         2522 1451
+       12-10-2015 11:58:11 PM at Villingen  , Switzerland. The RRR2522 1451
+       expands from 0 to 1.343999E+4 eV. A total of               2522 1451
+       2 l-values are used and 36 resonances. The resonance       2522 1451
+       formalism is multi-level Breit Wigner (MLBW).              2522 1451
+       The ladder approach from the CALENDF code is used to       2522 1451
+       generate statistical resonances in the unresolved          2522 1451
+       resonance range. Therefore, the URR is translated into     2522 1451
+       resolved resonance range. Explanations about the method    2522 1451
+       can be found in the CALENDF manual: CEA-Report CEA-R-6277  2522 1451
+       "CALENDF-2010: User manual" by J.C. Sublet, P. Ribon and   2522 1451
+       M. Coste-Delcaux.                                          2522 1451
+       The method of creating statistical resonances in the       2522 1451
+       URR region is described in: "From average parameters to    2522 1451
+       statistical resolved resonances", D. Rochman et al.,       2522 1451
+       Annals of Nucl. Ene. 51 (2013) 60.                         2522 1451
+       The s-wave average level spacing is 482 eV and             2522 1451
+       the s-wave neutron strength is 0.000659 1e-4.              2522 1451
+                                                                  2522 1451
+       After the ladder method, the retroactive method is applied 2522 1451
+       to update the MF32 and MF2 with the SAMMY code.            2522 1451
+                                                                  2522 1451
+  MF32: Covariance file for resonance parameters                  2522 1451
+        The compact format is used to represent the covariance    2522 1451
+        information on the resonance parameters. Uncertainties    2522 1451
+        come from compilations, EXFOR or existing libraries and   2522 1451
+        correlations between parameters are obtained following    2522 1451
+        the method presented in NIM/A 589 (2008) 85.              2522 1451
+        SAMMY is used in the retroactive mode to update MF32.     2522 1451
+                                                                  2522 1451
+                                                                  2522 1451
+               Average parameters from INTER                      2522 1451
+                                                                  2522 1451
+     ****************************************************         2522 1451
+     *   Thermal (n,g) xs =  3.779210E+01 b.            *         2522 1451
+     *   RI      (n,g)    =  1.663450E+01 b.            *         2522 1451
+     *   MACS 30 keV      =  4.624100E-01 b. (MF2 only) *         2522 1451
+     *                                                  *         2522 1451
+     *   Thermal (n,el) xs = 8.330220E+00 b.            *         2522 1451
+     *   RI      (n,el)    = 7.436350E+01 b.            *         2522 1451
+     ****************************************************         2522 1451
+                                                                  2522 1451
+                                                                  2522 1451
+               Plots of different cross sections                  2522 1451
+                                                                  2522 1451
+                         Mn54(n,el)                               2522 1451
+ 1000 ++---+----+----+----+----+---+----+----+----+---++          2522 1451
+      +    +    +    +    +    +   +    +(n,el)A  A    +          2522 1451
+      +                                        AA      +          2522 1451
+  100 ++                                       AAAAA  ++          2522 1451
+      +                                        AAAAA   +          2522 1451
+      +                                        AAAAA   +          2522 1451
+   10 ++                                       AAAAA  ++          2522 1451
+      AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA   AAAAA   +          2522 1451
+      +                                    AAAAAAAAA   +          2522 1451
+      +                                        AAAAA   +          2522 1451
+    1 ++                                        A A   ++          2522 1451
+      +                                         A A    +          2522 1451
+      +    +    +    +    +    +   +    +    +  A +    +          2522 1451
+  0.1 ++---+----+----+----+----+---+----+----+----+---++          2522 1451
+    1e-050.0001.001 0.01 0.1   1   10  100  100010000100000       2522 1451
+                         Energy (eV)                              2522 1451
+                           Mn54(n,g)                              2522 1451
+ 10000 ++---+----+---+----+----+----+----+---+----+---++          2522 1451
+       AA   +    +   +    +    +    +    +(n,g)   A    +          2522 1451
+  1000 +AAAAAA                                        ++          2522 1451
+       +     AAAAAA                                    +          2522 1451
+   100 ++         AAAAAA                       AA     ++          2522 1451
+       +                AAAAA                  AA A    +          2522 1451
+    10 ++                    AAAAAA           AAAAAA  ++          2522 1451
+     1 ++                         AAAAA       AAAAAA  ++          2522 1451
+       +                              AAAA    AAAAAA   +          2522 1451
+   0.1 ++                                 AA  AAAAAA  ++          2522 1451
+       +                                    AAAAAAAA   +          2522 1451
+  0.01 ++                                    AAAAAAA  ++          2522 1451
+       +    +    +   +    +    +    +    +   +    AA   +          2522 1451
+ 0.001 ++---+----+---+----+----+----+----+---+----+---++          2522 1451
+     1e-050.0001.0010.01 0.1   1    10  100 100010000100000       2522 1451
+                          Energy (eV)                             2522 1451
+                                                                  2522 1451
+                                                                  2522 1451
+  --------------------------------------------------------------- 2522 1451
+  --------------------------------------------------------------- 2522 1451
+                                                                  2522 1451
+***************************** T A L Y S **************************2522 1451
+                                                                  2522 1451
+TALYS is a computer code system for the prediction and analysis   2522 1451
+of nuclear reactions. TALYS simulates reactions that involve      2522 1451
+neutrons, gamma-rays, protons, deuterons, tritons, helions and    2522 1451
+alpha-particles, in the 1 keV - 200 MeV energy range. This is     2522 1451
+achieved by implementing a suite of nuclear reaction models into  2522 1451
+a single code system. This nuclear data file is based on a        2522 1451
+theoretical analysis that utilizes the optical model, compound    2522 1451
+nucleus statistical theory, fission, direct reactions and         2522 1451
+pre-equilibrium processes, in combination with databases and      2522 1451
+models for nuclear structure. The following output of TALYS is    2522 1451
+stored in this data file:                                         2522 1451
+                                                                  2522 1451
+- Total, elastic and non-elastic cross sections                   2522 1451
+- Inelastic cross sections to discrete states                     2522 1451
+- Exclusive channel cross sections, e.g. (n,g), (n,2n), (n,np),.. 2522 1451
+- Inelastic scattering angular distributions to discrete states   2522 1451
+- Exclusive channel energy spectra                                2522 1451
+- Exclusive channel double-differential spectra                   2522 1451
+- Exclusive gamma production for discrete states and continuum    2522 1451
+- Elastic scattering angular distributions                        2522 1451
+- Recoil data                                                     2522 1451
+- Total particle cross sections, e.g. (n,xn), (n,xp),..           2522 1451
+- Total particle energy spectra                                   2522 1451
+- Total particle double-differential spectra                      2522 1451
+- Isomeric and ground state cross sections                        2522 1451
+- Residual production cross sections                              2522 1451
+                                                                  2522 1451
+For a description of the used nuclear models and their            2522 1451
+parameterization we refer to [kon12]. If for this specific        2522 1451
+nuclide we deviate from the global parameterization, it is made   2522 1451
+explicit above under Nuclide Specific Information.                2522 1451
+                                                                  2522 1451
+***************** F I L E   I N F O R M A T I O N ****************2522 1451
+                                                                  2522 1451
+##### MF1: GENERAL INFORMATION                                    2522 1451
+                                                                  2522 1451
+- MT451    : Descriptive data and directory                       2522 1451
+                                                                  2522 1451
+This text and the full directory of used MF/MT sections.          2522 1451
+                                                                  2522 1451
+##### MF2: RESONANCE PARAMETERS                                   2522 1451
+                                                                  2522 1451
+- MT151    : Resonance parameters                                 2522 1451
+                                                                  2522 1451
+Details about the origin of the resonance parameters for this     2522 1451
+nuclide are given above in this description. In general, both a   2522 1451
+Resolved and an Unresolved Resonance Range are given.             2522 1451
+                                                                  2522 1451
+##### MF3: REACTION CROSS SECTIONS                                2522 1451
+                                                                  2522 1451
+All the data present in the following MT-sections have been       2522 1451
+calculated with TALYS, possibly normalized to experimental data.  2522 1451
+If the maximal cross section in an excitation function over the   2522 1451
+whole energy range does not exceed 1.e-9 b, the MT-number is not  2522 1451
+included. Cross sections lower than 1.e-20 b are assumed to have  2522 1451
+no physical meaning and are set to zero. All MT numbers extend up 2522 1451
+to the highest incident energy.                                   2522 1451
+The following reaction channels/MT numbers are generally included:2522 1451
+                                                                  2522 1451
+- MT1      : Total cross section                                  2522 1451
+                                                                  2522 1451
+Calculated with the optical model over the whole energy range,    2522 1451
+or partly reproduced using experimental data.                     2522 1451
+                                                                  2522 1451
+- MT2      : Elastic scattering cross section                     2522 1451
+                                                                  2522 1451
+Obtained by subtracting the non-elastic cross section from the    2522 1451
+total cross section.                                              2522 1451
+                                                                  2522 1451
+- MT3      : Non-elastic cross section                            2522 1451
+                                                                  2522 1451
+Calculated with the optical model over the whole energy range.    2522 1451
+                                                                  2522 1451
+- MT4      : Total inelastic cross section                        2522 1451
+                                                                  2522 1451
+Sum of MT=51-91.                                                  2522 1451
+                                                                  2522 1451
+- MT5      : (n,anything) cross section                           2522 1451
+                                                                  2522 1451
+MT5 contains the reactions which can not be stored in any other   2522 1451
+MT-number. The information of MF3/MT5 can be combined with        2522 1451
+MF6/MT5 to obtain residual production cross sections particle     2522 1451
+production cross sections and (double-)differential cross         2522 1451
+sections.                                                         2522 1451
+                                                                  2522 1451
+- MT16     : (n,2n) cross section                                 2522 1451
+- MT17     : (n,3n) cross section                                 2522 1451
+- MT22     : (n,na) cross section                                 2522 1451
+- MT28     : (n,np) cross section                                 2522 1451
+- MT51-90  : (n,n') cross section for 1st-40th excited state      2522 1451
+- MT91     : (n,n') continuum cross section                       2522 1451
+- MT102    : (n,gamma) cross section                              2522 1451
+- MT103    : (n,p) cross section                                  2522 1451
+- MT104    : (n,d) cross section                                  2522 1451
+- MT105    : (n,t) cross section                                  2522 1451
+- MT106    : (n,h) cross section                                  2522 1451
+- MT107    : (n,a) cross section                                  2522 1451
+- MT600-610: (n,p) cross section for 0th-10th excited state       2522 1451
+- MT649    : (n,p) continuum cross section                        2522 1451
+- MT650-655: (n,d) cross section for 0th-5th excited state        2522 1451
+- MT699    : (n,d) continuum cross section                        2522 1451
+- MT700-705: (n,t) cross section for 0th-5th excited state        2522 1451
+- MT749    : (n,t) continuum cross section                        2522 1451
+- MT750-755: (n,h) cross section for 0th-5th excited state        2522 1451
+- MT799    : (n,h) continuum cross section                        2522 1451
+- MT800-810: (n,a) cross section for 0th-10th excited state       2522 1451
+- MT849    : (n,a) continuum cross section                        2522 1451
+                                                                  2522 1451
+##### MF4: ANGULAR DISTRIBUTIONS OF SECONDARY PARTICLES           2522 1451
+                                                                  2522 1451
+We use MF4 for the neutron scattering angular distribution for    2522 1451
+discrete levels.                                                  2522 1451
+                                                                  2522 1451
+- MT2      : Elastic angular distribution                         2522 1451
+                                                                  2522 1451
+The flag LTT=3 is used to indicate a switch at some high energy,  2522 1451
+generally 50 MeV, from a Legendre representation to a tabulated   2522 1451
+representation. For incident energies below this energy, the      2522 1451
+Legendre coefficients are given on a sufficiently precise energy  2522 1451
+grid. They are a sum of calculated Legendre coefficients for      2522 1451
+compound nucleus and shape-elastic scattering. For higher         2522 1451
+incident energies, relative angular distributions are tabulated   2522 1451
+on an angular grid.                                               2522 1451
+                                                                  2522 1451
+- MT51-70  : (n,n') angular distribution for 1st-20th state       2522 1451
+- MT600-610: (n,p) angular distribution for 0th-10th state        2522 1451
+- MT650-655: (n,d) angular distribution for 0th-5th state         2522 1451
+- MT700-705: (n,t) angular distribution for 0th-5th state         2522 1451
+- MT750-755: (n,h) angular distribution for 0th-5th state         2522 1451
+- MT800-810: (n,a) angular distribution for 0th-10th state        2522 1451
+                                                                  2522 1451
+##### MF6: PRODUCT ENERGY-ANGLE DISTRIBUTIONS                     2522 1451
+                                                                  2522 1451
+In MF6 we store all secondary energy, angle, and energy-angle     2522 1451
+distributions, as well as all residual and discrete + continuum   2522 1451
+photon production cross sections for channels other than capture  2522 1451
+(MT102) and reactions to discrete levels (MT51,etc.).             2522 1451
+All data are generated with TALYS.                                2522 1451
+                                                                  2522 1451
+- MT5      : (n,anything) yields and energy-angle distributions   2522 1451
+                                                                  2522 1451
+MT5 contains, in this order,                                      2522 1451
+For neutrons up to alpha particles and photons:                   2522 1451
+- the production yields per particle for the whole energy range   2522 1451
+- the secondary energy-angle distributions per particles which are2522 1451
+  not represented by explicit MT numbers. On a secondary energy   2522 1451
+  grid the relative emission spectra are given together with the  2522 1451
+  parameters for the Kalbach systematics for angular              2522 1451
+  distributions. Inelastic scattering cross sections for discrete 2522 1451
+  states have been broadened and added to the continuum spectra.  2522 1451
+For each residual product:                                        2522 1451
+- the production yields for the whole energy range.               2522 1451
+- the recoil                                                      2522 1451
+These distributions can be multiplied with MF3/MT5 to get         2522 1451
+the production cross sections and (double-)differential cross     2522 1451
+sections.                                                         2522 1451
+                                                                  2522 1451
+- MT16     : (n,2n) energy-angle distr. and photon production     2522 1451
+                                                                  2522 1451
+First, for each type of outgoing particle, the (trivial) integer  2522 1451
+particle yields are given. Next, on a sufficiently dense incident 2522 1451
+energy grid the secondary energy-angle distributions are          2522 1451
+specified by means of the relative emission spectra and the       2522 1451
+parameters for the Kalbach systematics for angular distributions. 2522 1451
+Next, the photon yield is tabulated as a function of incident     2522 1451
+energy. For each incident energy, the photon production is given  2522 1451
+for all discrete gamma lines present in the final nucleus. A      2522 1451
+continuum photon distribution is added to this. We assume         2522 1451
+isotropy for all produced gamma rays.                             2522 1451
+                                                                  2522 1451
+For the following MT-numbers, the same procedure as for MT16 is   2522 1451
+followed:                                                         2522 1451
+                                                                  2522 1451
+- MT17 : (n,3n) energy-angle distr. and photon production         2522 1451
+- MT22 : (n,na) energy-angle distr. and photon production         2522 1451
+- MT28 : (n,np) energy-angle distr. and photon production         2522 1451
+- MT91 : (n,n') continuum energy-angle distr. and phot. prod.     2522 1451
+- MT649: (n,p) continuum energy-angle distr. and photon prod.     2522 1451
+- MT699: (n,d) continuum energy-angle distr. and photon prod.     2522 1451
+- MT749: (n,t) continuum energy-angle distr. and photon prod.     2522 1451
+- MT809: (n,h) continuum energy-angle distr. and photon prod.     2522 1451
+- MT849: (n,a) continuum energy-angle distr. and photon prod.     2522 1451
+                                                                  2522 1451
+##### MF8: RADIOACTIVE DECAY DATA                                 2522 1451
+                                                                  2522 1451
+For reactions to isomers, MF8 designates where the information    2522 1451
+for isomeric versus ground state production, or residual          2522 1451
+production can be found, i.e. for each MT number it points to     2522 1451
+either MF6, MF9 or MF10.                                          2522 1451
+                                                                  2522 1451
+##### MF9: MULTIPLICITIES FOR PRODUCTION OF RADIOACTIVE NUCLIDES  2522 1451
+                                                                  2522 1451
+MF9 is used for isomer production by non-threshold reactions.     2522 1451
+Final states with a lifetime that exceeds 1 second are treated    2522 1451
+as isomer.                                                        2522 1451
+                                                                  2522 1451
+##### MF10: CROSS SECTIONS FOR PRODUCTION OF RADIOACTIVE NUCLIDES 2522 1451
+                                                                  2522 1451
+MF10 is used for isomer production by threshold reactions.        2522 1451
+Final states with a lifetime that exceeds 1 second are treated    2522 1451
+as isomer.                                                        2522 1451
+                                                                  2522 1451
+##### MF12: PHOTON PRODUCTION YIELD DATA                          2522 1451
+                                                                  2522 1451
+MF12 is used for the photon production for two types of reactions:2522 1451
+- Reactions to discrete levels (MT51, etc.) For this transition   2522 1451
+  probabilities are used (LO=2)                                   2522 1451
+- Photons from neutron capture (MT102). Here multiplicities are   2522 1451
+  given                                                           2522 1451
+                                                                  2522 1451
+##### MF14: PHOTON ANGULAR DISTRIBUTIONS                          2522 1451
+                                                                  2522 1451
+All photon production is considered as isotropic                  2522 1451
+                                                                  2522 1451
+##### MF15: PHOTON ENERGY SPECTRA                                 2522 1451
+                                                                  2522 1451
+For capture (MT102), the photon energy spectrum is given.         2522 1451
+                                                                  2522 1451
+##### MF32: COVARIANCES OF RESONANCE PARAMETERS                   2522 1451
+                                                                  2522 1451
+In MF32, we store the covariances of resonance parameters,        2522 1451
+and more details are given above in this description.             2522 1451
+                                                                  2522 1451
+##### MF33: COVARIANCES OF NEUTRON CROSS SECTIONS                 2522 1451
+                                                                  2522 1451
+In MF33, we store the covariances of most, but not all, reaction  2522 1451
+channels that are given in MF3. All covariances are generated     2522 1451
+with the TASMAN code [kon12], which generates TALYS runs using    2522 1451
+a Monte Carlo parameter method.                                   2522 1451
+For each MT-number, the information consists of:                  2522 1451
+1. Covariances for MTa, Ea and MTa, Ea (variances)                2522 1451
+2. Covariances for MTa, Ea and MTa, Eb (correlations for the      2522 1451
+   same reaction channel between different energies)              2522 1451
+3. Covariances for MTa, Ea and MTb, Ea (correlations between      2522 1451
+   different reaction channels for the same energy)               2522 1451
+4. Covariances for MTa, Ea and MTb, Eb (correlations between      2522 1451
+   different reaction channels for different energies)            2522 1451
+Classes 1 and 2 are covered by NI-type subsubsections with        2522 1451
+flag LB=5, followed by a LB=8 section which contains              2522 1451
+the cross section variances multiplied by 1.e-3. Next, classes 3  2522 1451
+and 4 are covered by flag LB=6 to account for the different       2522 1451
+energy grids that two correlating MT-sections may have. Since     2522 1451
+the total correlation matrix is fully symmetric, we only need to  2522 1451
+include the correlation elements between different MT-numbers     2522 1451
+once, and we do that in the subsection with the lowest of the     2522 1451
+two MT-numbers. We include covariance information for all the     2522 1451
+total cross sections, the lumped partial cross sections and the   2522 1451
+individual inelastic cross sections per level (MT51,...). We do   2522 1451
+not include covariances for MT600 and higher MT-numbers. For the  2522 1451
+most important channels, we include cross-channel correlations.   2522 1451
+                                                                  2522 1451
+##### MF34: COVARIANCES OF ANGULAR DISTRIBUTIONS                  2522 1451
+                                                                  2522 1451
+In MF34, we store the covariances of the elastic scattering       2522 1451
+angular distributions that are given in MF4/MT2. All covariances  2522 1451
+are generated with the TASMAN code [kon12], which generates       2522 1451
+TALYS runs using a Monte Carlo parameter method. The tables are   2522 1451
+restricted to MT2 and contain covariances for the first 6         2522 1451
+Legendre coefficients. Both intra- and inter-correlations of the  2522 1451
+various Legendre coefficients are given. As in MF33, the LB5      2522 1451
+representation is used.                                           2522 1451
+                                                                  2522 1451
+##### MF40: COVARIANCES OF ISOMER PRODUCTION                      2522 1451
+                                                                  2522 1451
+For covariances of ground state and isomeric cross sections, the  2522 1451
+same procedures as for MF33 are used.                             2522 1451
+                                                                  2522 1451
+***** F I L E   C H E C K I N G   A N D   P R O C E S S I N G ****2522 1451
+                                                                  2522 1451
+This file has been checked and processed by                       2522 1451
+- the BNL checking codes CHECKR-8.13, FIZCON-8.09 and PSYCHE-8.05 2522 1451
+  [her08],                                                        2522 1451
+- the preprocessing codes PREPRO-2015 [cul12] into a PENDF file,  2522 1451
+- the processing code NJOY12.50 [mac10] into a PENDF file and an  2522 1451
+  MCNP (ACE) library,                                             2522 1451
+- MCNP for a standard calculation with the ACE library.           2522 1451
+                                                                  2522 1451
+*********************** R E F E R E N C E S **********************2522 1451
+                                                                  2522 1451
+[cul12] D.E. Cullen, PREPRO 2013 - 2013 ENDF-6 Pre-processing     2522 1451
+        codes, Technical report IAEA-NDS-39 (Rev.14), IAEA (2010) 2522 1451
+[her08] M. Herman, ENDF Utility Codes Release 8.0, (2008)         2522 1451
+[kon07] A.J. Koning, S. Hilaire and M.C. Duijvestijn, TALYS-1.0,  2522 1451
+        Proceedings of the International Conference on Nuclear    2522 1451
+        Data for Science and Technology - ND-2007,                2522 1451
+        April 22-27, 2007, Nice, France                           2522 1451
+[kon12] A.J. Koning and D. Rochman, Modern nuclear data           2522 1451
+        evaluation with the TALYS code system, Nuclear Data       2522 1451
+        Sheets 113, 2841 (2012)                                   2522 1451
+[mac10] R.E. Macfarlane and A.C. Kahler, Methods for processing   2522 1451
+        ENDF/B-VII with NJOY, Nuclear Data Sheets 111, 2739 (2010)2522 1451
+                                                                  2522 1451
+************************* C O N T E N T S ************************2522 1451
+                                                                  2522 1451
+ ***************** Program LINEAR (VERSION 2017-1) ***************2522 1451
+ For All Data Greater than 1.0000E-10 barns in Absolute Value     2522 1451
+ Data Linearized to Within an Accuracy of .100000000 per-cent     2522 1451
+ ***************** Program FIXUP (Version 2017-1) ****************2522 1451
+ Corrected ZA/AWR in All Sections-----------------------------Yes 2522 1451
+ Corrected Thresholds-----------------------------------------No  2522 1451
+ Extended Cross Sections to 20 MeV----------------------------No  2522 1451
+ Allow Cross Section Deletion---------------------------------No  2522 1451
+ Allow Cross Section Reconstruction---------------------------Yes 2522 1451
+ Make All Cross Sections Non-Negative-------------------------Yes 2522 1451
+ Delete Energies Not in Ascending Order-----------------------Yes 2522 1451
+ Deleted Duplicate Points-------------------------------------Yes 2522 1451
+ Check for Ascending MAT/MF/MT Order--------------------------Yes 2522 1451
+ Check for Legal MF/MT Numbers--------------------------------Yes 2522 1451
+ Allow Creation of Missing Sections---------------------------No  2522 1451
+ Allow Insertion of Energy Points-----------------------------No  2522 1451
+ Uniform Energy Grid for ALL MT-------------------------------No  2522 1451
+ Delete Section if Cross Section =0 at All Energies-----------Yes 2522 1451
+                                1        451        475          02522 1451
+                                3         17          7          02522 1451
+                                8         17          3          02522 1451
+                               10         17         13          02522 1451
+                               40         17         11          02522 1451
+ 0.000000+0 0.000000+0          0          0          0          02522 1  0
+                                                                  2522 0  0
+ 25054.0000 53.4769900          0          0          0          02522 3 17
+-20992300.0-20992300.0          0          0          1         122522 3 17
+         12          2                                            2522 3 17
+ 21384900.0 0.0        22000000.08.202791E-4 23000000.0 .0085192702522 3 17
+ 24000000.0 .026848700 25000000.0 .053410400 26000000.0 .0791503002522 3 17
+ 27000000.0 .099714000 28000000.0 .117340000 29000000.0 .1290390002522 3 17
+ 30000000.0 .136401000 30000000.0 0.0        200000000. 0.0       2522 3 17
+                                                                  2522 3  0
+                                                                  2522 0  0
+ 25054.0000 53.4769900          0          0          2          12522 8 17
+ 2.505200+4 0.000000+0         10          0          0          02522 8 17
+ 2.505200+4 3.778000+5         10          1          0          02522 8 17
+                                                                  2522 8  0
+                                                                  2522 0  0
+ 25054.0000 53.4769900          0          0          2          0252210 17
+-20992300.0-20992300.0      25052          0          1         12252210 17
+         12          2                                            252210 17
+ 21384900.0 0.0        22000000.08.084381E-4 23000000.0 .007633040252210 17
+ 24000000.0 .021511200 25000000.0 .039607100 26000000.0 .055788100252210 17
+ 27000000.0 .067000300 28000000.0 .077084910 29000000.0 .082646800252210 17
+ 30000000.0 .085768600 30000000.0 0.0        200000000. 0.0       252210 17
+-20992300.0-21370100.0      25052          1          1         12252210 17
+         12          2                                            252210 17
+ 21769700.0 0.0        22000000.0 1.18414E-5 23000000.0 8.86230E-4252210 17
+ 24000000.0 .005337480 25000000.0 .013803300 26000000.0 .023362200252210 17
+ 27000000.0 .032713700 28000000.0 .040255000 29000000.0 .046392000252210 17
+ 30000000.0 .050632500 30000000.0 0.0        200000000. 0.0       252210 17
+                                                                  252210  0
+                                                                  2522 0  0
+ 25054.0000 53.4769900          0          0          2          0252240 17
+-2.099230+7-2.099230+7      25052          0          0          1252240 17
+ 1.000000+1 0.000000+0          0         17          0          1252240 17
+ 0.000000+0 0.000000+0          1          5         10          4252240 17
+ 1.000000-5 2.138490+7 2.400000+7 2.800000+7 3.421700-1 3.067930-1252240 17
+ 2.303420-1 2.910460-1 2.473160-1 2.744590-1                      252240 17
+-2.099230+7-2.137010+7      25052          1          0          1252240 17
+ 1.000000+1 1.000000+0          0         17          0          1252240 17
+ 0.000000+0 0.000000+0          1          5         10          4252240 17
+ 1.000000-5 2.138490+7 2.400000+7 2.800000+7 3.502830-1 3.199400-1252240 17
+ 2.412740-1 3.330130-1 2.775140-1 2.891340-1                      252240 17
+                                                                  252240  0
+                                                                  2522 0  0
+                                                                     0 0  0
+                                                                    -1 0  0

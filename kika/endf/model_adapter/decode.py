@@ -69,7 +69,7 @@ __all__ = ["decodeMF3MT", "decodeMF1MT451", "decodeReactionSuite"]
 #: MF numbers this decoder converts into the model (the photon files, MF12-15,
 #: are handled beside them). Everything else the tape carries -- parsed or
 #: not -- is declared unsupported by the report rather than silently skipped.
-SUPPORTED_MF = (1, 2, 3, 4, 5, 6, 7, 31, 32, 33, 34, 35)
+SUPPORTED_MF = (1, 2, 3, 4, 5, 6, 7, 31, 32, 33, 34, 35, 40)
 
 #: Of those, the ones whose content belongs to the ``covarianceSuite``
 #: (§25.1.1) rather than to the ``reactionSuite``. Kept as a set of its own
@@ -78,7 +78,7 @@ SUPPORTED_MF = (1, 2, 3, 4, 5, 6, 7, 31, 32, 33, 34, 35)
 #: it is reactionSuite content, and since the MF5 adapter landed it is decoded
 #: like the four. MF6 is the second of the same kind and is decoded the same
 #: way, one product at a time rather than one section.
-COVARIANCE_MF = (31, 32, 33, 34, 35)
+COVARIANCE_MF = (31, 32, 33, 34, 35, 40)
 
 #: The photon production files. Decoded by :mod:`.photons`, which
 #: declares per MT what it keeps verbatim instead.

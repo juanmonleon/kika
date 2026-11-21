@@ -56,7 +56,7 @@ __all__ = ["MF_WRITE_ORDER", "PENDF_SECTIONS", "TAPE_ID_MAT", "DEFAULT_TAPE_ID",
 #: tape. Ascending, which is also §0.3.2's rule, so the constant is a statement
 #: of *coverage* rather than of order: an MF absent here is one nothing can
 #: write, not one that sorts late.
-MF_WRITE_ORDER = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 23, 26, 27, 31, 32, 33, 34, 35)
+MF_WRITE_ORDER = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 23, 26, 27, 31, 32, 33, 34, 35, 40)
 
 #: The MAT column of a tape identification record. ENDF-6 §0.6.2 fixes it at 1
 #: regardless of the material that follows.
@@ -534,16 +534,16 @@ def _photoatomicSections(suite, mat, report):
 
 
 def _covarianceSections(suite, mat, report):
-    """MF31/33/34/35, one section per (MF, row MT) the covariance suite carries."""
+    """MF31/33/34/35/40, one section per (MF, row MT) the covariance suite carries."""
     from ..model_adapter import (encodeMF31MT, encodeMF32MT, encodeMF33MT,
-                                 encodeMF34MT, encodeMF35MT)
+                                 encodeMF34MT, encodeMF35MT, encodeMF40MT)
 
     covarianceSuite = getattr(suite, "covarianceSuite", None)
     if covarianceSuite is None:
         return [], report
 
     encoders = {31: encodeMF31MT, 33: encodeMF33MT,
-                34: encodeMF34MT, 35: encodeMF35MT}
+                34: encodeMF34MT, 35: encodeMF35MT, 40: encodeMF40MT}
 
     # One pass over the sections to learn which (MF, MT) pairs exist, because
     # the encoders take an MT and there is no listing of them anywhere else.
@@ -568,7 +568,8 @@ def _covarianceSections(suite, mat, report):
             )
             continue
         section, report = encode(covarianceSuite, mt, mat, report)
-        sections.append((mf, mt, section))
+        if section is not None:
+            sections.append((mf, mt, section))
 
     # Lumped covariance components (ENDF-6 §33.2): a reaction that is part of
     # lump MT851-870 has an MF33 section of its own holding only its HEAD, with

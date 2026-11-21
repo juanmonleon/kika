@@ -1,0 +1,507 @@
+ ENDF/B-VIII.1                                                         0  0
+ 4.109300+4 9.210510+1          1          0          0          14125 1451
+ 0.000000+0 0.000000+0          0          0          0          64125 1451
+ 1.000000+0 1.500000+8          1          0         10          84125 1451
+ 0.000000+0 0.000000+0          0          0        328          54125 1451
+ 41-Nb- 93 LANL,ANL   EVAL-DEC97 M.Chadwick,P.Young,D.L.Smith     4125 1451
+ CH97,CH99            DIST-AUG24 REV1-JUL23            20240830   4125 1451
+---- ENDF/B-VIII.1    MATERIAL 4125         REVISION 1            4125 1451
+----- INCIDENT-NEUTRON DATA                                       4125 1451
+------ ENDF-6                                                     4125 1451
+                                                                  4125 1451
+****************************************************************  4125 1451
+Missing exit distributions imported from TENDL2019                4125 1451
+by I.J. Thompson (LLNL) on 2023-04-21T21:09:08                    4125 1451
+                                                                  4125 1451
+Some neutron exit distributions, as noted, may be imported so all 4125 1451
+exit distributions have the same reference frame.                 4125 1451
+                                                                  4125 1451
+Changes by program patchGNDS.py:                                  4125 1451
+  H1 distribution for MT=28: n + H1 + Zr92.                       4125 1451
+  n distribution for MT=28: n + H1 + Zr92.                        4125 1451
+      per --forENDF option as needed by ENDF LCT flag.            4125 1451
+  H2 distribution for MT=32: n + H2 + Zr91.                       4125 1451
+  n distribution for MT=32: n + H2 + Zr91.                        4125 1451
+      per --forENDF option as needed by ENDF LCT flag.            4125 1451
+  H3 distribution for MT=33: n + H3 + Zr90.                       4125 1451
+  n distribution for MT=33: n + H3 + Zr90.                        4125 1451
+      per --forENDF option as needed by ENDF LCT flag.            4125 1451
+  He4 distribution for MT=22: n + He4 + Y89.                      4125 1451
+  n distribution for MT=22: n + He4 + Y89.                        4125 1451
+      per --forENDF option as needed by ENDF LCT flag.            4125 1451
+  H1 distribution for MT=103: H1 + Zr93 [inclusive].              4125 1451
+  H2 distribution for MT=104: H2 + Zr92 [inclusive].              4125 1451
+  H3 distribution for MT=105: H3 + Zr91 [inclusive].              4125 1451
+  He4 distribution for MT=107: He4 + Y90 [inclusive].             4125 1451
+                                                                  4125 1451
+                                                                  4125 1451
+ **************************************************************** 4125 1451
+ Resolved and unresolved resonance parameters replaced by those   4125 1451
+ in JENDL-4.0, and the resolved resonance boundary energy         4125 1451
+ changed from 7.35keV to 7keV. The comment section in JENDL-4.0   4125 1451
+ about the resonance evaluation is copied below.                  4125 1451
+                                            T. Kawano, Oct. 2016  4125 1451
+                                                                  4125 1451
+MF=2          Resonance parameters                                4125 1451
+  MT=151 Resolved and unresolved resonance parameters             4125 1451
+    Resolved resonances: 1.0e-5 eV - 7 keV                        4125 1451
+      Parameters in JENDL-3.1 were taken from JENDL-2 by modifying4125 1451
+      J values. The JENDL-2 parameters were evaluated on the basis4125 1451
+      of following measurements:                                  4125 1451
+       transmission  by Garg et al./12/, Poittevin et al./13/     4125 1451
+                     and Iliescu et al./14/                       4125 1451
+       scattering    by Iliescu et al./14/                        4125 1451
+       capture       by Macklin /15/, Lopez et al./16/ and        4125 1451
+                     Iliescu et al. /14/                          4125 1451
+      J values determined by Haste et al. /17/  were adopted.     4125 1451
+      average radiative width was assumed to be 0.172 eV (0.212 eV4125 1451
+      for doublet), and Scattering radius to be 7.10 fm.  The J   4125 1451
+      values of resonances without known j values were randomly   4125 1451
+      assigned.                                                   4125 1451
+                                                                  4125 1451
+      For JENDL-3.2, re-assignment of J and modification of       4125 1451
+      neutron and radiative widths were made to reproduce the     4125 1451
+      measured capture area data/15/.                             4125 1451
+                                                                  4125 1451
+      In JENDL-4.0, we took account of the data for eight         4125 1451
+      resonances obtained by Drindak et al./18/  The J values     4125 1451
+      for 364.93-eV s-wave, 362.71-eV p-wave and 392,53-eV p-wave 4125 1451
+      resonances were taken from ENDF/B-VI.8.                     4125 1451
+                                                                  4125 1451
+      After JENDL-3.3 evaluation, new measurements 93Nb resonance 4125 1451
+      parameters have been made by Drindak et al./18/ and by      4125 1451
+      Wang et al./19/.                                            4125 1451
+      Resonance parameters of JENDL-3.3 are replaced by           4125 1451
+      those of Drindak et al./18/ in the resonance energy region  4125 1451
+      below 500eV, in detail, an s-wave resonance at Er=194.25 eV;4125 1451
+      J=4 was added and a p-wave resonance at Er=184.3 eV was     4125 1451
+      eliminated.                                                 4125 1451
+      Resonance parameters of a negative resonance were determined4125 1451
+      to reproduce thermal cross sections and resonance integral  4125 1451
+      given by Mughabghab/20/.                                    4125 1451
+                                                                  4125 1451
+  Unresolved resonances: 7 keV - 600 keV                          4125 1451
+     Determined with the asrep code/21/ so as to reproduce        4125 1451
+     the evaluated sig-c and sig-t up to 600 keV.                 4125 1451
+                                                                  4125 1451
+     Typical parameters at 70 keV:                                4125 1451
+       s0= 0.4e-4, s1=6.68e-4, d-obs=96.0 ev, r=6.477 fm,         4125 1451
+       radiative width= 0.172 eV                                  4125 1451
+                                                                  4125 1451
+    The parameters should be used only for self-shielding         4125 1451
+    calculation.                                                  4125 1451
+                                                                  4125 1451
+    Thermal cross sections and resonance integrals at 300 K       4125 1451
+    ----------------------------------------------------------    4125 1451
+                     0.0253 eV           res. integ. (*)          4125 1451
+                      (barns)              (barns)                4125 1451
+    ----------------------------------------------------------    4125 1451
+     Total           7.498E+00                                    4125 1451
+     Elastic         6.356E+00                                    4125 1451
+     n,gamma         1.142E+00           8.982E+00                4125 1451
+    ----------------------------------------------------------    4125 1451
+       (*) Integrated from 0.5 eV to 10 MeV.                      4125 1451
+                                                                  4125 1451
+References                                                        4125 1451
+12) Garg, J.B. et al.: Phys. Rev. B137, 547 (1965).               4125 1451
+13) Poittevin, G.Le. et al.: Nucl. Phys. 70, 497 (1965).          4125 1451
+14) Iliescu, N. et al.: Nucl. Phys. 72, 298 (1965).               4125 1451
+15) Macklin, R.L.: Nucl. Sci. Eng. 59, 12 (1976).                 4125 1451
+16) Lopez, W.M. et al.: Nucl. Phys. A93, 340 (1967).              4125 1451
+17) Haste, T.J. and Thomas B.W.: J. Phys. G1, 967 (1975).         4125 1451
+18) Drindak, N.J. et al.: Nucl. Sci. Eng. 154, 294 (2006).        4125 1451
+19) Wang,T. et al.: 16th Pacific Basin Nuclear Conf.(Aomori,      4125 1451
+     Japan, 2008), P16P1280.                                      4125 1451
+20) Mughabghab, S.F.: "Atlas of Neutron Resonances," Elsevier     4125 1451
+     (2006).                                                      4125 1451
+21) Kikuchi, Y. et al.: JAERI-Data/Code 99-025 (1999).            4125 1451
+                                                                  4125 1451
+                                                                  4125 1451
+ **************************************************************** 4125 1451
+ ENDF/B-VII: covariance data removed except for total (MF/MT=33/1)4125 1451
+             that are considered to be high quality (M. Herman).  4125 1451
+                                                                  4125 1451
+ **************************************************************** 4125 1451
+                                                                  4125 1451
+ ENDF/B-VI MOD 3 Evaluation, December 1997, M.B. Chadwick and     4125 1451
+                 P.G. Young (LANL)                                4125 1451
+                                                                  4125 1451
+ Los Alamos LA150 Library, produced with FKK/GNASH/GSCAN code     4125 1451
+   in cooperation with ECN Petten.                                4125 1451
+                                                                  4125 1451
+  This evaluation provides a complete representation of the       4125 1451
+nuclear data needed for transport, damage, heating, radioactivity,4125 1451
+and shielding applications over the incident proton energy range  4125 1451
+from 1 to 150 MeV.  The evaluation utilizes MF=6, MT=5 to         4125 1451
+represent all reaction data.  Production cross sections and       4125 1451
+emission spectra are given for neutrons, protons, deuterons,      4125 1451
+tritons, alpha particles, gamma rays, and all residual nuclides   4125 1451
+produced (A>5) in the reaction chains. To summarize, the ENDF     4125 1451
+sections with non-zero data above are:                            4125 1451
+                                                                  4125 1451
+  MF=3 MT=  2  Integral of nuclear plus interference components   4125 1451
+               of the elastic scattering cross section            4125 1451
+                                                                  4125 1451
+       MT=  5  Sum of binary (p,n') and (p,x) reactions           4125 1451
+                                                                  4125 1451
+  MF=6 MT=  2  Elastic (p,p) angular distributions given as       4125 1451
+               ratios of the differential nuclear-plus-           4125 1451
+               interference to the integrated value.              4125 1451
+                                                                  4125 1451
+       MT=  5  Production cross sections and energy-angle         4125 1451
+               distributions for emission neutrons, protons,      4125 1451
+               deuterons, and alphas; and angle-integrated        4125 1451
+               spectra for gamma rays and residual nuclei that    4125 1451
+               are stable against particle emission               4125 1451
+                                                                  4125 1451
+  The evaluation is based on nuclear model calculations that have 4125 1451
+been benchmarked to experimental data, especially for n +93Nb and 4125 1451
+n +93Nb reactions [Ch98]. We use the GNASH code system [Yo92],    4125 1451
+which utilizes Hauser-Feshbach statistical, preequilibrium and    4125 1451
+direct-reaction theories. Spherical optical model calculations are4125 1451
+used to obtain particle transmission coefficients for the Hauser- 4125 1451
+Feshbach calculations, as well as for the elastic proton angular  4125 1451
+distributions.                                                    4125 1451
+  Cross sections and spectra for producing individual residual    4125 1451
+nuclei are included for reactions. The energy-angle-correlations  4125 1451
+for all outgoing particles are based on Kalbach systematics       4125 1451
+[Ka88].                                                           4125 1451
+  A model was developed to calculate the energy distributions of  4125 1451
+all recoil nuclei in the GNASH calculations [Ch96a]. The recoil   4125 1451
+energy distributions are represented in the laboratory system in  4125 1451
+MT=5, MF=6, and are given as isotropic in the lab system. All     4125 1451
+other data in MT=5,MF=6 are given in the center-of-mass system.   4125 1451
+This method of representation utilizes the LCT=3 option approved  4125 1451
+at the November, 1996, CSEWG meeting.                             4125 1451
+  Preequilibrium corrections were performed in the course of the  4125 1451
+GNASH calculations using the exciton model of Kalbach [Ka77,      4125 1451
+Ka85], validated by comparison with calculations using Feshbach,  4125 1451
+Kerman, Koonin (FKK) theory [Ch93].  Discrete level data from     4125 1451
+nuclear data sheets were matched to continuum level densities     4125 1451
+using the formulation of Ignatyuk et al. [Ig75] and pairing and   4125 1451
+shell parameters from the Cook [Co67] analysis. Neutron and       4125 1451
+charged- particle transmission coefficients were obtained from the4125 1451
+optical potentials, as discussed below.  Gamma-ray transmission   4125 1451
+coefficients were calculated using the Kopecky-Uhl model [Ko90].  4125 1451
+                                                                  4125 1451
+SPECIFIC INFORMATION CONCERNING THE 93Nb EVALUATION               4125 1451
+                                                                  4125 1451
+The total neutron cross section was obtained from the Finlay[Fi93]4125 1451
+measurements.                                                     4125 1451
+                                                                  4125 1451
+The following optical potentials were used in the GNASH           4125 1451
+calculations.  For incident neutrons, the Wilmore-Hodgson         4125 1451
+potential was used below 15 MeV, and the Madland potential [Ma88] 4125 1451
+was used at higher energies. For incident protons, the            4125 1451
+Becchetti-Greenlees [Be69] potential was used up to 50 MeV, above 4125 1451
+which the Madland potential [Ma88] was used. In both cases, the   4125 1451
+matching energy between the potentials was chosen to result in    4125 1451
+continuity of the reaction cross section. For protons at 50 MeV   4125 1451
+the reaction cross section (and transmission coefficients) was    4125 1451
+renormalized slightly to smoothen the transition between the      4125 1451
+potentials. The Perey [Pe63] potential was used for indident      4125 1451
+deuterons. For tritons, the Becchetti-Greenlees [Be71] was used   4125 1451
+up to 80 MeV, above which the Watanabe potential was used. The    4125 1451
+Moyen (McFadden Satchler) [Mc66] potential was used for alpha     4125 1451
+particles over the whole energy range.                            4125 1451
+                                                                  4125 1451
+Direct inelastic scattering to low-lying states in Nb93 was       4125 1451
+determined as follows. Coherent excitation of 2+ and 3-           4125 1451
+vibrations were assumed to be fragmented over Nb93 states, after  4125 1451
+coupling these excitations with the 4.5+ core. The magnitudes of  4125 1451
+the deformation lengths of 2+ and 3- excitations was obtained by  4125 1451
+fitting values of 34 and 46 mb respectively at 14 MeV, obtained   4125 1451
+in ref. [Ch93] and accounting for measurements well. This         4125 1451
+strength was then fragmented over Nb states.  For the 3-          4125 1451
+excitation, the 7 states are in the "continuum" region of the     4125 1451
+GNASH calculation at approximately 2.5 MeV, with spins 1.5-,2.5-, 4125 1451
+..,7.5-.  For the 2+, the 5 states (2.5+,3.5+,...6.5+) near 1 MeV 4125 1451
+were assumed to be those whose inelastic cross section in the     4125 1451
+existing ENDF <20 MeV file are significant (note that the ENDF    4125 1451
+file below 20 MeV appears to incorporate inelastic information    4125 1451
+only up to 5 MeV for many states, after which a value of zero at  4125 1451
+20 MeV was inserted).                                             4125 1451
+                                                                  4125 1451
+Experimental data is used to benchmark the calculations. For      4125 1451
+incident neutrons, experimental neutron emission spectra data     4125 1451
+exist at 20 and 26 MeV by Marcinkowski [Ma83]. For incident       4125 1451
+protons, spectra data exist at 14 and 26 MeV by Watanabe et       4125 1451
+al. [Wa97], and at 65 MeV by Sakai et al [Sa80]. Our evaluation   4125 1451
+agrees reasonably well with these measurements.                   4125 1451
+                                                                  4125 1451
+****************************************************************  4125 1451
+                                                                  4125 1451
+REFERENCES                                                        4125 1451
+                                                                  4125 1451
+[Be69]  F.D. Becchetti, Jr., and G.W. Greenlees, Phys.Rev. 182,   4125 1451
+  1190 (1969)                                                     4125 1451
+[Be71]  F.D. Becchetti, Jr., and G.W. Greenlees in Polarization   4125 1451
+  Phenomena in Nuclear Reactions (Ed: H.H. Barschall and W.       4125 1451
+  Haeberli, The University of Wisconsin Press, 1971) p.682        4125 1451
+[Ch93]  M.B. Chadwick and P.G. Young, Phys.Rev. C 47, 2255 (1993) 4125 1451
+[Ch96a] M.B. Chadwick, P.G. Young, R.E. MacFarlane, and A.J.      4125 1451
+  Koning, "High-Energy Nuclear Data Libraries for Accelerator-    4125 1451
+  Driven Technologies:  Calculational Method for Heavy Recoils,"  4125 1451
+  Proc. of 2nd Int. Conf. on Accelerator Driven Transmutation     4125 1451
+  Technology and Applications, Kalmar, Sweden, 3-7 June 1996.     4125 1451
+[Ch98]  M.B. Chadwick and P.G. Young, "Model Calculations of      4125 1451
+  n,p + 93Nb" in APT PROGRESS REPORT: 1 November 1997 - 1 January 4125 1451
+  1998, internal Los Alamos National Laboratory memo              4125 1451
+  January 1998 from R.E. MacFarlane to L. Waters.                 4125 1451
+[Ch99]  M.B. Chadwick, P.G. Young, G.M. Hale et al., Los Alamos   4125 1451
+  National Laboratory report, LA-UR-99-1222 (1999)                4125 1451
+[Co67]  J.L. Cook, H. Ferguson, and A.R. DeL Musgrove, Aust.J.    4125 1451
+  Phys. 20, 477 (1967)                                            4125 1451
+[Fi93]  R. W. Finlay, W. P. Abfalterer, G. Fink et al., Phys. Rev 4125 1451
+  C 47, 237 (1993)                                                4125 1451
+[Ig75]  A.V. Ignatyuk, G.N. Smirenkin, and A.S. Tishin, Sov.J.    4125 1451
+   Nucl.Phys. 21, 255 (1975); translation of Yad.Fiz. 21, 485     4125 1451
+   (1975)                                                         4125 1451
+[Ka77]  C. Kalbach, Z.Phys.A  283, 401 (1977)                     4125 1451
+[Ka85]  C. Kalbach, Los Alamos National Laboratory report         4125 1451
+  LA-10248-MS (1985)                                              4125 1451
+[Ka88]  C. Kalbach, Phys.Rev.C 37, 2350 (1988); see also          4125 1451
+  C. Kalbach and F. M. Mann, Phys.Rev.C 23, 112 (1981)            4125 1451
+[Ko90]  J. Kopecky and M. Uhl, Phys.Rev.C 41, 1941 (1990)         4125 1451
+[Lo74]  J.M. Lohr and W. Haeberli, Nucl.Phys. A232, 381 (1974)    4125 1451
+[Ma88]  D.G. Madland, "Recent Results in the Development of a     4125 1451
+  Global Medium-Energy Nucleon-Nucleus Optical-Model Potential,"  4125 1451
+  Proc. OECD/NEANDC Specialist's Mtg. on Preequilibrium Nuclear   4125 1451
+  Reactions, Semmering, Austria, 10-12 Feb. 1988, NEANDC-245 'U'  4125 1451
+  (1988).                                                         4125 1451
+[Ma83]  A. Marcinkowski, R.W. Finlay, G. Randers-Pehrson et al.,  4125 1451
+  Nucl.Phys. A402, 220 (1983)                                     4125 1451
+[Mc66]  L. McFadden and G. R. Satchler, Nucl. Phys. 84, 177       4125 1451
+  (1966).                                                         4125 1451
+[Pe63]  C.M. Perey and F.G. Perey, Phys.Rev. 132, 755 (1963)      4125 1451
+[Sa80]  H. Sakai, K. Hosono, N. Matsuoka et al., Nucl.Phys. A344, 4125 1451
+  41 (1980)                                                       4125 1451
+[We96]  H.P. Wellisch and D. Axen, Phys.Rev. C 54, 1329(1996)     4125 1451
+[Wa97]  Y. Watanabe, S. Yoshioka, M. Harada et al, Nuclear Data   4125 1451
+  for Science and Technology, Proc. Conf. Trieste, May, 1997,     4125 1451
+  G. Reffo, Ed. (Editrice Compositori, 1997) p.580                4125 1451
+[Wi64]  D. Wilmore and P.E. Hodgson, Nucl.Phys. 55, 673 (1964)    4125 1451
+[Yo92]  P.G. Young, E.D. Arthur, and M.B. Chadwick, report        4125 1451
+  LA-12343-MS (1992)                                              4125 1451
+                                                                  4125 1451
+***************************************************************** 4125 1451
+                                                                  4125 1451
+ ENDF/B-VI MOD 2 Revision, August 1991, NNDC                      4125 1451
+                                                                  4125 1451
+ Only the section MOD numbers have been corrected in the          4125 1451
+ directory.                                                       4125 1451
+                                                                  4125 1451
+***************************************************************** 4125 1451
+                                                                  4125 1451
+ ENDF/B-VI MOD 1 Evaluation, March 1990, A.B. Smith, D.L. Smith   4125 1451
+                 L.P. Geraldo (ANL), and R. Howerton (LLNL)       4125 1451
+                                                                  4125 1451
+ Original evaluation fully documented in Smith et al. [1]         4125 1451
+                                                                  4125 1451
+ ---------------------------------------------------------------- 4125 1451
+                                                                  4125 1451
+ Evaluation of 93Nb(n,n')93Nb-m Dosimetry Reaction                4125 1451
+   D.L. Smith and L.P. Geraldo, ANL, March 1990.                  4125 1451
+                                                                  4125 1451
+  For complete documentation see Smith  and Geraldo [2].          4125 1451
+                                                                  4125 1451
+  Production of the isomer 93Nb-m by the (n,n') process is        4125 1451
+routinely employed for neutron dosimetry applications. Isomer     4125 1451
+is the first-excited state of the isotope 93Nb (30.82 keV         4125 1451
+excitation energy). The reaction threshold energy is 31.15 keV.   4125 1451
+The isotopic abundance of 93Nb in natural niobium is 100 %.       4125 1451
+The half life of 93Nb-m is 16.1 years. The decay is entirely by   4125 1451
+isomeric transition with nearly 100 % internal conversion.        4125 1451
+                                                                  4125 1451
+  The activity measurement is by observation of x-rays.           4125 1451
+X-ray yields: 16.6 keV k-alpha (0.09238 per disintegration),      4125 1451
+              18.6 kev k-beta (0.01802 per disintegration).       4125 1451
+                                                                  4125 1451
+  The evaluation is based on a least-squares adjustment procedure.4125 1451
+Input information includes results from nuclear model             4125 1451
+calculations and recent differential activation cross section     4125 1451
+data from the literature. Uncertainties are derived from          4125 1451
+experimental errors and the consideration of systematics.         4125 1451
+                                                                  4125 1451
+REFERENCES                                                        4125 1451
+                                                                  4125 1451
+[1.] A.B. Smith, D.L. Smith and R.J. Howerton, Argonne report     4125 1451
+     ANL/NDM-88 (1985)                                            4125 1451
+[2.] D.L. Smith and L.P. Geraldo, Argonne report ANL/NDM-117      4125 1451
+     (1990)                                                       4125 1451
+                                                                  4125 1451
+ ************************ C O N T E N T S *********************** 4125 1451
+                                1        451        337          04125 1451
+                                3          4         48          04125 1451
+                                8          4          2          04125 1451
+                               10          4         15          04125 1451
+                               40          4         92          04125 1451
+ 0.000000+0 0.000000+0          0          0          0          04125 1  0
+ 0.000000+0 0.000000+0          0          0          0          04125 0  0
+ 4.109300+4 9.210510+1          0          0          0          04125 3  4
+ 0.000000+0-3.073000+4          0          0          1        1334125 3  4
+        133          2          0          0          0          04125 3  4
+ 3.106000+4 0.000000+0 4.000000+4 6.000000-5 5.000000+4 1.500000-44125 3  4
+ 6.000000+4 2.500000-4 8.000000+4 5.200000-4 1.000000+5 8.600000-44125 3  4
+ 1.500000+5 1.970000-3 2.000000+5 3.430000-3 3.000000+5 7.190000-34125 3  4
+ 4.000000+5 1.188000-2 5.000000+5 1.727000-2 6.000000+5 2.317000-24125 3  4
+ 6.873000+5 2.821590-2 7.000000+5 3.145000-2 7.200000+5 3.625600-24125 3  4
+ 7.400000+5 3.996200-2 7.520000+5 4.128560-2 7.600000+5 5.976800-24125 3  4
+ 7.800000+5 1.004740-1 8.000000+5 1.423800-1 8.096000+5 1.599550-14125 3  4
+ 8.167000+5 1.752060-1 8.200000+5 1.849940-1 8.400000+5 2.448080-14125 3  4
+ 8.600000+5 2.964220-1 8.800000+5 3.419360-1 9.000000+5 3.801500-14125 3  4
+ 9.200000+5 4.139980-1 9.400000+5 4.422460-1 9.600000+5 4.669940-14125 3  4
+ 9.602000+5 4.671960-1 9.800000+5 5.416420-1 9.895000+5 5.683120-14125 3  4
+ 1.000000+6 6.280900-1 1.092000+6 9.355590-1 1.100000+6 9.751950-14125 3  4
+ 1.200000+6 1.210400+0 1.300000+6 1.326200+0 1.314000+6 1.326100+04125 3  4
+ 1.334000+6 1.344380+0 1.344000+6 1.355690+0 1.385000+6 1.412950+04125 3  4
+ 1.400000+6 1.435000+0 1.405000+6 1.438070+0 1.496000+6 1.515310+04125 3  4
+ 1.500000+6 1.519450+0 1.516000+6 1.527700+0 1.600000+6 1.621900+04125 3  4
+ 1.617000+6 1.631170+0 1.688000+6 1.701810+0 1.698000+6 1.712630+04125 3  4
+ 1.699000+6 1.714160+0 1.700000+6 1.716090+0 1.708000+6 1.721900+04125 3  4
+ 1.800000+6 1.825680+0 1.900000+6 1.901710+0 1.971000+6 1.914580+04125 3  4
+ 2.000000+6 1.950220+0 2.178000+6 1.990800+0 2.200000+6 2.011170+04125 3  4
+ 2.400000+6 1.982020+0 2.500000+6 1.993960+0 2.600000+6 2.004890+04125 3  4
+ 2.800000+6 2.012860+0 3.000000+6 2.007090+0 3.200000+6 1.991110+04125 3  4
+ 3.400000+6 1.976120+0 3.500000+6 1.965630+0 3.600000+6 1.955550+04125 3  4
+ 3.800000+6 1.925380+0 3.860000+6 1.923330+0 4.000000+6 1.905210+04125 3  4
+ 4.200000+6 1.911710+0 4.400000+6 1.918220+0 4.500000+6 1.926470+04125 3  4
+ 4.600000+6 1.928290+0 4.800000+6 1.941930+0 5.000000+6 1.955570+04125 3  4
+ 5.500000+6 1.989810+0 6.000000+6 1.994050+0 6.110000+6 1.992840+04125 3  4
+ 6.260000+6 1.981190+0 6.500000+6 1.978550+0 7.000000+6 1.953040+04125 3  4
+ 7.500000+6 1.907540+0 8.000000+6 1.852040+0 8.500000+6 1.826540+04125 3  4
+ 8.920000+6 1.811920+0 9.000000+6 1.801040+0 9.040000+6 1.800600+04125 3  4
+ 9.060000+6 1.800380+0 9.100000+6 1.799940+0 9.200000+6 1.788840+04125 3  4
+ 9.300000+6 1.777740+0 9.400000+6 1.756640+0 9.500000+6 1.725540+04125 3  4
+ 9.600000+6 1.684440+0 9.700000+6 1.613340+0 9.800000+6 1.522240+04125 3  4
+ 9.900000+6 1.441140+0 1.000000+7 1.380040+0 1.020000+7 1.277840+04125 3  4
+ 1.040000+7 1.195640+0 1.060000+7 1.113440+0 1.080000+7 1.044230+04125 3  4
+ 1.100000+7 9.750340-1 1.120000+7 9.068330-1 1.140000+7 8.446330-14125 3  4
+ 1.160000+7 7.844320-1 1.180000+7 7.212320-1 1.200000+7 6.720310-14125 3  4
+ 1.250000+7 5.665300-1 1.260000+7 5.574300-1 1.300000+7 5.140290-14125 3  4
+ 1.350000+7 4.754270-1 1.350000+7 4.725270-1 1.400000+7 4.400260-14125 3  4
+ 1.450000+7 4.165250-1 1.500000+7 3.990230-1 1.550000+7 3.915220-14125 3  4
+ 1.600000+7 3.900210-1 1.690000+7 4.011180-1 1.700000+7 4.030180-14125 3  4
+ 1.720000+7 4.088170-1 1.750000+7 4.125170-1 1.780000+7 4.082160-14125 3  4
+ 1.800000+7 4.010150-1 1.850000+7 3.815140-1 1.900000+7 3.630130-14125 3  4
+ 1.950000+7 3.783110-1 2.000000+7 3.950100-1 2.000001+7 0.000000+04125 3  4
+ 1.500000+8 0.000000+0                                            4125 3  4
+ 0.000000+0 0.000000+0          0          0          0          04125 3  0
+ 0.000000+0 0.000000+0          0          0          0          04125 0  0
+ 4.109300+4 9.210510+1          0          0          1          14125 8  4
+ 4.109300+4 3.073000+4         10          1          0          04125 8  4
+ 0.000000+0 0.000000+0          0          0          0          04125 8  0
+ 0.000000+0 0.000000+0          0          0          0          04125 0  0
+ 4.109300+4 9.210510+1          0          0          1          0412510  4
+ 0.000000+0-3.073000+4      41093          1          1         34412510  4
+         34          2          0          0          0          0412510  4
+ 3.115000+4 0.000000+0 4.000000+4 6.053000-5 5.000000+4 1.513000-4412510  4
+ 6.000000+4 2.522000-4 8.000000+4 5.246000-4 1.000000+5 8.676000-4412510  4
+ 1.500000+5 1.987000-3 2.000000+5 3.460000-3 3.000000+5 7.253000-3412510  4
+ 4.000000+5 1.198000-2 5.000000+5 1.742000-2 6.000000+5 2.337000-2412510  4
+ 7.000000+5 2.921000-2 7.625000+5 4.035000-2 1.000000+6 7.484000-2412510  4
+ 1.288000+6 1.122000-1 1.750000+6 2.110000-1 2.063000+6 2.060000-1412510  4
+ 2.563000+6 2.486000-1 4.050000+6 2.782000-1 4.588000+6 2.629000-1412510  4
+ 6.156000+6 2.455000-1 8.344000+6 2.446000-1 9.375000+6 2.089000-1412510  4
+ 1.037500+7 1.349000-1 1.139400+7 8.441000-2 1.239400+7 5.764000-2412510  4
+ 1.340600+7 4.385000-2 1.435600+7 3.756000-2 1.552000+7 3.088000-2412510  4
+ 1.700000+7 2.718000-2 2.000000+7 2.265000-2 2.000000+7 0.000000+0412510  4
+ 1.500000+8 0.000000+0                                            412510  4
+ 0.000000+0 0.000000+0          0          0          0          0412510  0
+ 0.000000+0 0.000000+0          0          0          0          04125 0  0
+ 4.109300+4 9.210510+1          0          0          1          0412540  4
+ 0.000000+0-3.073000+4      41093          1          0          1412540  4
+ 1.000000+1 1.000000+0          0          4          0          1412540  4
+ 0.000000+0 0.000000+0          1          5        528         32412540  4
+ 1.000000-5 4.000000+4 5.000000+4 6.000000+4 8.000000+4 1.000000+5412540  4
+ 1.500000+5 2.000000+5 3.000000+5 4.000000+5 5.000000+5 6.000000+5412540  4
+ 7.000000+5 7.625000+5 1.000000+6 1.288000+6 1.750000+6 2.063000+6412540  4
+ 2.563000+6 4.050000+6 4.588000+6 6.156000+6 8.344000+6 9.375000+6412540  4
+ 1.037500+7 1.139400+7 1.239400+7 1.340600+7 1.435600+7 1.552000+7412540  4
+ 1.700000+7 2.000000+7 4.981800-2 1.295300-3 1.295300-3 1.295300-3412540  4
+ 1.295300-3 1.295300-3 1.295300-3 1.295300-3 1.295300-3 1.295300-3412540  4
+ 1.295300-3 1.295300-3 1.310400-3 9.366500-4 1.307400-3 1.308400-3412540  4
+ 9.948000-4 8.478200-4 9.517600-4 9.520300-4 9.386700-4 5.715900-4412540  4
+ 1.315400-3 1.315400-3 1.310400-3 1.295300-3 1.298300-3 8.918000-5412540  4
+ 1.336800-4 1.279300-4 1.293500-4 4.981800-2 1.295300-3 1.295300-3412540  4
+ 1.295300-3 1.295300-3 1.295300-3 1.295300-3 1.295300-3 1.295300-3412540  4
+ 1.295300-3 1.295300-3 1.310400-3 9.366500-4 1.307400-3 1.308400-3412540  4
+ 9.948000-4 8.478200-4 9.517600-4 9.520300-4 9.386700-4 5.715900-4412540  4
+ 1.315400-3 1.315400-3 1.310400-3 1.295300-3 1.298300-3 8.918000-5412540  4
+ 1.336800-4 1.279300-4 1.293500-4 4.981800-2 1.295300-3 1.295300-3412540  4
+ 1.295300-3 1.295300-3 1.295300-3 1.295300-3 1.295300-3 1.295300-3412540  4
+ 1.295300-3 1.310400-3 9.366500-4 1.307400-3 1.308400-3 9.948000-4412540  4
+ 8.478200-4 9.517600-4 9.520300-4 9.386700-4 5.715900-4 1.315400-3412540  4
+ 1.315400-3 1.310400-3 1.295300-3 1.298300-3 8.918000-5 1.336800-4412540  4
+ 1.279300-4 1.293500-4 4.981800-2 1.295300-3 1.295300-3 1.295300-3412540  4
+ 1.295300-3 1.295300-3 1.295300-3 1.295300-3 1.295300-3 1.310400-3412540  4
+ 9.366500-4 1.307400-3 1.308400-3 9.948000-4 8.478200-4 9.517600-4412540  4
+ 9.520300-4 9.386700-4 5.715900-4 1.315400-3 1.315400-3 1.310400-3412540  4
+ 1.295300-3 1.298300-3 8.918000-5 1.336800-4 1.279300-4 1.293500-4412540  4
+ 4.981800-2 1.295300-3 1.295300-3 1.295300-3 1.295300-3 1.295300-3412540  4
+ 1.295300-3 1.295300-3 1.310400-3 9.366500-4 1.307400-3 1.308400-3412540  4
+ 9.948000-4 8.478200-4 9.517600-4 9.520300-4 9.386700-4 5.715900-4412540  4
+ 1.315400-3 1.315400-3 1.310400-3 1.295300-3 1.298300-3 8.918000-5412540  4
+ 1.336800-4 1.279300-4 1.293500-4 4.981800-2 1.295300-3 1.295300-3412540  4
+ 1.295300-3 1.295300-3 1.295300-3 1.295300-3 1.310400-3 9.366500-4412540  4
+ 1.307400-3 1.308400-3 9.948000-4 8.478200-4 9.517600-4 9.520300-4412540  4
+ 9.386700-4 5.715900-4 1.315400-3 1.315400-3 1.310400-3 1.295300-3412540  4
+ 1.298300-3 8.918000-5 1.336800-4 1.279300-4 1.293500-4 4.981800-2412540  4
+ 1.295300-3 1.295300-3 1.295300-3 1.295300-3 1.295300-3 1.310400-3412540  4
+ 9.366500-4 1.307400-3 1.308400-3 9.948000-4 8.478200-4 9.517600-4412540  4
+ 9.520300-4 9.386700-4 5.715900-4 1.315400-3 1.315400-3 1.310400-3412540  4
+ 1.295300-3 1.298300-3 8.918000-5 1.336800-4 1.279300-4 1.293500-4412540  4
+ 4.981800-2 1.295300-3 1.295300-3 1.295300-3 1.295300-3 1.310400-3412540  4
+ 9.366500-4 1.307400-3 1.308400-3 9.948000-4 8.478200-4 9.517600-4412540  4
+ 9.520300-4 9.386700-4 5.715900-4 1.315400-3 1.315400-3 1.310400-3412540  4
+ 1.295300-3 1.298300-3 8.918000-5 1.336800-4 1.279300-4 1.293500-4412540  4
+ 4.981800-2 1.295300-3 1.295300-3 1.295300-3 1.310400-3 9.366500-4412540  4
+ 1.307400-3 1.308400-3 9.948000-4 8.478200-4 9.517600-4 9.520300-4412540  4
+ 9.386700-4 5.715900-4 1.315400-3 1.315400-3 1.310400-3 1.295300-3412540  4
+ 1.298300-3 8.918000-5 1.336800-4 1.279300-4 1.293500-4 4.981800-2412540  4
+ 1.295300-3 1.295300-3 1.310400-3 9.366500-4 1.307400-3 1.308400-3412540  4
+ 9.948000-4 8.478200-4 9.517600-4 9.520300-4 9.386700-4 5.715900-4412540  4
+ 1.315400-3 1.315400-3 1.310400-3 1.295300-3 1.298300-3 8.918000-5412540  4
+ 1.336800-4 1.279300-4 1.293500-4 4.981800-2 1.295300-3 1.310400-3412540  4
+ 9.366500-4 1.307400-3 1.308400-3 9.948000-4 8.478200-4 9.517600-4412540  4
+ 9.520300-4 9.386700-4 5.715900-4 1.315400-3 1.315400-3 1.310400-3412540  4
+ 1.295300-3 1.298300-3 8.918000-5 1.336800-4 1.279300-4 1.293500-4412540  4
+ 4.981800-2 1.310400-3 9.366500-4 1.307400-3 1.308400-3 9.948000-4412540  4
+ 8.478200-4 9.517600-4 9.520300-4 9.386700-4 5.715900-4 1.315400-3412540  4
+ 1.315400-3 1.310400-3 1.295300-3 1.298300-3 8.918000-5 1.336800-4412540  4
+ 1.279300-4 1.293500-4 2.387000-2 9.373800-4 1.316300-3 1.317400-3412540  4
+ 9.981700-4 8.482400-4 9.484600-4 9.512500-4 9.445500-4 5.760300-4412540  4
+ 1.311600-3 1.311600-3 1.312900-3 1.310400-3 1.328500-3 9.876900-5412540  4
+ 1.306300-4 1.298800-4 1.287100-4 2.556300-3 9.369300-4 9.340700-4412540  4
+ 9.675400-4 9.070000-4 9.720400-4 9.713900-4 9.725900-4 4.512700-4412540  4
+ 9.329400-4 9.329400-4 9.373800-4 9.366500-4 9.334200-4 6.868400-5412540  4
+ 9.262400-5 9.273100-5 9.339500-5 1.134200-2 1.314800-3 9.972500-4412540  4
+ 8.498700-4 9.474200-4 9.480200-4 9.413900-4 5.735400-4 1.315100-3412540  4
+ 1.315100-3 1.316300-3 1.307400-3 1.319800-3 9.361500-5 1.313200-4412540  4
+ 1.302200-4 1.311500-4 7.889000-3 9.951300-4 8.477100-4 9.468600-4412540  4
+ 9.487700-4 9.442100-4 5.753300-4 1.314900-3 1.314900-3 1.317400-3412540  4
+ 1.308400-3 1.302800-3 9.936600-5 1.314200-4 1.323600-4 1.319000-4412540  4
+ 1.672000-3 8.979800-4 9.680100-4 9.676000-4 9.680900-4 4.712100-4412540  4
+ 9.954900-4 9.954900-4 9.981700-4 9.948000-4 9.927400-4 7.188500-5412540  4
+ 9.939800-5 9.999400-5 9.922900-5 1.018900-3 9.046800-4 9.045100-4412540  4
+ 9.061200-4 4.375700-4 8.487700-4 8.487700-4 8.482400-4 8.478200-4412540  4
+ 8.476200-4 6.376800-5 8.434100-5 8.537600-5 8.439800-5 1.351300-3412540  4
+ 9.707600-4 9.719400-4 4.568500-4 9.465200-4 9.465200-4 9.484600-4412540  4
+ 9.517600-4 9.482500-4 7.050000-5 9.453900-5 9.410800-5 9.453300-5412540  4
+ 1.375700-3 9.705600-4 4.567600-4 9.498200-4 9.498200-4 9.512500-4412540  4
+ 9.520300-4 9.473900-4 7.113300-5 9.538800-5 9.495300-5 9.538100-5412540  4
+ 1.516300-3 4.546100-4 9.425500-4 9.425500-4 9.445500-4 9.386700-4412540  4
+ 9.454000-4 6.845700-5 9.465800-5 9.373800-5 9.449700-5 1.418300-3412540  4
+ 5.733600-4 5.733600-4 5.760300-4 5.715900-4 5.714500-4 4.213200-5412540  4
+ 5.705100-5 5.756000-5 5.729000-5 4.922400-3 1.314300-3 1.311600-3412540  4
+ 1.315400-3 1.313000-3 9.531000-5 1.310000-4 1.313600-4 1.321400-4412540  4
+ 4.922400-3 1.311600-3 1.315400-3 1.313000-3 9.531000-5 1.310000-4412540  4
+ 1.313600-4 1.321400-4 2.387000-2 1.310400-3 1.328500-3 9.876900-5412540  4
+ 1.306300-4 1.298800-4 1.287100-4 4.981800-2 1.298300-3 8.918000-5412540  4
+ 1.336800-4 1.279300-4 1.293500-4 6.395800-2 1.010500-4 1.336500-4412540  4
+ 1.352900-4 1.282400-4 6.385600-3 8.445700-6 9.160100-6 8.683000-6412540  4
+ 1.241200-3 1.346100-5 1.276000-5 1.460000-3 1.245600-5 1.311900-3412540  4
+ 0.000000+0 0.000000+0          0          0          0          0412540  0
+ 0.000000+0 0.000000+0          0          0          0          04125 0  0
+ 0.000000+0 0.000000+0          0          0          0          0   0 0  0
+ 0.000000+0 0.000000+0          0          0          0          0  -1 0  0

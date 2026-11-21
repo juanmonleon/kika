@@ -58,10 +58,13 @@ from kika.nuclear_data.model import (
 from .parameter_covariances import MF32MT151_KEY, decodeMF32MT, encodeMF32MT
 
 __all__ = ["decodeMF31MT", "decodeMF32MT", "decodeMF33MT", "decodeMF34MT",
-           "decodeMF35MT", "decodeCovarianceSuite",
+           "decodeMF35MT", "decodeMF40MT", "decodeCovarianceSuite",
            "encodeMF31MT", "encodeMF32MT", "encodeMF33MT", "encodeMF34MT",
-           "encodeMF35MT", "reactionHref", "angularDistributionHref",
-           "energyDistributionHref", "nubarShims"]
+           "encodeMF35MT", "encodeMF40MT", "reactionHref", "productionHref",
+           "angularDistributionHref", "energyDistributionHref", "nubarShims"]
+
+#: Where an MF40 section's state and subsection header travel in its provenance.
+MF40_KEY = "mf40"
 
 
 def reactionHref(mt: int) -> str:
@@ -74,6 +77,16 @@ def reactionHref(mt: int) -> str:
     """
     container = "sums/crossSectionSums/crossSectionSum" if 851 <= mt <= 870 else "reactions/reaction"
     return f"/reactionSuite/{container}[@label='MT{mt}']/crossSection"
+
+
+def productionHref(mt: int, pid: str) -> str:
+    """xPath into a ``reactionSuite`` for the cross section of one production (an MF10 state).
+
+    The label is the one :mod:`.productions` gives the node, ``MT<mt> <pid>``.
+    """
+    from .productions import productionLabel
+
+    return f"/reactionSuite/productions/production[@label='{productionLabel(mt, pid)}']/crossSection"
 
 
 def angularDistributionHref(mt: int) -> str:
@@ -893,6 +906,154 @@ def encodeMF35MT(source, mt: int, mat: Optional[int] = None,
     return built, report
 
 
+def decodeMF40MT(mf40mt, report: Optional[ConversionReport] = None,
+                 izapOf: Optional[dict] = None, mf10mt=None):
+    """One MF40/MT section → a list of :class:`CovarianceSection`, one per (state, subsection).
+
+    MF40 is MF33 one level down: a block list per final state of MF10. Each
+    subsection is read by the MF33 code, and each block is named by its two
+    productions, ``MT<mt> <pid>`` with ``pid`` from the state's ``IZAP`` and
+    ``LFS``. *izapOf* maps ``(MT, LFS)`` to ``IZAP`` over the whole MF40 file,
+    so that a block whose column is another state can name it; a block of a state
+    with itself needs no look-up, which matters for MT5, where one ``(MT, LFS)``
+    names several products. The state's
+    QM, QI, IZAP and LFS, the subsection's XMF1 and XLFS1, and the section's LIS
+    go to provenance, so the encoder writes the records the file had.
+
+    A block of a state with itself that sums absolute and relative components
+    is made relative with that state's MF10 cross section (*mf10mt*), as MF33
+    uses MF3, and the components are merged as the MF33 decoder merges them. A
+    block that cannot be read is reported and skipped: one against another
+    material, one stated by NC sub-subsections, a mixed one between two states,
+    and one whose column ``(MT1, XLFS1)`` names more than one product (MT5).
+    A block stated by one record keeps how it was stored, so it is written back
+    as it was read.
+    """
+    from kika.endf.classes.mf33 import mixesAbsoluteAndRelative
+    from kika.endf.classes.mf33.mf33 import MF33MT
+    from kika.nuclear_data.model.pops import pidFromZA
+
+    report = report if report is not None else ConversionReport()
+    mt = int(mf40mt.number)
+    mat = int(getattr(mf40mt, "_mat", None) or 0)
+    izapOf = {key: set(values) for key, values in (izapOf or {}).items()}
+    for s in mf40mt.states:
+        izapOf.setdefault((mt, int(s.lfs)), set()).add(int(s.izap))
+    sections = []
+    for state in mf40mt.states:
+        lfs = int(state.lfs)
+        if int(state.izap) <= 0:
+            report.lost(f"MF40/MT{mt} LFS={lfs}: IZAP={int(state.izap)} is not a nuclide, so the "
+                        f"state has no production in the model to be the covariance of; not read")
+            continue
+        rowPid = pidFromZA(int(state.izap), lfs)
+        if mf10mt is not None and mf10mt.get_state(int(state.izap), lfs) is None:
+            report.warn(f"MF40/MT{mt} LFS={lfs}: MF10/MT{mt} has no state IZAP={int(state.izap)} "
+                        f"LFS={lfs} (it states LFS {sorted(int(s.lfs) for s in mf10mt.states)}), so this "
+                        f"covariance is about a production the evaluation does not give")
+        for sub in state.subsections:
+            mt1, lfs1 = int(sub.mt1), int(round(float(sub.xlfs1)))
+            where = f"MF40/MT{mt} LFS={lfs} with MT{mt1} LFS={lfs1}"
+            if int(sub.mat1 or 0) not in (0, mat):
+                report.lost(f"{where}: a block with MAT1={int(sub.mat1)}, another material, "
+                            f"cannot be linked from this evaluation")
+                continue
+            if sub.nc_records:
+                report.lost(f"{where}: NC sub-subsections are not read for MF40")
+                continue
+            same = (mt1, lfs1) == (mt, lfs)
+            xs = None
+            if mixesAbsoluteAndRelative(sub.ni_records):
+                production = (mf10mt.get_state(int(state.izap), lfs) if mf10mt is not None and same else None)
+                if production is None:
+                    report.lost(f"{where}: the block sums absolute and relative components and "
+                                f"{'the state has no MF10 table' if same else 'is between two states'}; not read")
+                    continue
+                from types import SimpleNamespace
+                xs = {mt: SimpleNamespace(energies=production.x, values=production.y,
+                                          energy_interpolation=production.interp)}
+                report.warn(f"{where}: absolute components were made relative with the state's "
+                            f"MF10 cross section and merged with the relative ones")
+            columnIzap = int(state.izap) if same else next(iter(izapOf.get((mt1, lfs1), ())), None)
+            if not same and len(izapOf.get((mt1, lfs1), ())) != 1:
+                report.lost(f"{where}: the column's state is not one product of MF40, so it cannot be named")
+                continue
+            view = MF33MT(number=mt, _za=mf40mt._za, _awr=mf40mt._awr, _mtl=0, _nl=1, _mat=mat, _mf=40)
+            view._subsections = [sub]
+            covmat = view.to_xs_covmat(mf3_sections=xs)
+            if not covmat.matrices:
+                report.lost(f"{where}: no covariance block decoded")
+                continue
+            grid = covmat.energy_grids[0] if covmat.energy_grids else None
+            header = {"qm": float(state.qm), "qi": float(state.qi), "izap": int(state.izap),
+                      "lfs": lfs, "xmf1": float(sub.xmf1), "xlfs1": float(sub.xlfs1),
+                      "lis": int(getattr(mf40mt, "_lis", None) or 0)}
+            sections.append(CovarianceSection(
+                label=f"MF40-MT{mt}-LFS{lfs}" + ("" if same else f"-MT{mt1}-LFS{lfs1}"),
+                rowData=DataLink(href=productionHref(mt, rowPid), ENDF_MFMT=f"40/{mt}"),
+                columnData=(None if same else DataLink(
+                    href=productionHref(mt1, pidFromZA(columnIzap, lfs1)), ENDF_MFMT=f"40/{mt1}")),
+                form=_storedAs(_matrixForm(covmat.matrices[0], grid, covmat.is_relative[0]),
+                               sub.ni_records),
+                provenance=EndfProvenance(mat=mat, awr=mf40mt._awr, za=mf40mt._za,
+                                          headerFields={MF40_KEY: header}),
+            ))
+    if not sections:
+        report.lost(f"MF40/MT{mt}: no covariance blocks decoded")
+    return sections, report
+
+
+def _storedAs(form, ni_records):
+    """*form* with the array storage of its one NI record (LB=0/1 diagonal, LB=5 by LS), so it writes back as read."""
+    if len(ni_records) == 1:
+        record = ni_records[0]
+        lb, ls = int(record.lb), int(getattr(record, "ls", 0) or 0)
+        form.arrayStorage = {0: "diagonal", 1: "diagonal", 5: "symmetric" if ls == 1 else "full"}.get(lb)
+        form.columnGridIsRowGrid = lb != 6
+    return form
+
+
+def encodeMF40MT(source, mt: int, mat: Optional[int] = None,
+                 report: Optional[ConversionReport] = None):
+    """A :class:`CovarianceSuite` → an ``MF40MT`` for one MT, or ``None`` when the header is not known.
+
+    One state per final state the sections name, in the order they come; one
+    subsection per section, its record built by the MF33 rule for an NI
+    sub-subsection. The state and subsection headers come from the provenance
+    :func:`decodeMF40MT` keeps; a section without it (read from GNDS) is not
+    written, and the report says so.
+    """
+    from kika.endf.classes.mf33.mf33 import Subsection
+    from kika.endf.classes.mf40.mf40 import MF40MT, MF40State
+
+    report = report if report is not None else ConversionReport()
+    sections = _covarianceSections(source, 40, mt)
+    headers = [getattr(s.provenance, "headerFields", {}).get(MF40_KEY) for s in sections]
+    if any(h is None for h in headers) or any(not isinstance(s.form, CovarianceMatrix) for s in sections):
+        report.unsupportedNode(
+            f"MF40/MT{mt} has no ENDF state header (QM, QI, IZAP, LFS) or holds a form other than "
+            f"one matrix, so it is absent from the written tape")
+        return None, report
+    provenance = sections[0].provenance
+    states = {}
+    for section, header in zip(sections, headers):
+        key = (header["izap"], header["lfs"])
+        state = states.get(key)
+        if state is None:
+            state = states[key] = MF40State(qm=header["qm"], qi=header["qi"], izap=header["izap"],
+                                            lfs=header["lfs"], nl=0, subsections=[])
+        colMT = _endfMT(section.columnData) if section.columnData is not None else mt
+        sub = Subsection(xmf1=header["xmf1"], xlfs1=header["xlfs1"], mat1=0, mt1=colMT)
+        sub.ni_records.append(_niRecord(section.form, mt, report))
+        sub.nc, sub.ni = 0, 1
+        state.subsections.append(sub)
+        state.nl = len(state.subsections)
+    resolvedMat = mat if mat is not None else getattr(provenance, "mat", None)
+    built = MF40MT(number=mt, _za=provenance.za, _awr=provenance.awr, _lis=headers[0]["lis"],
+                   _ns=len(states), _mat=int(resolvedMat or 0), states=list(states.values()))
+    return built, report
+
+
 def decodeCovarianceSuite(endf, report: Optional[ConversionReport] = None,
                           evaluation: Optional[str] = None,
                           target: Optional[str] = None,
@@ -903,7 +1064,7 @@ def decodeCovarianceSuite(endf, report: Optional[ConversionReport] = None,
     is represented there as native crossSectionSums; without it membership
     cannot be linked and is reported as a loss. The public reader supplies it.
 
-    MF31, MF33, MF34 and MF35 become ``covarianceSections``; **MF32 becomes
+    MF31, MF33, MF34, MF35 and MF40 become ``covarianceSections``; **MF32 becomes
     ``parameterCovariances``**, and the two lists are separate because §25.3 is
     a separate subsection of the standard — a matrix whose rows are resonance
     parameters is not interchangeable with one whose rows are bins of an energy
@@ -1031,6 +1192,18 @@ def decodeCovarianceSuite(endf, report: Optional[ConversionReport] = None,
             sections, report = decodeMF35MT(mf35.mt[mt], report)
             suite.covarianceSections.extend(sections)
 
+    mf40 = endf.mf.get(40) if hasattr(endf, "mf") else None
+    if mf40 is not None:
+        izapOf = {}
+        for mt, section in getattr(mf40, "mt", {}).items():
+            for s in section.states:
+                izapOf.setdefault((int(mt), int(s.lfs)), set()).add(int(s.izap))
+        mf10 = endf.mf.get(10)
+        for mt in sorted(getattr(mf40, "mt", {})):
+            sections, report = decodeMF40MT(mf40.mt[mt], report, izapOf=izapOf,
+                                            mf10mt=getattr(mf10, "mt", {}).get(mt) if mf10 is not None else None)
+            suite.covarianceSections.extend(sections)
+
     mf32 = endf.mf.get(32) if hasattr(endf, "mf") else None
     if mf32 is not None:
         for mt in sorted(getattr(mf32, "mt", {})):
@@ -1046,9 +1219,9 @@ def decodeCovarianceSuite(endf, report: Optional[ConversionReport] = None,
             suite.parameterCovariances.extend(parameterCovariances)
 
     if (mf31 is None and mf33 is None and mf34 is None and mf35 is None
-            and not suite.parameterCovariances):
+            and mf40 is None and not suite.parameterCovariances):
         report.lost(
-            "no MF31, MF32, MF33, MF34 or MF35: this evaluation carries no "
+            "no MF31, MF32, MF33, MF34, MF35 or MF40: this evaluation carries no "
             "covariances"
         )
 

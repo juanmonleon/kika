@@ -18,11 +18,13 @@ from .covariances import (
     decodeMF33MT,
     decodeMF34MT,
     decodeMF35MT,
+    decodeMF40MT,
     encodeMF31MT,
     encodeMF32MT,
     encodeMF33MT,
     encodeMF34MT,
     encodeMF35MT,
+    encodeMF40MT,
 )
 from .decode import decodeMF1MT451, decodeMF3MT, decodeReactionSuite
 from .encode import encodeMF1MT451, encodeMF3MT
@@ -51,10 +53,10 @@ __all__ = [
     "decodeMF6MT", "encodeMF6MT",
     "decodeMF2MT151", "encodeMF2MT151",
     "decodeMF31MT", "decodeMF32MT", "decodeMF33MT", "decodeMF34MT",
-    "decodeMF35MT",
+    "decodeMF35MT", "decodeMF40MT",
     "decodeCovarianceSuite",
     "encodeMF31MT", "encodeMF32MT", "encodeMF33MT", "encodeMF34MT",
-    "encodeMF35MT", "decodeMF1Nubar", "attachNubar", "nubarHref",
+    "encodeMF35MT", "encodeMF40MT", "decodeMF1Nubar", "attachNubar", "nubarHref",
     "encodeMF1MT452", "encodeMF1MT455", "encodeMF1MT456",
     "decodeMF1MT458", "attachFissionEnergyRelease", "encodeMF1MT458",
     "encodeMF1MT460",

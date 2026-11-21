@@ -176,7 +176,7 @@ def test_a_file_with_no_covariances_says_so():
     # joined MF33 and MF34 with the PFNS work, MF31 with the nu-bar work, and
     # MF32 with §25.3; a tape carrying only one of them must not be reported as
     # carrying none.
-    assert any("no MF31, MF32, MF33, MF34 or MF35" in entry
+    assert any("no MF31, MF32, MF33, MF34, MF35 or MF40" in entry
                for entry in report.losses)
 
 

@@ -74,8 +74,8 @@ FORMATS = ("endf", "ace", "gnds", "g4ndl", "hdf5")
 #: read it, and MF31 was already here before the nu-bar work taught it the same.
 #: Without the entry the door would leave the redirect notice standing with
 #: nothing replacing it -- telling the user to call `decodeCovarianceSuite` for
-#: a file it had, in fact, just decoded.
-COVARIANCE_MF = (31, 32, 33, 34, 35)
+#: a file it had, in fact, just decoded. MF40 joined with the activation covariances.
+COVARIANCE_MF = (31, 32, 33, 34, 35, 40)
 
 
 class UnknownFormatError(ValueError):

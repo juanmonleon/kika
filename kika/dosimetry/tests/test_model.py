@@ -12,6 +12,7 @@ from kika.cov.decomposition import clip_projection
 from kika.dosimetry import SpectrumPrior, adjust_spectrum, dosimeter_from_suite, response_cells
 
 TAPE = Path(kika.__file__).parent / "endf" / "tests" / "data" / "micro_fe56_mf33.endf"
+NB93 = Path(kika.__file__).parent / "endf" / "tests" / "data" / "micro_nb93_b81_mf40.endf"
 EDGES = np.geomspace(1e5, 2e7, 41)
 
 
@@ -45,7 +46,7 @@ def test_the_cross_section_and_its_covariance_are_the_evaluations(suite):
 def test_an_absolute_covariance_is_made_relative_with_the_interval_averages(suite):
     form = _section(suite, 16).form
     d = dosimeter_from_suite(suite, 16)
-    average = group_averages(d.energies, d.cross_section, d.laws, form.rowGrid)
+    average = group_averages(d.energies, d.cross_section, d.laws, form.rowGrid, "1/x")
     absolute = dataclasses.replace(form, matrix=form.matrix * np.outer(average, average), isRelative=False)
     section = SimpleNamespace(rowData=SimpleNamespace(ENDF_MFMT="33/16"), columnData=None, form=absolute, label="x")
     fake = SimpleNamespace(cross_section=suite.cross_section, reactionByENDF_MT=suite.reactionByENDF_MT,
@@ -85,3 +86,21 @@ def test_with_real_covariances_the_first_iteration_equals_folding_them_into_the_
     np.testing.assert_allclose(result.one_step_flux, prior.flux * np.exp(one.mean), rtol=1e-12)
     assert set(result.cross_section_factors) == {"Fe56 MT4", "Fe56 MT16"}
     assert result.cross_section_factors["Fe56 MT16"].shape == (124,)
+
+
+def test_a_production_state_reads_its_mf10_table_and_its_mf40_block():
+    suite = kika.read(NB93)
+    d = dosimeter_from_suite(suite, 4, lfs=1)
+    production = next(iter(suite.productions))
+    x, y, _ = production.crossSection["eval"].toEndfRegions()
+    np.testing.assert_array_equal(d.energies, x)
+    np.testing.assert_array_equal(d.cross_section, y)
+    section = next(s for s in suite.covarianceSuite.covarianceSections if s.rowData.ENDF_MF == 40)
+    np.testing.assert_array_equal(d.relative_covariance, section.form.matrix)
+    np.testing.assert_array_equal(d.covariance_edges, section.form.rowGrid)
+    assert d.name == "MT4 Nb93_e1"
+
+
+def test_a_final_state_that_names_no_production_raises():
+    with pytest.raises(KeyError, match="LFS=0"):
+        dosimeter_from_suite(kika.read(NB93), 4, lfs=0)
