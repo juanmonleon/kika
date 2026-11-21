@@ -12,13 +12,14 @@ __all__ = ["EmissionReport", "read_library_tables"]
 
 
 def read_library_tables(path) -> Set[str]:
-    """The table names (``92235.80c``, ``lwtr.20t``) an MCNP xsdir or a Serpent xsdata file lists, in lower case.
+    """The table names (``92235.80c``, ``lwtr.20t``, ``U235``) a library index lists, in lower case.
 
     Parameters
     ----------
     path
-        An MCNP ``xsdir`` (recognised by its ``directory`` line) or a Serpent
-        ``xsdata`` file (alias and name in the first two columns).
+        An MCNP ``xsdir`` (recognised by its ``directory`` line), an OpenMC
+        ``cross_sections.xml`` (recognised by its ``<cross_sections>`` root) or a
+        Serpent ``xsdata`` file (alias and name in the first two columns).
 
     Returns
     -------
@@ -27,6 +28,10 @@ def read_library_tables(path) -> Set[str]:
     from ..ace.xsdir import _entries
 
     text = Path(path).read_text(encoding="utf-8", errors="replace")
+    if "<cross_sections" in text:
+        from ..hdf5.library import CrossSectionsXml
+
+        return {name.lower() for entry in CrossSectionsXml.read(path).entries for name in entry.materials}
     if any(line.strip().lower() == "directory" for line in text.splitlines()):
         _, entries = _entries(text)
         return {name.lower() for name, _ in entries}

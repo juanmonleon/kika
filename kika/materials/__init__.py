@@ -1,8 +1,9 @@
 """Material compositions for the Monte Carlo codes, independent of the code.
 
 A material holds nuclides (ZAID, fraction, library overrides), a density and a
-temperature. It is built by hand or read from an MCNP or Serpent input, converted
-between atomic and weight fractions, and written back as an MCNP or Serpent card.
+temperature. It is built by hand or read from an MCNP or Serpent input or an OpenMC
+``materials.xml``, converted between atomic and weight fractions, and written for any
+of the three; every card is read back before it is returned.
 
 Examples
 --------
@@ -18,11 +19,13 @@ Examples
 >>> # Export to different codes
 >>> print(mat.to_mcnp())
 >>> print(mat.to_serpent())
+>>> print(mat.to_openmc())
 """
 
 from .material import Nuclide, NuclideAccessor, Material, MaterialCollection
 from .parse_mcnp import read_material
 from .parse_serpent import read_serpent_materials
+from .openmc import read_openmc_materials
 
 __all__ = [
     'Nuclide',
@@ -31,4 +34,5 @@ __all__ = [
     'MaterialCollection',
     'read_material',
     'read_serpent_materials',
+    'read_openmc_materials',
 ]

@@ -974,13 +974,16 @@ class Material:
         Raises
         ------
         ValueError
-            If a requested element is missing, not natural, or lacks abundance data.
+            If a requested element is missing, not natural, or lacks abundance data,
+            or an isotope it expands into is already in the material with other
+            libraries.
+
+        Notes
+        -----
+        An atomic fraction is split by the natural abundances; a weight fraction by
+        each isotope's share of the element's mass. No other nuclide changes, and an
+        isotope the material already has gets the share added to its own.
         """
-        original_fraction_type = self.fraction_type
-
-        if self.is_weight:
-            self.to_atomic_fraction()
-
         if elements is not None:
             # Convert to list of symbols
             symbols_list = [elements] if isinstance(elements, str) else elements
@@ -1004,32 +1007,26 @@ class Material:
 
         for symbol in natural_symbols:
             nuclide = self.nuclide[symbol]
-            zaid = nuclide.zaid
-            atomic_number = zaid // 1000
-
-            atomic_key = atomic_number * 1000
-            if atomic_key not in NATURAL_ABUNDANCE:
+            isotopes = NATURAL_ABUNDANCE.get(nuclide.z * 1000)
+            if isotopes is None:
                 raise ValueError(f"No natural abundance data available for element {symbol}")
-
-            original_fraction = nuclide.fraction
-            natural_isotopes = NATURAL_ABUNDANCE[atomic_key]
-            new_isotopes: Dict[str, Nuclide] = {}
-
-            for iso_zaid, atomic_abundance in sorted(natural_isotopes.items()):
-                fraction = original_fraction * atomic_abundance
-                iso_symbol = zaid_to_symbol(iso_zaid)
-                new_isotopes[iso_symbol] = Nuclide(
-                    zaid=iso_zaid,
-                    fraction=fraction,
-                    libs=dict(nuclide.libs),
-                )
-
-            for iso_symbol, isotope in new_isotopes.items():
-                self.nuclide[iso_symbol] = isotope
+            # A weight fraction splits by each isotope's share of the element's mass.
+            weights = {za: x * (ATOMIC_MASS[za] if self.is_weight else 1.0) for za, x in isotopes.items()}
+            total = sum(weights.values())
             del self.nuclide[symbol]
-
-        if original_fraction_type == "wo":
-            self.to_weight_fraction()
+            for iso_zaid, weight in sorted(weights.items()):
+                share = nuclide.fraction * weight / total
+                iso_symbol = zaid_to_symbol(iso_zaid)
+                existing = self.nuclide.get(iso_symbol)
+                if existing is None:
+                    self.nuclide[iso_symbol] = Nuclide(zaid=iso_zaid, fraction=share, libs=dict(nuclide.libs))
+                elif existing.libs != nuclide.libs:
+                    raise ValueError(
+                        f"Material {self.id}: natural {symbol} expands into {iso_symbol}, which the "
+                        f"material already has with other libraries ({existing.libs} and {nuclide.libs})"
+                    )
+                else:
+                    existing.fraction += share
 
         return self
 
@@ -1171,13 +1168,58 @@ class Material:
         zaid = _zaid.mcnp(nuclide.zaid)
         return f"{zaid}.{lib}" if lib else str(zaid)
 
-    def _check_written(self, code: str, text: str) -> None:
-        """Read *text* back and raise if it is not this material."""
+    def to_openmc(self) -> str:
+        """Serialise the material as an OpenMC ``<material>`` element of ``materials.xml``.
+
+        Nuclides take OpenMC's names (``U235``, ``Am242_m1``). OpenMC libraries hold
+        no natural elements, so each is split into its isotopes with kika's natural
+        abundances. The density keeps its unit (``g/cm3``, ``kg/m3``, ``atom/b-cm``,
+        or ``sum``); ``temperature``, ``volume`` (``metadata["vol"]``) and
+        ``depletable`` are written when set, and S(alpha,beta) tables named as
+        OpenMC names them (``c_H_in_H2O``) as ``<sab>``. Library suffixes have no
+        place: OpenMC picks its data from ``cross_sections.xml`` and the
+        temperature. The element is read back before it is returned; what it
+        cannot hold is listed by :meth:`emission_losses`.
+        :meth:`MaterialCollection.to_openmc` writes the whole file.
+
+        Returns
+        -------
+        str
+            The ``<material>`` element.
+
+        Raises
+        ------
+        ValueError
+            If the material has no density and was not read with ``sum``, or a
+            natural element has no natural composition in kika.
+        RuntimeError
+            If the element does not read back as this material (a defect in kika).
+        """
+        import xml.etree.ElementTree as ET
+
+        from .openmc import expanded, material_element
+
+        element = material_element(self)
+        ET.indent(element, space="  ")
+        text = ET.tostring(element, encoding="unicode")
+        self._check_written("openmc", text, expanded(self))
+        return text
+
+    def _check_written(self, code: str, text: str, reference: Optional[Material] = None) -> None:
+        """Read *text* back and raise if it is not this material (or *reference*, as written)."""
         from .parse_mcnp import read_material
         from .parse_serpent import read_serpent_materials
 
+        reference = reference or self
         lines = text.splitlines()
-        if code == "mcnp":
+        if code == "openmc":
+            from .openmc import read_openmc_materials, sab_tables
+
+            back = read_openmc_materials(f"<materials>{text}</materials>").by_id[self.id]
+            same = (back.temperature == self.temperature
+                    and (back.density, back.density_unit) == (self.density, self.density_unit)
+                    and back.thermal_scattering == sab_tables(self)[0])
+        elif code == "mcnp":
             back, _ = read_material(lines, 1 if self.name else 0)
             mt = lines[-1].split()[1:] if self.thermal_scattering else []
             same = (back.libs == self.libs and back.keywords == self.keywords
@@ -1193,9 +1235,9 @@ class Material:
             else:
                 density = self._mass_density_gcc()
             same = back.temperature == self.temperature and back.density == density
-        fractions = {s: n.fraction for s, n in self.nuclide.items()}
+        fractions = {s: n.fraction for s, n in reference.nuclide.items()}
         same = (same and {s: n.fraction for s, n in back.nuclide.items()} == fractions
-                and (not fractions or back.fraction_type == self.fraction_type))
+                and (not fractions or back.fraction_type == reference.fraction_type))
         if not same:
             raise RuntimeError(
                 f"kika wrote material {self.id} as a {code} card that does not read back as "
@@ -1208,7 +1250,7 @@ class Material:
         Parameters
         ----------
         code
-            ``'mcnp'`` or ``'serpent'``.
+            ``'mcnp'``, ``'serpent'`` or ``'openmc'``.
 
         Returns
         -------
@@ -1243,8 +1285,27 @@ class Material:
                            | {k for k in self.libs if k != "nlib"})
             if other:
                 losses.append(f"libraries other than the neutron one not written: {', '.join(other)}")
+        elif code == "openmc":
+            from .openmc import sab_tables
+
+            natural = sorted(n.symbol for n in self.nuclide.values() if n.is_natural)
+            if natural:
+                losses.append(f"natural {', '.join(natural)} split into isotopes with kika's natural "
+                              f"abundances: OpenMC libraries hold no natural elements")
+            if self.libs or any(n.libs for n in self.nuclide.values()):
+                losses.append("library suffixes not written: OpenMC picks its data from "
+                              "cross_sections.xml and the temperature")
+            if self.keywords:
+                losses.append(f"MCNP keywords not written: {', '.join(sorted(self.keywords))}")
+            others = sab_tables(self)[1]
+            if others:
+                losses.append(f"S(alpha,beta) tables {', '.join(others)} not written: OpenMC needs "
+                              f"its own names (c_H_in_H2O, ...)")
+            skipped = [k for k in serpent_options if k != "vol"]
+            if skipped:
+                losses.append(f"Serpent options not written: {', '.join(skipped)}")
         else:
-            raise ValueError(f"Unknown code '{code}': use 'mcnp' or 'serpent'")
+            raise ValueError(f"Unknown code '{code}': use 'mcnp', 'serpent' or 'openmc'")
         return losses
 
     def library_tables(self, code: str) -> List[Tuple[str, Optional[str]]]:
@@ -1253,7 +1314,7 @@ class Material:
         Parameters
         ----------
         code
-            ``'mcnp'`` or ``'serpent'``.
+            ``'mcnp'``, ``'serpent'`` or ``'openmc'``.
 
         Returns
         -------
@@ -1262,6 +1323,12 @@ class Material:
             table of the ``mt`` card is its own symbol), or None when the card gives no
             suffix and the material no default, so the code picks one itself.
         """
+        if code.lower() == "openmc":
+            from .openmc import expanded, openmc_name, sab_tables
+
+            full = expanded(self)
+            return ([(symbol, openmc_name(full, symbol)) for symbol in sorted(full.nuclide.keys())]
+                    + [(t, t) for t in sab_tables(self)[0]])
         serpent = code.lower() == "serpent"
         tables: List[Tuple[str, Optional[str]]] = []
         for symbol, nuclide in sorted(self.nuclide.items()):
@@ -1558,6 +1625,28 @@ class MaterialCollection:
             raise ValueError(f"Serpent card names given to more than one material: {'; '.join(clashes)}")
         return "\n\n".join(material.to_serpent() for material in self.by_id.values())
 
+    def to_openmc(self, cross_sections: Optional[str] = None) -> str:
+        """Serialise all materials as an OpenMC ``materials.xml`` document.
+
+        Each material is written by :meth:`Material.to_openmc`.
+
+        Parameters
+        ----------
+        cross_sections
+            Path written as the document's ``<cross_sections>``; None leaves it
+            out (OpenMC then reads ``OPENMC_CROSS_SECTIONS``).
+
+        Returns
+        -------
+        str
+            The whole file.
+        """
+        from .openmc import to_xml
+        import xml.etree.ElementTree as ET
+
+        elements = [ET.fromstring(material.to_openmc()) for material in self.by_id.values()]
+        return to_xml(elements, cross_sections)
+
     def _serpent_name_clashes(self) -> List[str]:
         owners: Dict[str, List[int]] = {}
         for material in self.by_id.values():
@@ -1575,10 +1664,11 @@ class MaterialCollection:
         Parameters
         ----------
         code
-            ``'mcnp'`` or ``'serpent'``.
+            ``'mcnp'``, ``'serpent'`` or ``'openmc'``.
         library
-            Path of the MCNP ``xsdir`` or Serpent ``xsdata`` the input will run
-            with; None skips the table check.
+            Path of the MCNP ``xsdir``, Serpent ``xsdata`` or OpenMC
+            ``cross_sections.xml`` the input will run with; None skips the table
+            check.
 
         Returns
         -------
@@ -1593,15 +1683,15 @@ class MaterialCollection:
         from .report import EmissionReport, read_library_tables
 
         code = code.lower()
-        if code not in ("mcnp", "serpent"):
-            raise ValueError(f"Unknown code '{code}': use 'mcnp' or 'serpent'")
+        if code not in ("mcnp", "serpent", "openmc"):
+            raise ValueError(f"Unknown code '{code}': use 'mcnp', 'serpent' or 'openmc'")
         tables = read_library_tables(library) if library is not None else None
         clashes = self._serpent_name_clashes() if code == "serpent" else []
         clashing = {name.split(" (")[0] for name in clashes}
         report = EmissionReport(code=code, library=str(library) if library is not None else None,
                                 clashes=clashes)
         for material in self.by_id.values():
-            material.to_mcnp() if code == "mcnp" else material.to_serpent()
+            getattr(material, f"to_{code}")()
             asked = material.library_tables(code)
             missing = [[s, t] for s, t in asked if t and tables is not None and t.lower() not in tables]
             no_library = sorted({s for s, t in asked if t is None})
