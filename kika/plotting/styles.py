@@ -413,9 +413,7 @@ def register_style(style: Style, *, replace: bool = False) -> Style:
         The style to add. It is stored under ``style.name`` in lower case, and
         its colour maps given as stops are registered with matplotlib.
     replace : bool
-        Skip the check on the name, so ``style`` replaces a registered style of
-        the same name. A style registered under the name of an alias is not
-        found by that name, because :func:`get_style` resolves aliases first.
+        Let ``style`` replace a registered style of the same name.
 
     Returns
     -------
@@ -425,11 +423,14 @@ def register_style(style: Style, *, replace: bool = False) -> Style:
     Raises
     ------
     ValueError
-        If ``replace`` is False and the name (in lower case) is already
-        registered or is an alias.
+        If the name (in lower case) is an alias, which :func:`get_style` would
+        resolve before the style, or if ``replace`` is False and the name is
+        already registered.
     """
     key = style.name.lower()
-    if not replace and (key in _REGISTRY or key in _ALIASES):
+    if key in _ALIASES:
+        raise ValueError(f"{style.name!r} is an alias of {_ALIASES[key]!r}; choose another name")
+    if not replace and key in _REGISTRY:
         raise ValueError(f"A style named {style.name!r} already exists")
     _REGISTRY[key] = style
     _register_cmaps(style)

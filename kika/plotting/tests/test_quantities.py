@@ -137,9 +137,9 @@ def test_mixing_frames_warns():
         PlotBuilder().add_data(ad("CM")).add_data(ad("LAB")).build()
 
 
-def test_legacy_data_keeps_the_old_axis_guess():
+def test_data_without_quantity_or_unit_get_an_energy_axis_with_no_unit():
     ax = PlotBuilder().add_data(PlotData(x=[1, 10], y=[1, 2])).set_scales(log_x=True).build().axes[0]
-    assert ax.get_xlabel() == "Energy (MeV)"
+    assert ax.get_xlabel() == "Energy"
 
 
 def test_comparison_is_computed_in_the_reference_units():

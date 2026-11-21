@@ -387,7 +387,10 @@ class PlotBuilder:
             to explicitly hide the title. If not provided, the default title
             (e.g., from heatmap_data.label) will be used.
         x_label : str, optional
-            X-axis label
+            X-axis label. Without one, the label comes from the quantity the
+            curves share; with no quantity, a log axis reads ``'Energy (<unit>)'``
+            in the display unit, or ``'Energy'`` when no curve carries one, and a
+            linear axis ``'Energy-group index'``.
         y_label : str, optional
             Y-axis label
 
@@ -1291,10 +1294,8 @@ class PlotBuilder:
         elif auto_x is not None:
             self.ax.set_xlabel(auto_x, **({'fontsize': x_fs} if x_fs is not None else {}))
         elif self._use_log_x:
-            # Auto-label for energy axis if log scale is used
-            is_energy_axis = self._x_label is None or 'energy' in self._x_label.lower()
-            if is_energy_axis:
-                self.ax.set_xlabel("Energy (MeV)")
+            unit = display_units['x']
+            self.ax.set_xlabel(f"Energy ({unit})" if unit else "Energy")
         else:
             # Auto-label for group index if not log scale and no label
             if self._x_label is None:

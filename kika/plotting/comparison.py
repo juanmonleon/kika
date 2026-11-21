@@ -23,6 +23,7 @@ Examples
 ...     .build())
 """
 
+import warnings
 from typing import Optional, Tuple, List, Literal, Union
 from dataclasses import dataclass
 import numpy as np
@@ -251,11 +252,11 @@ class ComparisonBuilder:
     canonical one of its quantity); a curve of another dimension is left as it
     is, with a :class:`~kika.plotting.MixedQuantityWarning`, and nothing is
     converted when the reference has no units. Axis limits and the differences are
-    in those units. The axes are labelled from the quantity and unit of the curves
-    on the main panel only. A difference panel carries no unit, so its energy axis
-    takes the label given to :meth:`set_labels` and, without one, a fixed
-    ``'Energy (MeV)'`` on a log axis or ``'Energy-group index'`` on a linear one,
-    whatever unit the data are in.
+    in those units. The axes are labelled from the quantity and unit of the curves.
+    The energy axis of a difference panel takes the label given to
+    :meth:`set_labels`; without one, the x label of the reference's quantity in its
+    unit, else ``'Energy (<unit>)'`` on a log axis, or the fallback of
+    :meth:`PlotBuilder.set_labels` when the reference carries no unit.
 
     Parameters
     ----------
@@ -436,10 +437,10 @@ class ComparisonBuilder:
         ----------
         data : PlotData or PlotItem
             The points to draw. Their difference is taken on their own abscissae
-            (``grid='comparison'``). If computing the difference raises any
-            error (for instance no overlap with the reference), the points are
-            left out of the diff panel without a message. They are converted to
-            the reference's units when the figure is built.
+            (``grid='comparison'``). When it cannot be taken (no overlap with the
+            reference, for instance), the points are left out of the diff panel
+            with a ``UserWarning`` that names them. They are converted to the
+            reference's units when the figure is built.
         **styling
             Styling overrides for these points, as in :meth:`PlotBuilder.add_data`.
 
@@ -1022,6 +1023,19 @@ class ComparisonBuilder:
         self._overlays = convert(self._overlays)
         self._scatter_overlays = convert(self._scatter_overlays)
 
+    def _reference_x_label(self) -> Optional[str]:
+        """The x label the reference gives the main panel, for the difference panel."""
+        from .units import QUANTITIES
+
+        ref = self._reference
+        quantity = QUANTITIES.get(getattr(ref, 'quantity', None) or '')
+        unit = getattr(ref, 'x_unit', None)
+        if quantity is not None:
+            return quantity.axis_label('x', unit)
+        if unit and self._use_log_x:
+            return f"Energy ({unit})"
+        return None
+
     def _resolve_diff_y_label(self) -> str:
         """Build the default y-axis label for difference panels."""
         if self._diff_y_label is not None:
@@ -1316,21 +1330,24 @@ class ComparisonBuilder:
                     grid='comparison',  # Keep scatter x-points
                     relative_in_percent=self._relative_in_percent,
                 )
-                ovl_diff = ovl_result.difference
-                ovl_diff.label = None  # Suppress legend in diff panel
-                # Preserve scatter marker style
-                ovl_diff_styling = {
-                    'color': ovl_data.color or ovl_styling.get('color'),
-                    'marker': ovl_data.marker or ovl_styling.get('marker', 'o'),
-                    'markersize': ovl_data.markersize or ovl_styling.get('markersize', 5),
-                    'linestyle': 'none',
-                }
-                diff_builder.add_data(ovl_diff, **ovl_diff_styling)
-            except Exception:
-                pass  # Skip if interpolation fails for this overlay
+            except ValueError as exc:
+                warnings.warn(
+                    f"{ovl_data.label or 'A scatter overlay'} is left out of the "
+                    f"difference panel: {exc}", UserWarning, stacklevel=3)
+                continue
+            ovl_diff = ovl_result.difference
+            ovl_diff.label = None  # Suppress legend in diff panel
+            ovl_diff_styling = {
+                'color': ovl_data.color or ovl_styling.get('color'),
+                'marker': ovl_data.marker or ovl_styling.get('marker', 'o'),
+                'markersize': ovl_data.markersize or ovl_styling.get('markersize', 5),
+                'linestyle': 'none',
+            }
+            diff_builder.add_data(ovl_diff, **ovl_diff_styling)
 
         diff_builder.set_labels(
-            y_label=self._resolve_diff_y_label(), x_label=self._x_label,
+            y_label=self._resolve_diff_y_label(),
+            x_label=self._x_label if self._x_label is not None else self._reference_x_label(),
         )
         diff_builder.set_scales(log_x=self._use_log_x, log_y=self._diff_log_y)
         diff_builder.set_limits(x_lim=self._x_lim, y_lim=self._diff_y_lim)
