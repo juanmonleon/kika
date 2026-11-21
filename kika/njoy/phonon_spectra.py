@@ -355,6 +355,23 @@ def _flasshSites(dos_path: Path, elements: Optional[List[str]] = None) -> List[d
     return sites
 
 
+_LONG_LIVED_ACTINIDES = (
+    90229, 90230, 90232, 91231, 92232, 92233, 92234, 92235, 92236, 92238, 93237,
+    94238, 94239, 94240, 94241, 94242, 94244, 95241, 95243, 96244, 96245, 96246,
+    96247, 96248, 97249, 98249, 98250, 98251, 98252,
+)
+
+
+def _scattererCandidates():
+    from kika._constants import NATURAL_ABUNDANCE
+
+    return tuple(sorted({za for isotopes in NATURAL_ABUNDANCE.values() for za in isotopes}
+                        | set(_LONG_LIVED_ACTINIDES)))
+
+
+_SCATTERER_CANDIDATES = _scattererCandidates()
+
+
 def _symbolForMass(mass: float, elements: Optional[List[str]] = None) -> Optional[str]:
     """The element (``D`` for hydrogen-2) whose isotope or natural mass is nearest *mass*.
 
@@ -364,7 +381,9 @@ def _symbolForMass(mass: float, elements: Optional[List[str]] = None) -> Optiona
     from kika._constants import (ATOMIC_MASS, ATOMIC_NUMBER_TO_SYMBOL, NATURAL_ABUNDANCE,
                                  SYMBOL_TO_ATOMIC_NUMBER)
 
-    candidates = dict(ATOMIC_MASS)
+    # Naturally occurring isotopes and long-lived actinides: an unstable isobar of
+    # a light atom sits a few 0.01 u from it and would win on a rounded mass.
+    candidates = {za: ATOMIC_MASS[za] for za in _SCATTERER_CANDIDATES}
     if elements:
         allowed = {SYMBOL_TO_ATOMIC_NUMBER.get("H" if e == "D" else e) for e in elements}
         candidates = {za: m for za, m in candidates.items() if za // 1000 in allowed}

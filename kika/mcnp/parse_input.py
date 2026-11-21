@@ -149,7 +149,7 @@ def read_mcnp(file_path, pert_metadata=None):
                 if current_original_mat is not None:
                     pert_obj.original_material = current_original_mat
                 inst.perturbation.pert[pert_obj.id] = pert_obj
-        elif line.startswith("m"):
+        elif line[:1].lower() == "m":
             material_obj, i = read_material(lines, i)
             if material_obj:
                 inst.materials.by_id[material_obj.id] = material_obj

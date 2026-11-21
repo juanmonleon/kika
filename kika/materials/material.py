@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Union
@@ -30,11 +31,41 @@ _DENSITY_CONVERSIONS: Dict[tuple[str, str], float] = {
 }
 
 
+# MCNP data class letter -> m-card library keyword. 'y' (dosimetry) is kika's own key, not an
+# m-card keyword; 't' (S(a,b)) is absent because those tables go on the mt card.
+_LIB_KEY_BY_CLASS: Dict[str, str] = {
+    "c": "nlib", "d": "nlib", "p": "plib", "u": "pnlib", "e": "elib", "h": "hlib",
+    "o": "dlib", "r": "tlib", "s": "slib", "a": "alib", "y": "ylib",
+}
+
+
 def _normalize_density_unit(unit: Optional[str]) -> Optional[str]:
     if unit is None:
         return None
     key = unit.strip().lower().replace(" ", "")
     return _DENSITY_UNIT_ALIASES.get(key, key)
+
+
+def _read_lines(path) -> List[str]:
+    """Lines of a text file with their own endings, any byte sequence kept as is."""
+    with open(path, "r", encoding="utf-8", errors="surrogateescape", newline="") as f:
+        return f.readlines()
+
+
+def _write_lines(path, lines: List[str]) -> None:
+    """Write lines read by :func:`_read_lines` back byte for byte."""
+    with open(path, "w", encoding="utf-8", errors="surrogateescape", newline="") as f:
+        f.writelines(lines)
+
+
+def _line_ending(lines: List[str]) -> str:
+    """The file's line ending, from its first ended line; ``"\\n"`` when there is none."""
+    for line in lines:
+        if line.endswith("\r\n"):
+            return "\r\n"
+        if line.endswith("\n"):
+            return "\n"
+    return "\n"
 
 
 def _validate_fraction_type(fraction_type: str) -> None:
@@ -356,28 +387,10 @@ class Material:
         return None
 
     def _infer_lib_key_from_suffix(self, library: str) -> Optional[str]:
-        """Infer MCNP library keyword from a library suffix.
-
-        Parameters
-        ----------
-        library : str
-            Library suffix to analyze.
-
-        Returns
-        -------
-        str or None
-            Library keyword ('nlib', 'plib', or 'ylib') or None if unrecognized.
-        """
+        """Library keyword for the data class letter that ends *library* (``'80c'`` -> ``'nlib'``), or None."""
         if not library:
             return None
-        last = library[-1].lower()
-        if last == "c":
-            return "nlib"
-        if last == "p":
-            return "plib"
-        if last == "y":
-            return "ylib"
-        return None
+        return _LIB_KEY_BY_CLASS.get(library[-1].lower())
 
     def set_name(self, name: Optional[str]) -> None:
         """Set or change the material name.
@@ -451,12 +464,18 @@ class Material:
             to the provided ``fraction_type``.
         fraction_type : str
             Fraction type for this addition: ``'ao'`` for atomic fractions or ``'wo'`` for
-            weight fractions. This updates the material's fraction_type.
+            weight fractions. It must be the material's own type when the material
+            holds other nuclides (convert first with :meth:`to_atomic_fraction` or
+            :meth:`to_weight_fraction`); a material with no other nuclide takes it.
         library : str, optional
-            MCNP library suffix (e.g. ``'80c'``, ``'70c'``, ``'12p'``). The library
-            type (neutron, photon, or thermal) is automatically inferred from the
-            suffix: 'c' -> neutron (nlib), 'p' -> photon (plib), 'y' -> thermal (ylib).
-            This provides a nuclide-level library override.
+            MCNP library suffix (e.g. ``'80c'``, ``'710nc'``, ``'12p'``), a nuclide-level
+            override. Its last letter, the MCNP data class, picks the keyword it is
+            stored under: ``c``/``d`` neutron (``nlib``), ``p`` photoatomic
+            (``plib``), ``u`` photonuclear (``pnlib``), ``e`` electron (``elib``),
+            ``h`` proton (``hlib``), ``o`` deuteron (``dlib``), ``r`` triton
+            (``tlib``), ``s`` helium-3 (``slib``), ``a`` alpha (``alib``) and ``y``
+            dosimetry (``ylib``). Thermal-scattering tables (``t``) belong on the
+            MCNP ``mt`` card, not here.
 
         Returns
         -------
@@ -465,7 +484,9 @@ class Material:
         Raises
         ------
         ValueError
-            If nuclide is a string and does not represent a valid element symbol.
+            If nuclide is a string and does not represent a valid element symbol,
+            if *fraction_type* differs from the type of the nuclides already in the
+            material, or if the class letter of *library* is none of the above.
 
         Examples
         --------
@@ -480,15 +501,22 @@ class Material:
         else:
             zaid = nuclide
 
-        # Validate fraction type (must be exactly 'ao' or 'wo')
         _validate_fraction_type(fraction_type)
+        symbol = zaid_to_symbol(zaid)
+        others = [s for s in self.nuclide if s != symbol]
+        if others and fraction_type != self.fraction_type:
+            raise ValueError(
+                f"Material {self.id} holds '{self.fraction_type}' fractions; adding {symbol} "
+                f"as '{fraction_type}' would reinterpret the others. Convert the material first."
+            )
         self.fraction_type = fraction_type
 
-        # Get symbol for dictionary key
-        symbol = zaid_to_symbol(zaid)
-
-        # Add or update the nuclide
         lib_key = self._infer_lib_key_from_suffix(library) if library else None
+        if library and lib_key is None:
+            raise ValueError(
+                f"Library suffix '{library}' of {symbol} ends in an MCNP data class kika does not "
+                f"place on an m card (known: {', '.join(sorted(_LIB_KEY_BY_CLASS))})"
+            )
 
         if symbol in self.nuclide:
             nuc = self.nuclide[symbol]
@@ -1072,6 +1100,20 @@ class Material:
         """
         return f"{fraction:.6e}"
 
+    def _card_suffix(self, nuclide: Nuclide) -> str:
+        """The single suffix a nuclide's m-card entry carries: its neutron library when it has one."""
+        # Listing a nuclide once per library would count its atoms once per library.
+        chosen = "nlib" if "nlib" in nuclide.libs else sorted(nuclide.libs)[0]
+        dropped = {k: v for k, v in nuclide.libs.items() if k != chosen}
+        if dropped:
+            warnings.warn(
+                f"Material {self.id}: {nuclide.symbol} is written as {nuclide.zaid}."
+                f"{nuclide.libs[chosen]}; its other libraries {dropped} have no place on an "
+                f"MCNP m card and are not written",
+                stacklevel=3,
+            )
+        return nuclide.libs[chosen]
+
     def to_mcnp(self) -> str:
         """Serialise the material as an MCNP ``m`` card.
 
@@ -1126,18 +1168,10 @@ class Material:
             # Get element symbol for comment
             nuclide_symbol = nuclide.symbol
 
-            # Format with fixed column widths for alignment
-            # ZAID+lib column: 12 chars, fraction: 14 chars, symbol: 6 chars
-            if nuclide.libs:
-                for key, lib in sorted(nuclide.libs.items()):
-                    zaid_lib = f"{zaid}.{lib}"
-                    output_lines.append(
-                        f"     {zaid_lib:<12} {self._format_fraction(sign * nuclide.fraction):>14}   $ {nuclide_symbol:<6}"
-                    )
-            else:
-                output_lines.append(
-                    f"     {zaid:<12} {self._format_fraction(sign * nuclide.fraction):>14}   $ {nuclide_symbol:<6}"
-                )
+            zaid_lib = f"{zaid}.{self._card_suffix(nuclide)}" if nuclide.libs else str(zaid)
+            output_lines.append(
+                f"     {zaid_lib:<12} {self._format_fraction(sign * nuclide.fraction):>14}   $ {nuclide_symbol:<6}"
+            )
 
         return "\n".join(output_lines)
 
@@ -1572,14 +1606,15 @@ class MaterialCollection:
         if header:
             content_lines.append(MCNPY_FOOTER)
 
-        with open(filepath, 'w') as f:
+        with open(filepath, 'w', encoding='utf-8', newline='') as f:
             f.writelines(content_lines)
 
     def _materials_equal(self, mat1: Material, mat2: Material) -> bool:
         """Compare two materials for equality.
 
-        Two materials are considered equal if they have the same nuclides
-        with the same fractions and libraries.
+        Two materials are considered equal if they have the same id, name,
+        fraction type, material libraries and nuclides with the same fractions
+        and libraries.
 
         Parameters
         ----------
@@ -1596,6 +1631,8 @@ class MaterialCollection:
         if mat1.id != mat2.id:
             return False
         if mat1.fraction_type != mat2.fraction_type:
+            return False
+        if mat1.libs != mat2.libs or mat1.name != mat2.name:
             return False
         if len(mat1.nuclide) != len(mat2.nuclide):
             return False
@@ -1623,9 +1660,11 @@ class MaterialCollection:
                       force_rewrite: bool = False) -> List[int]:
         """Update materials in an MCNP input file, only modifying those that changed.
 
-        This method reads the original file, compares materials, and only updates
-        those that have actually changed. Unchanged materials are left as-is,
-        preserving their original formatting and any comments.
+        Each material card is replaced where it stands, together with the
+        ``KIKA_MAT_NAME`` comment and the KIKA banner that an earlier write put around
+        it, so writing again replaces the same block. Every other line, materials
+        not in this collection included, is copied byte for byte, and the file keeps
+        its own line endings.
 
         Parameters
         ----------
@@ -1637,8 +1676,8 @@ class MaterialCollection:
             Specific material IDs to consider for update. If None, considers all
             materials in this collection.
         force_rewrite : bool, optional
-            If True, rewrites all materials from the collection regardless of
-            whether they changed. Default is False (only update changed materials).
+            If True, rewrites every considered material that is in the file even when
+            it has not changed. Default is False.
 
         Returns
         -------
@@ -1647,147 +1686,88 @@ class MaterialCollection:
 
         Notes
         -----
-        - Materials that exist in the collection but not in the file will be added
-          at the end of the material cards section.
-        - Materials that exist in the file but not in the collection are left unchanged.
-        - Only materials that have actually changed (different nuclides, fractions,
-          or libraries) are updated, unless force_rewrite=True.
+        - A material is changed when its nuclides, fractions, fraction type, nuclide
+          or material libraries, or name differ from the card in the file.
+        - Materials in the collection but not in the file are added after the last
+          material card; materials in the file but not in the collection are left
+          unchanged.
 
         Examples
         --------
-        >>> # Update in place
         >>> updated = collection.write_to_mcnp("input.i")
-        >>> print(f"Updated materials: {updated}")
-
-        >>> # Save to new file
         >>> updated = collection.write_to_mcnp("input.i", "input_modified.i")
-
-        >>> # Force rewrite all materials
         >>> updated = collection.write_to_mcnp("input.i", force_rewrite=True)
         """
         from .parse_mcnp import read_material
         from .._constants import MCNPY_HEADER, MCNPY_FOOTER
         import re
 
-        # Determine output path and read the file
         if output_filepath is None:
             output_filepath = input_filepath
+        lines = _read_lines(input_filepath)
+        eol = _line_ending(lines)
+        header = MCNPY_HEADER.splitlines()
+        footer = MCNPY_FOOTER.splitlines()
 
-        # Always read from input_filepath
-        with open(input_filepath, 'r') as f:
-            lines = f.readlines()
-
-        # Determine which materials to consider
         if material_ids is None:
             ids_to_consider = set(self.by_id.keys())
         else:
             ids_to_consider = set(mid for mid in material_ids if mid in self.by_id)
 
-        # Track which materials we've found in the file and which were updated
-        materials_found = set()
-        materials_updated = []
-
-        # Find all materials in the file and their positions
-        # We need to process in reverse order to maintain line positions
-        material_positions = []  # List of (mat_id, start_line, end_line)
-
+        # (mat_id, block start, block end, material read from the file)
+        blocks = []
         i = 0
         while i < len(lines):
-            line = lines[i].strip().lower()
+            match = re.match(r"m(\d+)(?=\s|$)", lines[i].strip().lower())
+            if not match:
+                i += 1
+                continue
+            existing, end = read_material(lines, i)
+            start = i
+            if start > 0 and "kika_mat_name:" in lines[start - 1].lower():
+                start -= 1
+            if [l.strip() for l in lines[max(start - 3, 0):start]] == header:
+                start -= 3
+            if [l.strip() for l in lines[end:end + 3]] == footer:
+                end += 3
+            blocks.append((int(match.group(1)), start, end, existing))
+            i = max(end, i + 1)
 
-            # Check if this line starts a material definition
-            if line.startswith('m') and not line.startswith('mt') and not line.startswith('mode'):
-                # Try to extract material ID
-                match = re.match(r'm(\d+)\s*', line)
-                if match:
-                    mat_id = int(match.group(1))
-                    _, end_pos = read_material(lines, i)
-                    material_positions.append((mat_id, i, end_pos))
-                    materials_found.add(mat_id)
-                    i = end_pos
-                    continue
-            i += 1
+        def block_lines(material: Material) -> List[str]:
+            text = MCNPY_HEADER + material.to_mcnp() + "\n" + MCNPY_FOOTER
+            return [line + eol for line in text.splitlines()]
 
-        # If force_rewrite, we'll replace the entire material section with one header/footer
-        if force_rewrite and material_positions:
-            # Get the range spanning all materials
-            first_mat_start = material_positions[0][1]
-            last_mat_end = material_positions[-1][2]
+        materials_updated = []
+        for mat_id, start, end, existing in reversed(blocks):
+            if mat_id not in ids_to_consider:
+                continue
+            new_material = self.by_id[mat_id]
+            if not force_rewrite and self._materials_equal(existing, new_material):
+                continue
+            lines[start:end] = block_lines(new_material)
+            materials_updated.append(mat_id)
 
-            # Delete the entire material section
-            del lines[first_mat_start:last_mat_end]
-
-            # Build new material section with single header/footer
-            insert_content = [MCNPY_HEADER]
-            for mat_id in sorted(ids_to_consider):
-                if mat_id in materials_found:  # Only rewrite materials that existed
-                    insert_content.append(self.by_id[mat_id].to_mcnp() + "\n")
-                    materials_updated.append(mat_id)
-            insert_content.append(MCNPY_FOOTER)
-
-            # Insert the entire section at once
-            for j, content_line in enumerate(insert_content):
-                lines.insert(first_mat_start + j, content_line)
-        else:
-            # Process materials in reverse order to maintain line positions
-            for mat_id, start_line, end_line in reversed(material_positions):
-                if mat_id not in ids_to_consider:
-                    continue
-
-                # Parse the existing material from file
-                existing_material, _ = read_material(lines, start_line)
-                if existing_material is None:
-                    continue
-
-                new_material = self.by_id[mat_id]
-
-                # Compare materials - only update if different
-                if self._materials_equal(existing_material, new_material):
-                    # Materials are the same, skip update
-                    continue
-
-                # Materials differ - update
-                del lines[start_line:end_line]
-
-                # Insert updated material with header/footer
-                insert_content = [
-                    MCNPY_HEADER,
-                    new_material.to_mcnp() + "\n",
-                    MCNPY_FOOTER,
-                ]
-                for j, content_line in enumerate(insert_content):
-                    lines.insert(start_line + j, content_line)
-
+        found = {mat_id for mat_id, _, _, _ in blocks}
+        new_ids = sorted(ids_to_consider - found)
+        if new_ids:
+            insert_at = len(lines)
+            if blocks:
+                # the replacements above moved the end of the last block
+                insert_at = blocks[-1][2]
+                shift = sum(
+                    len(block_lines(self.by_id[mid])) - (e - s)
+                    for mid, s, e, _ in blocks if mid in materials_updated
+                )
+                insert_at += shift
+            if insert_at > 0 and not lines[insert_at - 1].endswith(("\n", "\r")):
+                lines[insert_at - 1] += eol
+            added = []
+            for mat_id in new_ids:
+                added.extend(block_lines(self.by_id[mat_id]))
                 materials_updated.append(mat_id)
+            lines[insert_at:insert_at] = added
 
-        # Add new materials (those in collection but not in file)
-        new_material_ids = ids_to_consider - materials_found
-        if new_material_ids:
-            # Find the position right after the last material
-            insert_position = len(lines)
-
-            if material_positions:
-                # Get the last material's end position
-                _, _, last_end = material_positions[-1]
-                insert_position = last_end
-
-            # Add new materials with KIKA header/footer but no extra comments
-            new_content = []
-            new_content.append(MCNPY_HEADER)
-
-            for mat_id in sorted(new_material_ids):
-                new_content.append(self.by_id[mat_id].to_mcnp() + "\n")
-                materials_updated.append(mat_id)
-
-            new_content.append(MCNPY_FOOTER)
-
-            for j, content_line in enumerate(new_content):
-                lines.insert(insert_position + j, content_line)
-
-        # Write back to file
-        with open(output_filepath, 'w') as f:
-            f.writelines(lines)
-
+        _write_lines(output_filepath, lines)
         return sorted(materials_updated)
 
     @classmethod
@@ -1859,8 +1839,8 @@ class MaterialCollection:
         if output_filepath is None:
             output_filepath = input_filepath
 
-        with open(input_filepath, 'r') as f:
-            lines = f.readlines()
+        lines = _read_lines(input_filepath)
+        eol = _line_ending(lines)
 
         spans = _find_material_spans(lines)
         name_to_mat = self.by_name
@@ -1868,11 +1848,10 @@ class MaterialCollection:
         # Process in reverse to maintain line positions
         for mat_name, start, end in reversed(spans):
             if mat_name in name_to_mat:
-                replacement = name_to_mat[mat_name].to_serpent() + "\n"
-                lines[start:end] = [replacement]
+                text = name_to_mat[mat_name].to_serpent()
+                lines[start:end] = [line + eol for line in text.splitlines()]
 
-        with open(output_filepath, 'w') as f:
-            f.writelines(lines)
+        _write_lines(output_filepath, lines)
 
     def __str__(self) -> str:
         """Return a user-friendly string representation of the collection.

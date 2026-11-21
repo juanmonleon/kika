@@ -291,7 +291,7 @@ def read_serpent_materials(
         If a material mixes positive and negative nuclide fractions.
     """
     if isinstance(source, (str, Path)):
-        with open(source, "r") as f:
+        with open(source, "r", encoding="utf-8", errors="surrogateescape") as f:
             lines = f.readlines()
     else:
         lines = list(source)

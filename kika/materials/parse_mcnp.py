@@ -138,7 +138,7 @@ def read_material(lines: List[str], start_index: int) -> Tuple[Optional[Material
         full_line = full_line.split("$")[0].strip()
 
     tokens = full_line.split()
-    match = re.match(r"^m(\d+)", tokens[0])
+    match = re.match(r"^m(\d+)", tokens[0], re.IGNORECASE)
     if not match:
         return None, i + 1
 
@@ -226,7 +226,7 @@ def read_material(lines: List[str], start_index: int) -> Tuple[Optional[Material
         if not re.match(r"^\s*\d+", line):
             break
 
-        if re.match(r"^m\d+", line):
+        if re.match(r"^m\d+", line, re.IGNORECASE):
             break
 
         parts = line.split()
