@@ -92,7 +92,6 @@ The symbols every page shares are defined once in {doc}`notation`.
 
 - {doc}`uq/sensitivities`: first-order sensitivities from MCNP PERT and Serpent, SDF files.
 - {doc}`uq/sandwich`: propagation by the sandwich rule.
-- {doc}`uq/similarity-and-benchmarks`: $c_k$ similarity and benchmark ranking.
 - {doc}`uq/total-monte-carlo`: Total Monte Carlo and the separation of nuclear-data and
   statistical variance.
 
