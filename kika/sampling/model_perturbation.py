@@ -2335,8 +2335,113 @@ def _refuseSumRuleBreakingRepairs(blocks, index, plan) -> None:
             "hides it. Use 'clip' for these blocks.")
 
 
+def _asPlan(conditioningPlan):
+    """A :class:`~kika.cov.conditioning.ConditioningPlan`, a dict of one or the path of its JSON."""
+    import os
+
+    from kika.cov.conditioning import ConditioningPlan
+
+    if isinstance(conditioningPlan, ConditioningPlan):
+        return conditioningPlan
+    if isinstance(conditioningPlan, Mapping):
+        return ConditioningPlan.from_dict(conditioningPlan)
+    if isinstance(conditioningPlan, (str, os.PathLike)):
+        return ConditioningPlan.read(conditioningPlan)
+    raise TypeError(
+        f"conditioningPlan is None (inspect and apply the recommendation), "
+        f"False (touch nothing), a ConditioningPlan, a dict of one or the path "
+        f"of its JSON, got {type(conditioningPlan).__name__}")
+
+
+def _componentText(component) -> str:
+    if component.mf == 34:
+        return f"MT{component.mt} L={component.index}"
+    if component.mf == 35:
+        return f"MT{component.mt} band={component.index}"
+    return f"MT{component.mt}"
+
+
+def _rowPlace(row, meta) -> str:
+    """``MF33 MT102, 582-590 keV``: the component and incident-energy bin of a block row."""
+    component = meta["components"][row // meta["stride"]]
+    at = row % meta["stride"]
+    grid = meta["grids"][component]
+    where = f"MF{component.mf} {_componentText(component)}"
+    if at + 1 < len(grid):
+        where += f", {_energyText(grid[at])} to {_energyText(grid[at + 1])}"
+    return where
+
+
+def _energyText(energy) -> str:
+    energy = float(energy)
+    for unit, scale in (("MeV", 1e6), ("keV", 1e3)):
+        if abs(energy) >= scale:
+            return f"{energy / scale:.4g} {unit}"
+    return f"{energy:.4g} eV"
+
+
+def _logDomainFailures(blocks, index, stated, labels) -> List[Dict[str, Any]]:
+    """The blocks a log-normal draw cannot take, with the entries that stop it.
+
+    A block drawn in log space is ``log1p(Σ)``, which has no value where the
+    relative covariance Σ is -1 or below. One item per such block: where its
+    most negative entry is, how many there are, and the reactions involved.
+    """
+    out = []
+    for key, drawn in blocks:
+        if key not in stated:
+            continue
+        sigma = np.asarray(stated[key], dtype=float)
+        bad = ~np.isfinite(np.asarray(drawn, dtype=float)) & (sigma <= -1.0)
+        bad = np.triu(bad | bad.T)
+        if not bad.any():
+            continue
+        rows, cols = np.nonzero(bad)
+        worst = int(np.argmin(sigma[rows, cols]))
+        meta = index[key]
+        components = meta["components"]
+        involved = sorted({components[r // meta["stride"]] for r in np.concatenate([rows, cols])},
+                          key=lambda c: (c.mf, c.mt, c.index or 0))
+        value = float(sigma[rows[worst], cols[worst]])
+        text = (f"{_rowPlace(rows[worst], meta)} x {_rowPlace(cols[worst], meta)}: "
+                f"relative covariance {value:.4g}"
+                + (f", and {len(rows) - 1} more entr{'y' if len(rows) == 2 else 'ies'} "
+                   f"at -1 or below in this block" if len(rows) > 1 else "")
+                + ". A log-normal draw takes ln(1 + C), which needs C above -1")
+        text_key = block_key_text(key)
+        out.append({"block": text_key, "subject": (labels or {}).get(text_key, text_key),
+                    "text": text, "worst": value, "count": int(len(rows)),
+                    "reactions": sorted({int(c.mt) for c in involved}),
+                    "mfs": sorted({int(c.mf) for c in involved})})
+    return out
+
+
+def _refusalMessage(report, traced, outOfLog, planWritten) -> str:
+    message = ("the pre-flight says these blocks cannot be sampled as they stand "
+               f"and no automatic repair applies: {report.summary()}. ")
+    if traced:
+        message += f"Traced to the file: {'; '.join(traced[:4])}. "
+    for item in outOfLog[:3]:
+        message += item["text"] + ". "
+    if outOfLog:
+        mfs = sorted({mf for item in outOfLog for mf in item["mfs"]})
+        mts = sorted({mt for item in outOfLog for mt in item["reactions"]})
+        space = "{" + ", ".join(f"{mf}: 'linear'" for mf in mfs) + "}"
+        message += (f"Draw {'that quantity' if len(mfs) == 1 else 'those quantities'} in "
+                    f"linear space (space={space}), where a factor is 1 + y and can reach "
+                    f"zero, or leave {', '.join(f'MT{mt}' for mt in mts)} out of the request. ")
+    if planWritten:
+        message += ("The plan recommended for the blocks that can be repaired is saved as "
+                    "conditioning_plan.json, with the blocking findings in its notes: edit it "
+                    "or the request, and pass it back as conditioningPlan")
+    else:
+        message += ("kika.cov.conditioning.inspect_blocks gives the findings, and its "
+                    "recommended_plan() a plan to edit and pass as conditioningPlan")
+    return message
+
+
 def _condition(blocks, index, conditioningPlan, log, labels=None, sectionFindings=(),
-               stated=None):
+               stated=None, outputDir=None):
     """Stage 2 and 3 of the pre-flight, as the pipeline runs them.
 
     ``None`` (the default) inspects the assembled blocks and applies
@@ -2345,7 +2450,11 @@ def _condition(blocks, index, conditioningPlan, log, labels=None, sectionFinding
     ``clip`` the draw would otherwise make silently, now with a name and a
     reason in the run directory. ``False`` touches nothing: the blocks are
     drawn as the file states them, which is what an equivalence gate wants. A
-    :class:`~kika.cov.conditioning.ConditioningPlan` is applied as given.
+    :class:`~kika.cov.conditioning.ConditioningPlan` (or a dict of one, or the
+    path of its JSON) is applied as given.
+
+    A refusal in ``auto`` mode still writes the recommended plan to *outputDir*,
+    so that the run that needs a plan most is the one that leaves one.
 
     *sectionFindings* are the layer-1 findings of the requested sections
     (:func:`kika.sampling.section_checks.relevantFindings`). They are shown
@@ -2359,7 +2468,7 @@ def _condition(blocks, index, conditioningPlan, log, labels=None, sectionFinding
 
     Returns ``(blocks, plan, report, applied, mode, attribution)``.
     """
-    from kika.cov.conditioning import ConditioningPlan, apply_plan, inspect_blocks
+    from kika.cov.conditioning import apply_plan, inspect_blocks
     from kika.sampling.joint_blocks import rowFamilies
     from kika.sampling.section_checks import attribute
 
@@ -2401,19 +2510,27 @@ def _condition(blocks, index, conditioningPlan, log, labels=None, sectionFinding
                       block=item["block"], level="warning", check=item["check"],
                       severity=item["severity"], layer1=len(item["layer1"]))
         if not report.samplable:
+            outOfLog = _logDomainFailures(blocks, index, stated or {}, labels)
+            for item in outOfLog:
+                log.event("inspected", item["text"], subject=item["subject"],
+                          block=item["block"], level="warning", check="finiteness",
+                          severity="blocks", code="log_domain",
+                          reactions=item["reactions"], mfs=item["mfs"],
+                          worst=item["worst"], count=item["count"])
+            planWritten = False
+            if outputDir is not None:
+                folder = Path(outputDir)
+                folder.mkdir(parents=True, exist_ok=True)
+                report.recommended_plan().write(folder / "conditioning_plan.json")
+                log.event("written", "the plan recommended for the blocks that can be "
+                          "repaired", subject="conditioning_plan.json", mode="auto",
+                          refused=True)
+                planWritten = True
             traced = [item["text"] for item in attribution if item["severity"] == "blocks"]
-            raise ValueError(
-                "the pre-flight says these blocks cannot be sampled as they "
-                f"stand and no automatic repair applies: {report.summary()}. "
-                + (f"Traced to the file: {'; '.join(traced[:4])}. " if traced else "")
-                + "Run kika.cov.conditioning.inspect_blocks on them, decide, and "
-                "pass the plan")
+            raise ValueError(_refusalMessage(report, traced, outOfLog, planWritten))
         conditioningPlan = report.recommended_plan()
-    elif not isinstance(conditioningPlan, ConditioningPlan):
-        raise TypeError(
-            f"conditioningPlan is None (inspect and apply the recommendation), "
-            f"False (touch nothing) or a ConditioningPlan, got "
-            f"{type(conditioningPlan).__name__}")
+    else:
+        conditioningPlan = _asPlan(conditioningPlan)
 
     _refuseSumRuleBreakingRepairs(blocks, index, conditioningPlan)
 
@@ -2981,11 +3098,17 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         pre-flight's recommendation, which repairs definiteness and nothing
         else (a ``clip`` step for each block whose definiteness is distorted, a
         ``none`` step for the others); the plan is written to the run directory
-        as ``conditioning_plan.json`` as if a human had handed it in. ``False``:
-        touch nothing and draw the blocks as stated; no plan is written. A
-        :class:`~kika.cov.conditioning.ConditioningPlan`: apply exactly that. The
-        mode taken is on ``RunResult.conditioningMode``. Anything else raises
-        ``TypeError``, after the covariance blocks are assembled.
+        as ``conditioning_plan.json`` as if a human had handed it in. When the
+        pre-flight refuses a block no repair can make drawable, the run raises
+        ``ValueError`` naming the entries that stop it, and still writes the
+        recommended plan for the other blocks, with the refusal in its notes.
+        ``False``: touch nothing and draw the blocks as stated; no plan is
+        written. A :class:`~kika.cov.conditioning.ConditioningPlan`, a dict of one
+        (:meth:`~kika.cov.conditioning.ConditioningPlan.to_dict`) or the path of
+        its JSON, such as the ``conditioning_plan.json`` of an earlier run: apply
+        exactly that. The mode taken is on ``RunResult.conditioningMode``.
+        Anything else raises ``TypeError``, after the covariance blocks are
+        assembled.
     mat
         The material number that the ``endf-tape`` records are stamped with.
         ``None`` takes the MAT of the source tape; a GNDS source has none, so the
@@ -3186,11 +3309,14 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         *covarianceSource* is missing or is another nuclide's; the pre-flight
         finds blocks that cannot be sampled and no automatic repair applies; a
         *conditioningPlan* repairs a fission-spectrum band with a remedy other
-        than ``"none"`` or ``"clip"``; an ACE temperature has no extension and
+        than ``"none"`` or ``"clip"``, or its file is not a plan's JSON; an ACE temperature has no extension and
         is not within 1 K of one that has an ACE suffix; or an absolute section
         has no central value under ``onMissing="raise"``.
     TypeError
-        If *conditioningPlan* is not ``None``, ``False`` or a ``ConditioningPlan``.
+        If *conditioningPlan* is not ``None``, ``False``, a ``ConditioningPlan``,
+        a dict or a path.
+    FileNotFoundError
+        If *conditioningPlan* is a path that does not exist.
     RuntimeError
         If a sample fails in a worker process (the message carries the worker's
         traceback), or patching a section into an ``endf-delta`` tape fails.
@@ -3474,7 +3600,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                else matrix) for key, matrix in blocks]
     blocks, plan, report, conditioningApplied, conditioningMode, attribution = _condition(
         blocks, index, conditioningPlan, log, labels, layer1,
-        stated={key: statedBlocks[key] for key in logKeys})
+        stated={key: statedBlocks[key] for key in logKeys}, outputDir=outputDir)
 
     with log.timed("drawn", f"drew {nSamples} sample(s) of {len(blocks)} block(s)"):
         samples, drawDiagnostics = _drawEverything(
@@ -3593,9 +3719,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                 result.files["factors"] = table
                 info["bytes"] = table.stat().st_size
         if plan is not None:
-            planPath = outputDir / "conditioning_plan.json"
-            planPath.write_text(json.dumps(plan.to_dict(), indent=2),
-                                encoding="utf-8")
+            planPath = plan.write(outputDir / "conditioning_plan.json")
             result.files["conditioning-plan"] = planPath
             log.event("written", "conditioning plan", subject=planPath.name,
                       mode=conditioningMode)

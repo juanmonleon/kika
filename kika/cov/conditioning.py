@@ -23,8 +23,10 @@ so that an outlier is judged among its own family.
 """
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, Hashable, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -666,6 +668,51 @@ class ConditioningPlan:
             notes=tuple(data.get("notes", ())),
         )
 
+    @classmethod
+    def read(cls, path) -> "ConditioningPlan":
+        """The plan in a JSON file written by :meth:`write`.
+
+        Parameters
+        ----------
+        path : str or os.PathLike
+            The file, such as the ``conditioning_plan.json`` of a run directory.
+
+        Returns
+        -------
+        ConditioningPlan
+            The plan, with its steps in order and their keys as block text.
+
+        Raises
+        ------
+        FileNotFoundError
+            If *path* does not exist.
+        ValueError
+            If the file is not JSON, or its ``version`` is not 1.
+        """
+        text = Path(path).read_text(encoding="utf-8")
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as error:
+            raise ValueError(f"{path} is not a conditioning plan: {error}") from None
+        return cls.from_dict(data)
+
+    def write(self, path) -> Path:
+        """Write the plan as JSON (:meth:`to_dict`, indented), replacing *path*.
+
+        Parameters
+        ----------
+        path : str or os.PathLike
+            The file to write.
+
+        Returns
+        -------
+        pathlib.Path
+            The file written.
+        """
+        path = Path(path)
+        path.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
+        return path
+
 
 # ---------------------------------------------------------------------------
 # Block normalisation
@@ -924,6 +971,8 @@ def _check_finite(matrix: np.ndarray) -> Optional[Finding]:
 
 
 def _check_symmetry(matrix: np.ndarray) -> Optional[Finding]:
+    if not np.isfinite(matrix).all():
+        return None
     scale = float(np.max(np.abs(matrix))) if matrix.size else 0.0
     if scale <= 0.0:
         return None
@@ -1469,7 +1518,7 @@ def inspect_matrix(
     - ``finiteness`` (blocks): any NaN or infinity.
     - ``negative_variance`` (blocks): a finite diagonal entry below 0. No remedy.
     - ``symmetry``: ``max|C - Cᵀ| / max|C|`` above 1e-12. Distorts below 1e-6,
-      blocks from 1e-6 on.
+      blocks from 1e-6 on. Skipped if the matrix is not finite.
     - ``correlation_bound``: ``|ρ| > 1`` by more than 1e-10, over the rows with a
       positive finite variance. A note when the excess is at most
       ``CORRELATION_ROUNDOFF`` (1e-4), or when *stated* shows the excess comes
