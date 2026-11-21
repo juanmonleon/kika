@@ -605,7 +605,9 @@ def plot_uncertainties(
     mt : int or sequence of int
         Reaction MT number(s) to plot
     energy_range : tuple of float, optional
-        Energy range (min, max) for x-axis in MeV. If None, uses full range.
+        Energy range (min, max) for x-axis, in ``covmat.energy_unit`` (the unit
+        of the grid, which is drawn as stored and named on the axis). If None,
+        uses full range.
     sigma : float, default 1.0
         Number of sigma levels for uncertainty (e.g., 1.0 for 1-sigma, 2.0 for 2-sigma)
     style : str, default "light"
@@ -752,7 +754,7 @@ def plot_uncertainties(
     if fig.axes:
         ax = fig.axes[0]
         ax.legend(loc=legend_loc)
-        ax.set_xlabel("Energy (MeV)")
+        ax.set_xlabel(f"Energy ({covmat.energy_unit})")
         ax.set_ylabel("Relative Uncertainty (%)")
 
     return fig
@@ -792,7 +794,9 @@ def plot_multigroup_xs(
     mt : int or sequence of int
         Reaction MT number(s) to plot
     energy_range : tuple of float, optional
-        Energy range (min, max) for x-axis in MeV. If None, uses full range.
+        Energy range (min, max) for x-axis, in ``covmat.energy_unit`` (the unit
+        of the grid, which is drawn as stored and named on the axis). If None,
+        uses full range.
     show_uncertainties : bool, default False
         Whether to show uncertainty bands around cross sections
     sigma : float, default 1.0
@@ -936,7 +940,7 @@ def plot_multigroup_xs(
     if fig.axes:
         ax = fig.axes[0]
         ax.legend(loc=legend_loc)
-        ax.set_xlabel("Energy (MeV)")
+        ax.set_xlabel(f"Energy ({covmat.energy_unit})")
         ax.set_ylabel("Cross Section (barns)")
 
     return fig

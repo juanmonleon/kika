@@ -101,11 +101,9 @@ class LegendreCovariance:
         Unit of the grids: ``"eV"`` (default) or ``"MeV"``.
     legendre_coefficients : dict
         ``(isotope, mt, l)`` to the nominal coefficients ``a_l``, on the grid of
-        the matrices (optional). With ``to_ang_covmat(mf4_data=...)`` ``mt`` is
-        the reaction MT. :func:`~kika.cov.read_covfil` stores the MF3 sections of
-        the file under ``(zaid, 250 + L, L)``: the middle element is the NJOY
-        section number 250 + L, not the reaction, so a lookup by reaction MT
-        (as :meth:`to_plot_data` does) finds nothing in such an object.
+        the matrices (optional). ``mt`` is the reaction MT, also for the
+        coefficients :func:`~kika.cov.read_covfil` reads from MF3 sections
+        250 + L.
     metadata : dict
         Whole-object extras.  Conventional keys:
 
@@ -954,11 +952,13 @@ class LegendreCovariance:
         undefined). The grid of each ``L``, in ``energy_unit`` and not converted,
         is in ``energy_grids`` of the result. The axes ``x_edges`` and ``y_edges``
         are not energies: each block's edges are the grid (or its ``log10`` when
-        *scale* is log, a non-positive edge taken as 1e-300) minus its first value,
-        so the axis starts at 0, and successive blocks follow end to end. The
-        uncertainty above the heatmap is
-        ``100 * sqrt(variance)`` per group, in percent of the coefficient when the
-        blocks are relative.
+        *scale* is log, a non-positive first edge placed one decade below the
+        smallest positive one) minus its first value, so the axis starts at 0, and
+        successive blocks follow end to end. The uncertainty above the heatmap is
+        the relative one in percent per group: ``100 * sqrt(variance)`` for a
+        relative block, divided by ``|a_L|`` from ``legendre_coefficients`` for an
+        absolute one. An absolute ``L`` whose ``a_L`` is not stored on its grid has
+        no band (a warning says so).
 
         Parameters
         ----------
@@ -1046,8 +1046,8 @@ class LegendreCovariance:
 
         def _transform_edges(edges: np.ndarray) -> np.ndarray:
             if scale_normalized == "log":
-                safe = np.maximum(edges, 1e-300)
-                return np.log10(safe.astype(float))
+                from kika.cov.cross_section_covariance import _log_edges
+                return _log_edges(edges)
             return edges.astype(float)
 
         def _crop_edges(edges: np.ndarray) -> np.ndarray:
@@ -1236,9 +1236,15 @@ class LegendreCovariance:
             base = triplet_index[t] * max_G
             diag_variance = np.diag(cov_full[base: base + g_len, base: base + g_len])
             with np.errstate(divide='ignore', invalid='ignore'):
-                sigma_percent = np.sqrt(np.abs(diag_variance)) * 100
-                sigma_percent = np.nan_to_num(sigma_percent, nan=0.0, posinf=0.0, neginf=0.0)
-            uncertainty_data[l_val] = sigma_percent
+                sigma = np.sqrt(np.abs(diag_variance))
+                sigma = np.nan_to_num(sigma, nan=0.0, posinf=0.0, neginf=0.0)
+            if not filtered_mf34._diagonal_is_relative(*t):
+                try:
+                    sigma = filtered_mf34._absolute_over_coefficient(*t, sigma)
+                except ValueError as exc:
+                    warnings.warn(f"{exc}; no uncertainty band for L={l_val}.", stacklevel=2)
+                    continue
+            uncertainty_data[l_val] = sigma * 100
         if not uncertainty_data:
             uncertainty_data = None
 
@@ -1405,7 +1411,8 @@ class LegendreCovariance:
         ax : plt.Axes, optional
             Matplotlib axes to draw into. If None, creates new figure.
         uncertainty_type : str, default "relative"
-            Type of uncertainty to plot: "relative" (%) or "absolute"
+            Type of uncertainty to plot: "relative" (%) or "absolute" (σ of
+            ``a_L``; converting between them needs ``a_L``, see :meth:`to_plot_data`)
         style : str, default "default"
             Plot style: 'default', 'dark', 'paper', 'publication', 'presentation'
         figsize : tuple, default (8, 5)
@@ -1495,8 +1502,8 @@ class LegendreCovariance:
             'relative' gives ``100 * sigma * sqrt(diagonal)`` in percent. A block
             flagged absolute is first divided by ``|a_L|`` from
             ``legendre_coefficients`` (0 where ``a_L`` is 0). Any other value
-            gives ``sigma * sqrt(diagonal)`` as stored, with no conversion
-            whatever ``is_relative`` says (a fraction, for a relative block).
+            gives the absolute ``sigma * sqrt(diagonal)``: as stored for an
+            absolute block, multiplied by ``|a_L|`` for a relative one.
         label : str, optional
             Custom label for the plot. If None, auto-generates from isotope and order.
         **styling_kwargs
@@ -1517,8 +1524,9 @@ class LegendreCovariance:
         ------
         ValueError
             If there is no diagonal block for ``(nuclide, mt, order)``, or the
-            relative uncertainty of an absolute block is asked and ``a_L`` is not
-            stored on the grid of the block.
+            relative uncertainty of an absolute block (or the absolute uncertainty
+            of a relative one) is asked and ``a_L`` is not stored on the grid of
+            the block.
 
         Examples
         --------
@@ -1574,7 +1582,10 @@ class LegendreCovariance:
                     isotope, mt, order, uncertainties)
             uncertainties = uncertainties * 100.0 * sigma
         else:
-            uncertainties = uncertainties * sigma  # Apply sigma to absolute values
+            if unc_data.get('is_relative', True):
+                uncertainties = self._relative_times_coefficient(
+                    isotope, mt, order, uncertainties)
+            uncertainties = uncertainties * sigma
         
         # Generate label if not provided
         if label is None:
@@ -2198,6 +2209,24 @@ class LegendreCovariance:
             "ne": int(src_grid.size),
         }
         return out
+
+    def _diagonal_is_relative(self, isotope, mt, order) -> bool:
+        for i, key in enumerate(zip(self.isotope_rows, self.reaction_rows, self.l_rows,
+                                    self.isotope_cols, self.reaction_cols, self.l_cols)):
+            if key == (isotope, mt, order, isotope, mt, order):
+                return bool(self.is_relative[i])
+        return True
+
+    def _relative_times_coefficient(self, isotope, mt, order, uncertainties):
+        """An LB≠0 fractional σ(a_L) times the cell-averaged ``|a_L|``."""
+        coeffs = self.legendre_coefficients.get((isotope, mt, order))
+        if coeffs is None or np.size(coeffs) != np.size(uncertainties):
+            raise ValueError(
+                f"MT={mt} L={order}: the covariance is relative, and an absolute "
+                f"uncertainty needs a_L on its grid; build the covariance with "
+                f"to_ang_covmat(mf4_data=...)"
+            )
+        return uncertainties * np.abs(np.asarray(coeffs, dtype=float))
 
     def _absolute_over_coefficient(self, isotope, mt, order, uncertainties):
         """An LB=0 σ(a_L) as a fraction of the cell-averaged a_L (zero where a_L is zero)."""
