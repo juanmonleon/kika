@@ -8,6 +8,7 @@ import pytest
 
 import kika
 from kika.algebra import group_averages, linear_update
+from kika.cov.decomposition import clip_projection
 from kika.dosimetry import SpectrumPrior, adjust_spectrum, dosimeter_from_suite, response_cells
 
 TAPE = Path(kika.__file__).parent / "endf" / "tests" / "data" / "micro_fe56_mf33.endf"
@@ -55,16 +56,27 @@ def test_an_absolute_covariance_is_made_relative_with_the_interval_averages(suit
     assert np.all(back[~seen] == 0.0)
 
 
+def _clipped(d):
+    clipped, _ = clip_projection(d.relative_covariance, verbose=False)
+    return dataclasses.replace(d, relative_covariance=clipped)
+
+
+def test_an_evaluation_covariance_that_is_not_positive_semi_definite_is_refused(suite):
+    prior = _prior()
+    d = dosimeter_from_suite(suite, 4)
+    # JEFF-4.0's MF33 of MT4 has 41 negative eigenvalues, down to -4.4e-6 against 7.7.
+    with pytest.raises(ValueError, match="pre-flight"):
+        adjust_spectrum(prior, [d], [response_cells(prior, d).sum()], [[0.03**2]])
+
+
 def test_with_real_covariances_the_first_iteration_equals_folding_them_into_the_data(suite):
     prior = _prior()
-    dosimeters = [dosimeter_from_suite(suite, 4), dosimeter_from_suite(suite, 16)]
+    dosimeters = [_clipped(dosimeter_from_suite(suite, 4)), _clipped(dosimeter_from_suite(suite, 16))]
     cells = [response_cells(prior, d) for d in dosimeters]
     rates = np.array([c.sum() for c in cells])
     measured = rates * np.array([1.08, 0.93])
     V = np.diag([0.03**2, 0.05**2])
-    # JEFF-4.0's MF33 of MT4 has 41 negative eigenvalues (down to -4.4e-6 against 7.7): warned, not repaired.
-    with pytest.warns(RuntimeWarning, match="negative eigenvalue"):
-        result = adjust_spectrum(prior, dosimeters, measured, V)
+    result = adjust_spectrum(prior, dosimeters, measured, V)
 
     G = np.vstack([c.sum(axis=1) for c in cells]) / rates[:, None]
     shares = [c.sum(axis=0) / r for c, r in zip(cells, rates)]

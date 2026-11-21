@@ -200,3 +200,15 @@ def test_the_report_is_one_html_page_with_every_dosimeter(tmp_path):
     path = tmp_path / "adjustment.html"
     good.write_html(path)
     assert path.read_text(encoding="utf-8") == page
+
+
+def test_negative_eigenvalues_within_round_off_are_a_note_in_the_report():
+    q, _ = np.linalg.qr(np.random.default_rng(2).normal(size=(3, 3)))
+    cov = q @ np.diag([0.04, 0.02, -1.5e-17]) @ q.T
+    cov = 0.5 * (cov + cov.T)
+    edges = np.array([1e6, 2e6, 4e6, 8e6])
+    prior = SpectrumPrior(edges, [1e9, 8e8, 3e8], cov)
+    d = Dosimeter("flat", [1e6, 8e6], [0.3, 0.3], 2)
+    result = adjust_spectrum(prior, [d], [1.1 * response_cells(prior, d).sum()], [[0.03**2]])
+    assert len(result.notes) == 1 and "within round-off" in result.notes[0]
+    assert 'id="ka-notes"' in result.to_html()

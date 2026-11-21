@@ -23,6 +23,7 @@ import numpy as np
 from scipy.linalg import block_diag
 
 from kika.algebra import LinearUpdate, linear_update
+from kika.cov.conditioning import ROUNDOFF_RATIO
 
 from .response import Dosimeter, SpectrumPrior, response_cells
 
@@ -92,6 +93,9 @@ class SpectrumAdjustment:
     prior_log_covariance : numpy.ndarray
         The prior's relative covariance, ``n x n``, with zero rows and columns for
         groups of zero prior flux.
+    notes : tuple of str
+        What the report should say about the inputs: a covariance with negative
+        eigenvalues no larger than eigensolver round-off, with its smallest one.
     """
 
     edges: np.ndarray
@@ -112,6 +116,7 @@ class SpectrumAdjustment:
     cross_section_log_covariance: Dict[str, np.ndarray] = field(default_factory=dict)
     flux_cross_section_log_covariance: Dict[str, np.ndarray] = field(default_factory=dict)
     prior_log_covariance: np.ndarray = None
+    notes: Tuple[str, ...] = ()
 
     def integral(self, weights) -> Tuple[float, float]:
         """``sum_g w_g phi_g`` of the adjusted flux and its standard deviation.
@@ -225,6 +230,24 @@ def _reactions(dosimeters: List[Dosimeter]) -> Dict[str, Dosimeter]:
     return out
 
 
+def _definiteness(label: str, matrix: np.ndarray):
+    """A note when *matrix* is negative only by round-off; a ValueError when it is not positive semi-definite."""
+    if matrix.size == 0:
+        return None
+    eigenvalues = np.linalg.eigvalsh(matrix)
+    smallest, largest = float(eigenvalues[0]), float(eigenvalues[-1])
+    if smallest >= 0.0:
+        return None
+    if largest > 0.0 and -smallest / largest <= matrix.shape[0] * ROUNDOFF_RATIO:
+        return (f"The relative covariance of {label} has negative eigenvalues within round-off "
+                f"(smallest {smallest:.3g} against {largest:.3g}); it was used as it is.")
+    raise ValueError(
+        f"the relative covariance of {label} is not positive semi-definite: {int((eigenvalues < 0).sum())} "
+        f"negative eigenvalues, the smallest {smallest:.3g} against a largest of {largest:.3g}. Repair it "
+        f"before the adjustment, with the pre-flight of kika.cov.conditioning (inspect_matrix says how much "
+        f"each remedy changes it, apply_plan applies the one chosen).")
+
+
 class _Layout:
     """Where each parameter sits: the positive-flux groups, then each reaction's intervals."""
 
@@ -241,6 +264,9 @@ class _Layout:
                 start += k
         self.size = start
         self.prior_covariance = block_diag(*blocks)
+        labels = ["the prior spectrum"] + [name for name in reactions if name in self.slices]
+        self.notes = tuple(note for note in (_definiteness(label, block) for label, block in zip(labels, blocks))
+                           if note)
 
 
 def _rates_and_jacobian(x, layout, n_groups, names, cells):
@@ -291,8 +317,11 @@ def adjust_spectrum(prior: SpectrumPrior, dosimeters: Sequence[Dosimeter], measu
     ------
     ValueError
         If there is not one positive rate per dosimeter, the covariance shape does
-        not match, a dosimeter has no response in the prior spectrum, or two
-        dosimeters of one name hold different data.
+        not match, a dosimeter has no response in the prior spectrum, two
+        dosimeters of one name hold different data, or the prior's or a reaction's
+        relative covariance is not positive semi-definite beyond eigensolver
+        round-off (``order x machine epsilon`` relative to its largest eigenvalue,
+        as in :mod:`kika.cov.conditioning`).
     numpy.linalg.LinAlgError
         If the predictive covariance of the rates is not positive definite.
     AdjustmentNotConverged
@@ -374,4 +403,5 @@ def adjust_spectrum(prior: SpectrumPrior, dosimeters: Sequence[Dosimeter], measu
         cross_section_log_covariance=sigma_cov,
         flux_cross_section_log_covariance=cross_cov,
         prior_log_covariance=prior_log_covariance,
+        notes=layout.notes,
     )

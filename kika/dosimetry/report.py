@@ -193,7 +193,9 @@ def adjustment_html(result) -> str:
     status, headline, lead = _verdict(result)
     mark = {"pass": "✓", "warn": "!"}[status]
     one_step = np.max(np.abs(np.log(result.flux[result.prior_flux > 0] / result.one_step_flux[result.prior_flux > 0])))
-    parts = [
+    notes = "".join(f"<li>{_esc(n)}</li>" for n in result.notes)
+    parts = [f'<h2 id="ka-notes">Notes</h2><ul class="notes">{notes}</ul>'] if notes else []
+    parts += [
         '<h2 id="ka-dosimeters">Dosimeters</h2><p class="lead">M/C is the measured rate over the rate '
         'computed from the spectrum, before and after the adjustment. The pull is the residual before '
         'the adjustment over its predictive standard deviation (flux, cross section and measurement); '
