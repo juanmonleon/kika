@@ -52,9 +52,11 @@ reference's or the comparison's), interpolating each curve under the law its dat
 or lin-lin when it states none (the law of a PENDF or an ACE file; `interpolation=` to
 choose); `set_difference_panel` chooses a relative or
 absolute difference panel.
-`set_group_average()` on either builder overlays group averages (see
-{doc}`../methods/processing/group-averaging`), which is how to compare evaluations in the
-resonance region.
+Group averages travel with each curve, as `metadata["group_average_overlay"]` (computed
+with `kika.processing.resonance_group_average`, see
+{doc}`../methods/processing/group-averaging`); `set_group_average()` on either builder
+chooses how those curves are drawn. This is how to compare evaluations in the resonance
+region.
 
 ## Covariances
 

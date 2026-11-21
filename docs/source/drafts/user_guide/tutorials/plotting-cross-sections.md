@@ -173,8 +173,7 @@ different energies, and a point-by-point difference compares the peak of one wit
 valley of the other.
 
 `ComparisonBuilder` has no `set_units`: the axes stay in the reference's units (eV and
-b). Set the x label by hand, as above: without `set_labels(x_label=...)` the difference
-panel is labelled `Energy (MeV)` although its axis is in eV.
+b), and both panels name them.
 
 ## Group averages in the resonance region
 
