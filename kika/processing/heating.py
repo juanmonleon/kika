@@ -216,9 +216,11 @@ def dpa(table, flux, edges=None, *, weight: Optional[str] = None):
     ``1e-24 int sigma_d(E) phi(E) dE`` with ``sigma_d`` in b·displacements and
     ``phi`` per cm²: a flux in n/(cm² s) gives dpa per second, a fluence in n/cm²
     gives dpa. The atoms are those of the nuclide *table* belongs to; for a
-    material, sum the nuclides' results weighted by their atom fractions. Flux
-    that falls outside the table's energy range is refused, since the table
-    says nothing there.
+    material, sum the nuclides' results weighted by their atom fractions. A
+    panel or group that straddles an end of the table is folded over the part
+    the table covers (MCNP's first edge at 0 MeV, say); one wholly outside it
+    that carries flux is refused, since the table says nothing there. A flux
+    normalised per source particle gives dpa per source particle.
 
     Parameters
     ----------
@@ -254,7 +256,7 @@ def dpa(table, flux, edges=None, *, weight: Optional[str] = None):
         arrays with non-decreasing energies; if *edges* is not increasing or
         does not match the last axis of *flux*; if *weight* is missing with
         *edges*, given without them, or not one of the two above; or if a
-        non-zero flux reaches outside the table's energy range.
+        panel or group wholly outside the table's energy range carries flux.
     """
     from kika.algebra import LINLIN, group_averages, sample_on_union, union
     from kika.algebra.arithmetic import domain_steps
@@ -265,10 +267,9 @@ def dpa(table, flux, edges=None, *, weight: Optional[str] = None):
         if weight is not None:
             raise ValueError("weight applies to a group flux; a pointwise flux has its own shape")
         xf, f = _dpaTable(flux, "flux")
-        left = (xf[:-1] < lo) & ((f[:-1] != 0) | (f[1:] != 0))
-        right = (xf[1:] > hi) & ((f[:-1] != 0) | (f[1:] != 0))
-        if left.any() or right.any():
-            raise ValueError(f"the flux is not zero outside the table's range [{lo:g}, {hi:g}] eV")
+        carried = (f[:-1] != 0) | (f[1:] != 0)
+        if np.any(((xf[1:] <= lo) | (xf[:-1] >= hi)) & carried):
+            raise ValueError(f"the flux has panels wholly outside the table's range [{lo:g}, {hi:g}] eV")
         span = (min(lo, float(xf[0])), max(hi, float(xf[-1])))
         u = union([x, xf], steps=domain_steps(x, s, *span) + domain_steps(xf, f, *span))
         a = sample_on_union(x, s, LINLIN, u)
@@ -285,18 +286,16 @@ def dpa(table, flux, edges=None, *, weight: Optional[str] = None):
     phi = np.asarray(flux, dtype=float)
     if phi.ndim == 0 or phi.shape[-1] != edges.size - 1:
         raise ValueError(f"the flux's last axis must hold one value per group ({edges.size - 1})")
-    outside = (edges[:-1] < lo) | (edges[1:] > hi)
+    outside = (edges[1:] <= lo) | (edges[:-1] >= hi)
     carried = np.any(phi.reshape(-1, edges.size - 1) != 0, axis=0)
     if np.any(outside & carried):
         bad = np.flatnonzero(outside & carried)
-        raise ValueError(f"groups {bad.tolist()} carry flux outside the table's range [{lo:g}, {hi:g}] eV")
-    means = np.zeros(edges.size - 1)
-    inside = np.flatnonzero(~outside)
-    if inside.size:
-        # The groups inside the table are contiguous; only they reach group_averages,
-        # where an outside edge at 0 eV would break the lethargy weight.
-        g0, g1 = inside[0], inside[-1] + 1
-        means[g0:g1] = group_averages(x, s, LINLIN, edges[g0:g1 + 1], weight=_DPA_GROUP_WEIGHTS[weight])
+        raise ValueError(f"groups {bad.tolist()} lie wholly outside the table's range [{lo:g}, {hi:g}] eV "
+                         f"and carry flux")
+    # Clipped, so that MCNP's first edge at 0 eV leaves the lethargy weight finite.
+    with np.errstate(invalid="ignore"):
+        means = group_averages(x, s, LINLIN, np.clip(edges, lo, hi), weight=_DPA_GROUP_WEIGHTS[weight])
+    means[outside] = 0.0
     out = (phi @ means) * 1e-24
     return float(out) if np.ndim(out) == 0 else out
 

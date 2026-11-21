@@ -38,15 +38,25 @@ def test_a_flat_group_flux_is_the_flat_pointwise_one():
     assert dpa(sigma, np.ones(29), edges, weight="energy") == pytest.approx(dpa(sigma, pointwise), rel=1e-12)
 
 
-def test_flux_outside_the_table_is_refused_unless_it_is_zero():
+def test_flux_wholly_outside_the_table_is_refused_unless_it_is_zero():
     sigma = ([1e-5, 2e7], [1.0, 1.0])
     with pytest.raises(ValueError, match="outside"):
-        dpa(sigma, ([1e-6, 1.0], [1.0, 1.0]))
+        dpa(sigma, ([1e-7, 1e-6, 1.0], [1.0, 1.0, 1.0]))
     with pytest.raises(ValueError, match=r"groups \[0\]"):
-        dpa(sigma, [1.0, 1.0], [0.0, 1.0, 2e7], weight="lethargy")
-    # MCNP's first group starts at 0: fine when it carries nothing, even under 1/E.
-    assert dpa(sigma, [0.0, 2.0], [0.0, 1.0, 2e7], weight="lethargy") == pytest.approx(2e-24)
-    assert dpa(sigma, ([1e-6, 1.0, 2.0], [0.0, 0.0, 1.0])) == pytest.approx(0.5e-24)
+        dpa(sigma, [1.0, 1.0], [0.0, 1e-6, 2e7], weight="lethargy")
+    assert dpa(sigma, [0.0, 2.0], [0.0, 1e-6, 2e7], weight="lethargy") == pytest.approx(2e-24)
+    assert dpa(sigma, ([1e-7, 1e-6, 1.0, 2.0], [0.0, 0.0, 0.0, 1.0])) == pytest.approx(0.5e-24)
+
+
+def test_mcnp_edges_in_mev_straddle_the_table_and_fold_over_its_part():
+    # 1e-11 MeV * 1e6 is a hair below 1e-5 eV, and MCNP's first edge is often 0.
+    x = np.array([1e-5, 1.0, 2e7])
+    sigma = (x, np.array([2.0, 2.0, 2.0]))
+    for first in (0.0, 1e-11):
+        edges = np.array([first, 1e-6, 20.0]) * 1e6
+        for weight in ("energy", "lethargy"):
+            assert dpa(sigma, [3.0, 4.0], edges, weight=weight) == pytest.approx(14e-24, rel=1e-14)
+    assert dpa(sigma, (np.array([1e-11, 20.0]) * 1e6, [1.0, 1.0])) == pytest.approx(2 * (2e7 - 1e-5) * 1e-24)
 
 
 def test_the_group_weight_is_required_and_only_for_groups():
