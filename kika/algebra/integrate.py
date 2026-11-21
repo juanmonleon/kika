@@ -40,12 +40,14 @@ from typing import Optional
 
 import numpy as np
 
-from .evaluate import _read_checked
+from .arithmetic import domain_steps
+from .evaluate import _read_checked, sample_on_union
+from .grid import union
 from .laws import HISTOGRAM, LINLIN, LINLOG, LOGLIN, LOGLOG, validate, vanishing_panels
 from .refine import LINEARIZATION_TOLERANCE, to_linlin
 
 __all__ = ["panel_integrals", "cumulative_integral", "integral", "group_integrals",
-           "group_averages", "interval_integrals", "interval_averages",
+           "group_averages", "product_group_integrals","interval_integrals", "interval_averages",
            "log_window_averages", "legendre_moments", "legendre_coefficients", "WEIGHTS"]
 
 #: The weights :func:`panel_integrals` knows: none, and ``1/x``.
@@ -331,6 +333,61 @@ def group_averages(x, y, laws, edges, weight: Optional[str] = None) -> np.ndarra
         den = np.log(hi / lo)
     with np.errstate(divide="ignore", invalid="ignore"):
         return np.where(den > 0, num / den, np.nan)
+
+
+def product_group_integrals(f, g, edges, tol: float = LINEARIZATION_TOLERANCE) -> np.ndarray:
+    """``int_{e_j}^{e_{j+1}} f g dx`` for every group of *edges*.
+
+    Each table is first re-expressed lin-lin (:func:`~kika.algebra.to_linlin`,
+    to *tol*); a histogram or lin-lin table is taken as it is. The two are then
+    read on the union of their grids and of *edges*, steps kept, and the
+    product of two lin-lin panels, a quadratic, is integrated in closed form:
+    ``dx (2 f1 g1 + f1 g2 + f2 g1 + 2 f2 g2) / 6``. So the result is exact for
+    histogram and lin-lin tables and good to *tol* for the others. Each table is
+    zero outside its own domain.
+
+    Parameters
+    ----------
+    f, g : tuple
+        The two tables, each ``(x, y, laws)``: abscissae (non-decreasing),
+        ordinates and one interpolation law per interval (codes 1-5, or one code
+        for all).
+    edges : array_like
+        Group boundaries, non-decreasing. They may reach past either table.
+    tol : float
+        Relative tolerance of the lin-lin re-expression of a table with log laws.
+
+    Returns
+    -------
+    numpy.ndarray
+        One integral per group, ``len(edges) - 1`` values, in the units of
+        ``x`` times those of both ``y``.
+
+    Raises
+    ------
+    ValueError
+        If a table is not valid (:func:`~kika.algebra.validate`), or *edges* is
+        not a non-decreasing one-dimensional array.
+    RefinementError
+        If the lin-lin re-expression of a table does not converge.
+    """
+    edges = np.asarray(edges, dtype=float)
+    if edges.ndim != 1 or np.any(np.diff(edges) < 0):
+        raise ValueError("edges must be a non-decreasing 1-d array")
+    n_groups = max(edges.size - 1, 0)
+    linear = [to_linlin(*validate(*t), tol) for t in (f, g)]
+    if n_groups == 0 or any(lx.size < 2 for lx, _ in linear):
+        return np.zeros(n_groups)
+    lo, hi = float(edges[0]), float(edges[-1])
+    steps = [e for lx, ly in linear for e in domain_steps(lx, ly, lo, hi)]
+    u = union([lx for lx, _ in linear] + [edges], steps=steps)
+    u = u[(u >= lo) & (u <= hi)]
+    a, b = (sample_on_union(lx, ly, LINLIN, u) for lx, ly in linear)
+    dx = np.diff(u)
+    panels = dx * (2 * a[:-1] * b[:-1] + a[:-1] * b[1:] + a[1:] * b[:-1] + 2 * a[1:] * b[1:]) / 6
+    group = np.searchsorted(edges, u[:-1], side="right") - 1
+    inside = (dx > 0) & (group >= 0) & (group < n_groups)
+    return np.bincount(group[inside], weights=panels[inside], minlength=n_groups)[:n_groups]
 
 
 def interval_integrals(x, y, laws, lo, hi, weight: Optional[str] = None) -> np.ndarray:

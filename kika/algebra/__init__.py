@@ -47,7 +47,7 @@ The rules every function in the package keeps:
 Submodules: ``laws`` (law codes and their ENDF ``(NBT, INT)`` spelling),
 ``evaluate`` (values and one-sided limits), ``grid`` (unions of grids,
 discontinuities, regions), ``integrate`` (closed-form integrals, group
-integrals, 1/x weight), ``refine`` (the adaptive refinement engine and
+integrals, 1/x weight, group integrals of a product of two tables), ``refine`` (the adaptive refinement engine and
 :func:`to_linlin`), ``arithmetic`` (sums, and tables read on one common
 grid to compare them), ``fold`` (Gaussian folds), ``compare``
 (differences of two tables, and of a table against its own window or group
@@ -63,7 +63,8 @@ from .evaluate import (evaluate, interpolate_between, left_limit, right_limit,
 from .grid import compress_flat, compress_flat_pieces, discontinuities, join_pieces, split_at_discontinuities, union
 from .integrate import (cumulative_integral, group_averages, group_integrals,
                         integral, interval_averages, interval_integrals,
-                        log_window_averages, legendre_coefficients, legendre_moments, panel_integrals)
+                        log_window_averages, legendre_coefficients, legendre_moments, panel_integrals,
+                        product_group_integrals)
 from .fold import box_gaussian_fold_nodes, fold_tabulated, gaussian_fold_nodes
 from .refine import RefinementError, RefineResult, drive, refine, refine_steps, to_linlin
 from .arithmetic import add, on_common_grid
@@ -80,7 +81,8 @@ __all__ = [
     "compress_flat", "compress_flat_pieces", "discontinuities", "join_pieces", "split_at_discontinuities", "union",
     "cumulative_integral", "group_averages", "group_integrals", "integral",
     "interval_averages", "interval_integrals", "log_window_averages",
-    "legendre_coefficients", "legendre_moments", "panel_integrals", "box_gaussian_fold_nodes", "fold_tabulated", "gaussian_fold_nodes",
+    "legendre_coefficients", "legendre_moments", "panel_integrals", "product_group_integrals",
+    "box_gaussian_fold_nodes", "fold_tabulated", "gaussian_fold_nodes",
     "RefinementError", "RefineResult", "drive", "refine", "refine_steps", "to_linlin",
     "add", "on_common_grid", "prepare_evaluator",
     "difference", "interpolate_to_grid", "read_pair", "steps_difference", "window_difference",
