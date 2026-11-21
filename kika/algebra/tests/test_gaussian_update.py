@@ -125,6 +125,15 @@ def test_an_indefinite_prior_warns_and_is_not_repaired():
     assert u.covariance[1, 1] == -0.5
 
 
+def test_the_posterior_check_can_be_left_to_the_caller():
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        u = linear_update([0.0, 0.0], np.diag([1.0, -0.5]), [[1.0, 0.0]], [0.3], [[0.1]], check=False)
+    assert u.covariance[1, 1] == -0.5
+
+
 @pytest.mark.parametrize("bad", [
     dict(prior_covariance=[[1.0, 0.2], [0.0, 1.0]]),
     dict(sensitivity=np.ones((1, 3))),

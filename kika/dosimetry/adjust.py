@@ -23,6 +23,7 @@ import numpy as np
 from scipy.linalg import block_diag
 
 from kika.algebra import LinearUpdate, linear_update
+from kika.algebra.gaussian_update import _check_posterior
 from kika.cov.conditioning import ROUNDOFF_RATIO
 
 from .response import Dosimeter, SpectrumPrior, response_cells
@@ -371,7 +372,8 @@ def adjust_spectrum(prior: SpectrumPrior, dosimeters: Sequence[Dosimeter], measu
     update: LinearUpdate
     for iteration in range(1, MAX_ITERATIONS + 1):
         rates, G = _rates_and_jacobian(x, layout, n, names, cells)
-        update = linear_update(x0, layout.prior_covariance, G, data - np.log(rates) + G @ (x - x0), V)
+        update = linear_update(x0, layout.prior_covariance, G, data - np.log(rates) + G @ (x - x0), V,
+                               check=False)
         step = float(np.max(np.abs(update.mean - x)))
         x = update.mean
         if one_step is None:
@@ -381,6 +383,7 @@ def adjust_spectrum(prior: SpectrumPrior, dosimeters: Sequence[Dosimeter], measu
     else:
         raise AdjustmentNotConverged(
             f"no convergence in {MAX_ITERATIONS} Gauss-Newton steps (last step {step:.3g})")
+    _check_posterior(update.covariance, layout.prior_covariance)
 
     g = layout.groups
     prior_log_covariance = np.zeros((n, n))

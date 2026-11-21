@@ -84,8 +84,20 @@ def _square(name: str, matrix: np.ndarray, size: int) -> None:
         raise ValueError(f"{name} is not symmetric")
 
 
+def _check_posterior(posterior_covariance, prior_covariance) -> None:
+    """Warn, without repairing, if the posterior has a negative eigenvalue beyond the prior's rounding."""
+    if not np.size(posterior_covariance):
+        return
+    smallest = float(np.linalg.eigvalsh(posterior_covariance)[0])
+    if smallest < -POSTERIOR_EIGENVALUE_RTOL * np.max(np.abs(prior_covariance)):
+        warnings.warn(
+            f"the posterior covariance has a negative eigenvalue "
+            f"({smallest:.6g}); is the prior covariance positive semi-definite?",
+            RuntimeWarning, stacklevel=3)
+
+
 def linear_update(prior_mean, prior_covariance, sensitivity, residual,
-                  data_covariance) -> LinearUpdate:
+                  data_covariance, check: bool = True) -> LinearUpdate:
     """Update a Gaussian prior with data that depend on the parameters linearly.
 
     With ``x ~ N(prior_mean, C)`` and ``residual = G (x - prior_mean) + e``,
@@ -108,6 +120,11 @@ def linear_update(prior_mean, prior_covariance, sensitivity, residual,
         ``r``, ``m`` values: the data minus their prediction at *prior_mean*.
     data_covariance : array_like
         ``V``, ``m x m``, symmetric: the covariance of the data about the model.
+    check : bool
+        Whether to look for negative eigenvalues of the posterior covariance
+        (an ``n x n`` eigendecomposition, which dominates
+        the cost when ``n`` is much larger than ``m``). A caller that has already
+        checked the prior and iterates can check the last posterior alone.
 
     Returns
     -------
@@ -127,9 +144,10 @@ def linear_update(prior_mean, prior_covariance, sensitivity, residual,
     Warns
     -----
     RuntimeWarning
-        If the posterior covariance has a negative eigenvalue beyond rounding,
-        which happens when *prior_covariance* is not positive semi-definite. The
-        posterior is returned as computed, not repaired.
+        If *check* is true and the posterior covariance has a negative
+        eigenvalue beyond rounding, which happens when *prior_covariance* is not
+        positive semi-definite. The posterior is returned as computed, not
+        repaired.
     """
     x0 = np.asarray(prior_mean, dtype=float)
     C = np.asarray(prior_covariance, dtype=float)
@@ -172,13 +190,8 @@ def linear_update(prior_mean, prior_covariance, sensitivity, residual,
     Sinv_r = Sinv @ r
     eigenvalues = np.linalg.eigvalsh(S)
 
-    if n:
-        posterior_eigenvalues = np.linalg.eigvalsh(covariance)
-        if posterior_eigenvalues[0] < -POSTERIOR_EIGENVALUE_RTOL * np.max(np.abs(C)):
-            warnings.warn(
-                f"the posterior covariance has a negative eigenvalue "
-                f"({posterior_eigenvalues[0]:.6g}); is the prior covariance positive semi-definite?",
-                RuntimeWarning, stacklevel=2)
+    if check:
+        _check_posterior(covariance, C)
 
     return LinearUpdate(
         mean=mean,
