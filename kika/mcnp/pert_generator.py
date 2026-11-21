@@ -11,7 +11,8 @@ from typing import List, Optional, Union
 from .parse_input import read_mcnp
 from kika.materials.parse_mcnp import read_material
 from kika.materials import Material, MaterialCollection
-from kika._constants import ATOMIC_MASS, N_AVOGADRO
+from kika._constants import N_AVOGADRO
+from kika.materials.material import _atomic_mass
 
 
 def perturb_material(materials: MaterialCollection, material_id: int, nuclide: Union[int, str], 
@@ -183,7 +184,7 @@ def _calculate_perturbed_density(original_material: Material, perturbed_material
         for symbol, nuclide_obj in original_material.nuclide.items():
             fraction = abs(nuclide_obj.fraction)
             zaid = nuclide_obj.zaid
-            atomic_mass = ATOMIC_MASS.get(zaid, float(zaid % 1000) if zaid % 1000 > 0 else 1.0)
+            atomic_mass = _atomic_mass(zaid)
             sum_w_over_A += fraction / atomic_mass
         avg_atomic_mass = 1.0 / sum_w_over_A
     else:
@@ -191,7 +192,7 @@ def _calculate_perturbed_density(original_material: Material, perturbed_material
         for symbol, nuclide_obj in original_material.nuclide.items():
             fraction = nuclide_obj.fraction / total_original
             zaid = nuclide_obj.zaid
-            atomic_mass = ATOMIC_MASS.get(zaid, float(zaid % 1000) if zaid % 1000 > 0 else 1.0)
+            atomic_mass = _atomic_mass(zaid)
             avg_atomic_mass += fraction * atomic_mass
     
     # Convert between density types
@@ -211,7 +212,7 @@ def _calculate_perturbed_density(original_material: Material, perturbed_material
     for symbol, nuclide_obj in perturbed_material.nuclide.items():
         fraction = nuclide_obj.fraction / new_total
         zaid = nuclide_obj.zaid
-        atomic_mass = ATOMIC_MASS.get(zaid, float(zaid % 1000) if zaid % 1000 > 0 else 1.0)
+        atomic_mass = _atomic_mass(zaid)
         new_avg_atomic_mass += fraction * atomic_mass
     
     new_mass_density = new_atomic_density * new_avg_atomic_mass / N_AVOGADRO * 1e24
@@ -523,7 +524,7 @@ def generate_pert_cards(inputfile, cell, reactions, material, energies=None,
                     if total_frac > 0:
                         for _, nuc in mat_obj.nuclide.items():
                             frac = nuc.fraction / total_frac
-                            a = ATOMIC_MASS.get(nuc.zaid, float(nuc.zaid % 1000) if nuc.zaid % 1000 > 0 else 1.0)
+                            a = _atomic_mass(nuc.zaid)
                             avg_A += frac * a
 
                     if avg_A > 0:

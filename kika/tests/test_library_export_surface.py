@@ -61,8 +61,6 @@ APP_MODULES = (
     "kika.sampling.endf_perturbation",
     "kika.sampling.ace_perturbation_separate",
     "kika.mcnp",
-    "kika.mcnp.material",
-    "kika.mcnp.parse_materials",
     "kika.mcnp.parse_input",
     "kika.mcnp.parse_mctal",
     "kika.mcnp.parse_meshtal",

@@ -4,7 +4,7 @@ import filecmp
 import tempfile
 from kika.mcnp.parse_input import read_mcnp
 from kika.mcnp.pert_generator import perturb_material
-from kika.mcnp.parse_materials import read_material
+from kika.materials import read_material
 from kika.materials import Material
 
 _DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")

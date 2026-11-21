@@ -43,7 +43,7 @@ ATOMIC_NUMBER_TO_NAME = {
     115: "Moscovium", 116: "Livermorium", 117: "Tennessine", 118: "Oganesson",
 }
 
-N_AVOGADRO = 6.02214e23
+N_AVOGADRO = 6.02214076e23  # CODATA 2018, exact by the SI definition
 BOLTZMANN_CONSTANT = 8.617333262145e-11  # MeV/K
 
 # --- Particle and kinematic constants (CODATA 2018) ------------------------ #

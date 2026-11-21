@@ -50,7 +50,7 @@ Energy structure:         SCALE44
 
 ## Materials
 
-`inp.materials` is a {py:class}`~kika.mcnp.material.MaterialCollection`. Materials are
+`inp.materials` is a {py:class}`~kika.materials.MaterialCollection`. Materials are
 looked up by number through `by_id`:
 
 ```python
@@ -61,7 +61,7 @@ mat = materials.by_id[300000]
 mat.fraction_type, mat.libs       # ('ao', {'nlib': '06c'})
 ```
 
-Each {py:class}`~kika.mcnp.material.Material` keeps its nuclides in `nuclide`, keyed by
+Each {py:class}`~kika.materials.Material` keeps its nuclides in `nuclide`, keyed by
 symbol and reachable by ZAID too. Fractions are stored as positive numbers, and
 `fraction_type` says whether they are atomic (`'ao'`) or weight (`'wo'`) fractions; the
 sign MCNP uses on the card is applied only when the material is written.

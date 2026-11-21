@@ -31,10 +31,3 @@ kika.mcnp.pert_generator
    :undoc-members:
    :show-inheritance:
 
-kika.mcnp.material
---------------------
-
-.. automodule:: kika.mcnp.material
-   :members:
-   :undoc-members:
-   :show-inheritance:
