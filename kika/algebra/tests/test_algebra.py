@@ -252,9 +252,13 @@ def test_algebra_imports_nothing_from_kika():
 #: ``kika.nuclear_data.spectrum_laws`` in October 2026. ``compare`` (differences
 #: of two tables, and of a table against its own averages) came in from
 #: ``kika.plotting.comparison`` the same month: reading a table on another's grid
-#: and subtracting is arithmetic, whoever draws the result.
+#: and subtracting is arithmetic, whoever draws the result. ``gaussian_update``
+#: (the Gaussian posterior of linear data) came in November 2026: matrices and
+#: a residual, no physics, and shared by spectrum adjustment and any other
+#: generalized least-squares fit, so it widened the package from tabulated
+#: functions to mathematics.
 MATHEMATICS_ONLY = {"__init__", "arithmetic", "compare", "evaluate", "fold", "grid",
-                    "integrate", "laws", "prepared", "refine", "thin"}
+                    "integrate", "gaussian_update", "laws", "prepared", "refine", "thin"}
 
 
 def test_algebra_holds_only_its_mathematical_submodules():

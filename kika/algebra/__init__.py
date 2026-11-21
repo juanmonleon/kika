@@ -1,4 +1,9 @@
-"""Algebra of tabulated one-dimensional functions.
+"""Mathematics only: tabulated one-dimensional functions and the linear Gaussian update.
+
+Almost all of the package is about tabulated functions; ``gaussian_update`` is
+the one exception, the posterior of a Gaussian prior given linear data, which
+spectrum adjustment and every other generalized least-squares fit in kika
+share.
 
 A tabulated function here is three arrays: abscissae ``x`` (non-decreasing),
 ordinates ``y``, and one interpolation law per *interval*, ``laws``, with the
@@ -47,7 +52,8 @@ integrals, 1/x weight), ``refine`` (the adaptive refinement engine and
 grid to compare them), ``fold`` (Gaussian folds), ``compare``
 (differences of two tables, and of a table against its own window or group
 averages), ``thin`` (dropping points of tables on one grid to a stated
-error).
+error), ``gaussian_update`` (the posterior of a Gaussian prior given linear
+data).
 """
 from .laws import (HISTOGRAM, LINLIN, LINLOG, LOGLIN, LOGLOG, LAWS, METHODS,
                    interval_laws, laws_on_refinement, method_laws,
@@ -65,6 +71,7 @@ from .prepared import prepare_evaluator
 from .thin import thin_common_grid
 from .compare import (difference, interpolate_to_grid, read_pair,
                       steps_difference, window_difference)
+from .gaussian_update import LinearUpdate, linear_update
 
 __all__ = [
     "HISTOGRAM", "LINLIN", "LINLOG", "LOGLIN", "LOGLOG", "LAWS", "METHODS",
@@ -78,4 +85,5 @@ __all__ = [
     "add", "on_common_grid", "prepare_evaluator",
     "difference", "interpolate_to_grid", "read_pair", "steps_difference", "window_difference",
     "thin_common_grid",
+    "LinearUpdate", "linear_update",
 ]
