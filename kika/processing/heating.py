@@ -70,7 +70,7 @@ from typing import Callable, Dict, List, Optional, Sequence
 import numpy as np
 
 __all__ = ["HeatingResult", "heatingOf", "displacementEnergy", "lindhard", "NEUTRON_REST_ENERGY",
-           "DisplacementModel", "displacementModels", "ARC_DPA"]
+           "DisplacementModel", "displacementModels", "ARC_DPA", "dpa"]
 
 #: m_n c² in eV, from NJOY's constants (``phys.f90``: amassn·amu·c²/ev).
 NEUTRON_REST_ENERGY = 1.00866491595 * 931.49410242e6
@@ -205,6 +205,110 @@ def displacementModels(Z: int, ed: float) -> Dict[str, DisplacementModel]:
         edArc, b, c = ARC_DPA[int(Z)]
         models["arc-dpa"] = DisplacementModel("arc-dpa", edArc, b, c)
     return models
+
+
+_DPA_GROUP_WEIGHTS = {"energy": None, "lethargy": "1/x"}
+
+
+def dpa(table, flux, edges=None, *, weight: Optional[str] = None):
+    """Displacements per atom: a displacement cross section folded with a neutron flux.
+
+    ``1e-24 int sigma_d(E) phi(E) dE`` with ``sigma_d`` in b·displacements and
+    ``phi`` per cm²: a flux in n/(cm² s) gives dpa per second, a fluence in n/cm²
+    gives dpa. The atoms are those of the nuclide *table* belongs to; for a
+    material, sum the nuclides' results weighted by their atom fractions. Flux
+    that falls outside the table's energy range is refused, since the table
+    says nothing there.
+
+    Parameters
+    ----------
+    table : tuple of two array_like
+        ``(E, sigma_d)``: energies in eV, non-decreasing, and the displacement
+        cross section in b·displacements, read lin-lin. One entry of
+        :attr:`kika.endf.EndfProcessing.displacements` (``run.displacements[T]["nrt"]``).
+    flux : tuple of two array_like, or array_like
+        Without *edges*, a pointwise spectrum ``(E, phi)``: energies in eV,
+        non-decreasing, and the flux per unit energy (per eV), read lin-lin and
+        zero outside its own range. With *edges*, the flux integrated over each
+        group, last axis one value per group; leading axes (cells, say) are kept.
+    edges : array_like, optional
+        Group boundaries in eV, increasing (MCNP writes MeV: multiply by 1e6).
+        None: *flux* is pointwise.
+    weight : {"energy", "lethargy"}, optional
+        With *edges*, how the flux is spread inside each group to average the
+        cross section: flat per unit energy or flat per unit lethargy (1/E).
+        Required with *edges*, since coarse groups change the result; not
+        allowed without.
+
+    Returns
+    -------
+    float or numpy.ndarray
+        Displacements per atom per unit time of *flux* (dpa/s for a flux, dpa
+        for a fluence). A float for a pointwise flux or a one-dimensional group
+        flux; otherwise an array of the leading shape of *flux*.
+
+    Raises
+    ------
+    ValueError
+        If *table* or a pointwise *flux* is not two equal-length one-dimensional
+        arrays with non-decreasing energies; if *edges* is not increasing or
+        does not match the last axis of *flux*; if *weight* is missing with
+        *edges*, given without them, or not one of the two above; or if a
+        non-zero flux reaches outside the table's energy range.
+    """
+    from kika.algebra import LINLIN, group_averages, sample_on_union, union
+    from kika.algebra.arithmetic import domain_steps
+
+    x, s = _dpaTable(table, "table")
+    lo, hi = float(x[0]), float(x[-1])
+    if edges is None:
+        if weight is not None:
+            raise ValueError("weight applies to a group flux; a pointwise flux has its own shape")
+        xf, f = _dpaTable(flux, "flux")
+        left = (xf[:-1] < lo) & ((f[:-1] != 0) | (f[1:] != 0))
+        right = (xf[1:] > hi) & ((f[:-1] != 0) | (f[1:] != 0))
+        if left.any() or right.any():
+            raise ValueError(f"the flux is not zero outside the table's range [{lo:g}, {hi:g}] eV")
+        span = (min(lo, float(xf[0])), max(hi, float(xf[-1])))
+        u = union([x, xf], steps=domain_steps(x, s, *span) + domain_steps(xf, f, *span))
+        a = sample_on_union(x, s, LINLIN, u)
+        b = sample_on_union(xf, f, LINLIN, u)
+        # Both factors are straight on every panel of the union: Simpson's rule is exact.
+        h = np.diff(u)
+        total = np.sum(h * (2 * a[:-1] * b[:-1] + a[:-1] * b[1:] + a[1:] * b[:-1] + 2 * a[1:] * b[1:])) / 6.0
+        return float(total * 1e-24)
+    if weight not in _DPA_GROUP_WEIGHTS:
+        raise ValueError(f"a group flux needs weight in {tuple(_DPA_GROUP_WEIGHTS)}, got {weight!r}")
+    edges = np.asarray(edges, dtype=float)
+    if edges.ndim != 1 or edges.size < 2 or np.any(np.diff(edges) <= 0):
+        raise ValueError("edges must be an increasing 1-d array of at least two boundaries")
+    phi = np.asarray(flux, dtype=float)
+    if phi.ndim == 0 or phi.shape[-1] != edges.size - 1:
+        raise ValueError(f"the flux's last axis must hold one value per group ({edges.size - 1})")
+    outside = (edges[:-1] < lo) | (edges[1:] > hi)
+    carried = np.any(phi.reshape(-1, edges.size - 1) != 0, axis=0)
+    if np.any(outside & carried):
+        bad = np.flatnonzero(outside & carried)
+        raise ValueError(f"groups {bad.tolist()} carry flux outside the table's range [{lo:g}, {hi:g}] eV")
+    means = np.zeros(edges.size - 1)
+    inside = np.flatnonzero(~outside)
+    if inside.size:
+        # The groups inside the table are contiguous; only they reach group_averages,
+        # where an outside edge at 0 eV would break the lethargy weight.
+        g0, g1 = inside[0], inside[-1] + 1
+        means[g0:g1] = group_averages(x, s, LINLIN, edges[g0:g1 + 1], weight=_DPA_GROUP_WEIGHTS[weight])
+    out = (phi @ means) * 1e-24
+    return float(out) if np.ndim(out) == 0 else out
+
+
+def _dpaTable(pair, name):
+    try:
+        x, y = (np.asarray(v, dtype=float) for v in pair)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a pair (energies, values)") from None
+    if x.ndim != 1 or x.shape != y.shape or x.size < 2 or np.any(np.diff(x) < 0):
+        raise ValueError(f"{name} must be two equal-length 1-d arrays, energies non-decreasing")
+    return x, y
 
 
 #: The displacement model the damage quadratures evaluate (None: MT444's damage
