@@ -182,3 +182,21 @@ def test_the_posterior_correlates_flux_and_cross_sections():
     assert np.min(result.flux_cross_section_log_covariance[name]) < 0
     prior_sd = np.sqrt(np.diag(dosimeters[2].relative_covariance))
     assert np.all(np.sqrt(np.diag(result.cross_section_log_covariance[name])) <= prior_sd + 1e-15)
+
+
+def test_the_report_is_one_html_page_with_every_dosimeter(tmp_path):
+    prior = SpectrumPrior(EDGES, _flux(), _prior_covariance())
+    dosimeters = [_dosimeter(t) for t in THRESHOLDS]
+    rates = np.array([response_cells(prior, d).sum() for d in dosimeters])
+    good = adjust_spectrum(prior, dosimeters, rates * np.array([1.1, 1.05, 1.12, 1.08, 0.98, 1.15]),
+                          np.diag(np.full(6, 0.04**2)))
+    assert 0.3 <= good.chi2 / good.dof <= 2.0
+    page = good.to_html()
+    assert page.startswith("<!doctype html>") and page.count("<svg") == 2
+    assert all(name in page for name in good.names)
+    assert 'class="verdict pass"' in page and "Above 0.1 MeV" in page
+    bad = adjust_spectrum(prior, dosimeters, rates * np.array([1, 1, 2.5, 1, 1, 1]), np.diag(np.full(6, 0.01**2)))
+    assert 'class="verdict warn"' in bad.to_html()
+    path = tmp_path / "adjustment.html"
+    good.write_html(path)
+    assert path.read_text(encoding="utf-8") == page

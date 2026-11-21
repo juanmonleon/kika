@@ -34,6 +34,9 @@ STEP_TOLERANCE = 1e-12
 #: Gauss-Newton steps allowed before the adjustment is declared not converged.
 MAX_ITERATIONS = 100
 
+#: Two energies closer than this, relatively, are the same group boundary.
+EDGE_RTOL = 1e-9
+
 
 class AdjustmentNotConverged(RuntimeError):
     """The Gauss-Newton iteration of :func:`adjust_spectrum` did not converge; nothing is returned."""
@@ -86,6 +89,9 @@ class SpectrumAdjustment:
     flux_cross_section_log_covariance : dict
         Reaction name to the posterior covariance between ``ln phi_g`` (rows) and
         the logarithms of its factors (columns).
+    prior_log_covariance : numpy.ndarray
+        The prior's relative covariance, ``n x n``, with zero rows and columns for
+        groups of zero prior flux.
     """
 
     edges: np.ndarray
@@ -105,6 +111,7 @@ class SpectrumAdjustment:
     cross_section_factors: Dict[str, np.ndarray] = field(default_factory=dict)
     cross_section_log_covariance: Dict[str, np.ndarray] = field(default_factory=dict)
     flux_cross_section_log_covariance: Dict[str, np.ndarray] = field(default_factory=dict)
+    prior_log_covariance: np.ndarray = None
 
     def integral(self, weights) -> Tuple[float, float]:
         """``sum_g w_g phi_g`` of the adjusted flux and its standard deviation.
@@ -132,6 +139,47 @@ class SpectrumAdjustment:
         part = w * self.flux
         return float(part.sum()), float(np.sqrt(max(part @ self.log_covariance @ part, 0.0)))
 
+    def prior_integral(self, weights) -> Tuple[float, float]:
+        """``sum_g w_g phi_g`` of the prior flux and its standard deviation, as :meth:`integral` does for the adjusted one.
+
+        Parameters
+        ----------
+        weights : array_like
+            One weight per group.
+
+        Returns
+        -------
+        tuple of float
+            The value and its one-sigma uncertainty from *prior_log_covariance*.
+
+        Raises
+        ------
+        ValueError
+            If there is not one weight per group.
+        """
+        w = np.asarray(weights, dtype=float)
+        if w.shape != self.prior_flux.shape:
+            raise ValueError(f"one weight per group: {self.prior_flux.size} expected, got shape {w.shape}")
+        part = w * self.prior_flux
+        return float(part.sum()), float(np.sqrt(max(part @ self.prior_log_covariance @ part, 0.0)))
+
+    def to_html(self) -> str:
+        """The report of the adjustment as one HTML page: verdict, dosimeters, integrals, spectrum, cross sections, method."""
+        from .report import adjustment_html
+
+        return adjustment_html(self)
+
+    def write_html(self, path) -> None:
+        """Write :meth:`to_html` to *path*, in UTF-8.
+
+        Parameters
+        ----------
+        path : str or os.PathLike
+            The file to write; it is replaced if it exists.
+        """
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(self.to_html())
+
     def flux_above(self, energy: float) -> Tuple[float, float]:
         """The adjusted flux above a group boundary and its standard deviation.
 
@@ -139,7 +187,8 @@ class SpectrumAdjustment:
         ----------
         energy : float
             The lower limit in eV. It must be one of the group boundaries other than
-            the last, so that no group is split.
+            the last (to a relative 1e-9, so that a grid converted from MeV matches), so
+            that no group is split.
 
         Returns
         -------
@@ -152,7 +201,7 @@ class SpectrumAdjustment:
         ValueError
             If *energy* is not one of the group boundaries other than the last.
         """
-        where = np.flatnonzero(self.edges == energy)
+        where = np.flatnonzero(np.isclose(self.edges, energy, rtol=EDGE_RTOL, atol=0.0))
         if where.size != 1 or where[0] == self.edges.size - 1:
             raise ValueError(f"{energy!r} eV is not a lower group boundary")
         return self.integral(np.arange(self.flux.size) >= where[0])
@@ -294,6 +343,8 @@ def adjust_spectrum(prior: SpectrumPrior, dosimeters: Sequence[Dosimeter], measu
             f"no convergence in {MAX_ITERATIONS} Gauss-Newton steps (last step {step:.3g})")
 
     g = layout.groups
+    prior_log_covariance = np.zeros((n, n))
+    prior_log_covariance[np.ix_(g, g)] = prior.relative_covariance[np.ix_(g, g)]
     log_covariance = np.zeros((n, n))
     log_covariance[np.ix_(g, g)] = update.covariance[:g.size, :g.size]
     factors, sigma_cov, cross_cov = {}, {}, {}
@@ -322,4 +373,5 @@ def adjust_spectrum(prior: SpectrumPrior, dosimeters: Sequence[Dosimeter], measu
         cross_section_factors=factors,
         cross_section_log_covariance=sigma_cov,
         flux_cross_section_log_covariance=cross_cov,
+        prior_log_covariance=prior_log_covariance,
     )
