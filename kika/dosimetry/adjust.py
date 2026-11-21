@@ -94,8 +94,9 @@ class SpectrumAdjustment:
         The prior's relative covariance, ``n x n``, with zero rows and columns for
         groups of zero prior flux.
     notes : tuple of str
-        What the report should say about the inputs: a covariance with negative
-        eigenvalues no larger than eigensolver round-off, with its smallest one.
+        What the report should say about the inputs: reactions with no covariance
+        (taken as exact), and covariances with negative eigenvalues no larger than
+        eigensolver round-off.
     """
 
     edges: np.ndarray
@@ -266,12 +267,17 @@ class _Layout:
         labels = ["the prior spectrum"] + [name for name in reactions if name in self.slices]
         rounded = [(label, found) for label, found in ((label, _definiteness(label, block))
                                                        for label, block in zip(labels, blocks)) if found]
-        self.notes = ()
+        notes = []
+        exact = [name for name in reactions if name not in self.slices]
+        if exact:
+            notes.append(f"No covariance for {', '.join(exact)}: taken as exact, so the adjustment puts "
+                         f"all of their disagreement on the flux.")
         if rounded:
             worst = max(-small / large for _, (small, large) in rounded)
-            self.notes = (f"{len(rounded)} of {len(blocks)} covariances have negative eigenvalues within "
-                          f"eigensolver round-off ({', '.join(label for label, _ in rounded)}); the largest "
-                          f"ratio to the largest eigenvalue is {worst:.2g}. They were used as they are.",)
+            notes.append(f"{len(rounded)} of {len(blocks)} covariances have negative eigenvalues within "
+                         f"eigensolver round-off ({', '.join(label for label, _ in rounded)}); the largest "
+                         f"ratio to the largest eigenvalue is {worst:.2g}. They were used as they are.")
+        self.notes = tuple(notes)
 
 
 def _rates_and_jacobian(x, layout, n_groups, names, cells):

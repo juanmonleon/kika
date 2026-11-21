@@ -108,3 +108,44 @@ def test_a_view_of_one_subsection_is_an_mf33_section():
     view = MF33MT(number=17, _za=endf.mf[40].mt[17]._za, _awr=endf.mf[40].mt[17]._awr, _mtl=0, _nl=1, _mf=40)
     view._subsections = [sub]
     assert view.to_xs_covmat().matrices[0].shape == (3, 3)
+
+
+def _with_short_range_component(endf):
+    """Nb-93's MF40 state with an LB=8 (absolute) component added to its LB=5 block."""
+    from kika.endf.classes.mf33.mf33 import NISubSubsectionRecord
+
+    sub = endf.mf[40].mt[4].states[0].subsections[0]
+    grid = [1e6, 2e6, 5e6, 1e7, 2e7]
+    values = [1e-6, 2e-6, 1e-6, 5e-7, 0.0]
+    sub.ni_records.append(NISubSubsectionRecord(lb=8, lt=0, ls=0, nt=2 * len(grid), np=len(grid),
+                                                ne=len(grid), e_table_k=grid, f_table_k=values))
+    sub.ni = len(sub.ni_records)
+    return sub
+
+
+def test_a_mixed_block_is_made_relative_with_the_states_mf10_table():
+    from types import SimpleNamespace
+
+    endf = read_endf(str(NB93))
+    sub = _with_short_range_component(endf)
+    section40 = endf.mf[40].mt[4]
+    state10 = endf.mf[10].mt[4].states[0]
+    view = MF33MT(number=4, _za=section40._za, _awr=section40._awr, _mtl=0, _nl=1, _mf=40)
+    view._subsections = [sub]
+    table = SimpleNamespace(energies=state10.x, values=state10.y, energy_interpolation=state10.interp)
+    expected = view.to_xs_covmat(mf3_sections={4: table}).matrices[0]
+
+    suite, report = decodeCovarianceSuite(endf, checks=False, target="Nb93")
+    section = next(s for s in suite.covarianceSections if s.rowData.ENDF_MF == 40)
+    np.testing.assert_array_equal(section.form.matrix, expected)
+    assert section.form.arrayStorage is None
+    assert any("made relative with the state's MF10 cross section" in m for m in report.warnings)
+
+
+def test_a_mixed_block_without_its_mf10_state_is_reported_lost():
+    endf = read_endf(str(NB93))
+    _with_short_range_component(endf)
+    del endf.mf[10]
+    suite, report = decodeCovarianceSuite(endf, checks=False, target="Nb93")
+    assert not [s for s in suite.covarianceSections if s.rowData.ENDF_MF == 40]
+    assert any("the state has no MF10 table" in m for m in report.losses)

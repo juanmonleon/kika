@@ -210,5 +210,13 @@ def test_negative_eigenvalues_within_round_off_are_a_note_in_the_report():
     prior = SpectrumPrior(edges, [1e9, 8e8, 3e8], cov)
     d = Dosimeter("flat", [1e6, 8e6], [0.3, 0.3], 2)
     result = adjust_spectrum(prior, [d], [1.1 * response_cells(prior, d).sum()], [[0.03**2]])
-    assert len(result.notes) == 1 and "round-off" in result.notes[0] and "the prior spectrum" in result.notes[0]
+    rounded = [note for note in result.notes if "round-off" in note]
+    assert len(rounded) == 1 and "the prior spectrum" in rounded[0]
     assert 'id="ka-notes"' in result.to_html()
+
+
+def test_a_reaction_without_covariance_is_named_in_the_notes():
+    prior = SpectrumPrior(EDGES, _flux(), _prior_covariance())
+    exact = Dosimeter("exact", FINE, 0.5 / (1 + np.exp(-(FINE - 3e6) / 3e5)), 2)
+    result = adjust_spectrum(prior, [exact], [1.1 * response_cells(prior, exact).sum()], [[0.04**2]])
+    assert any("No covariance for exact" in note for note in result.notes)

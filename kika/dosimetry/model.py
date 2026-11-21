@@ -119,15 +119,21 @@ def dosimeter_from_suite(suite, mt: int, lfs: Optional[int] = None, name: Option
     TypeError
         If the form is not a tabulated function (reconstruct resonances first).
     ValueError
-        If the cross section states units other than eV and b, the production's
-        multiplicity is not the constant 1 of an MF10 table, or the covariance section
-        does not state one matrix (a GNDS ``mixed`` or ``sum``).
+        If the cross section states units other than eV and b, the production is not
+        an MF10 table, the covariance section does not state one matrix (a GNDS
+        ``mixed`` or ``sum``), or *lfs* is None and *mt* has no MF33 covariance but
+        has productions (the final state has to be named).
     """
     if lfs is None:
         suite.cross_section(mt, form)
         x, y, pairs = suite.reactionByENDF_MT(mt).crossSection[form].toEndfRegions()
         label = name if name is not None else f"{getattr(suite, 'target', '?')} MT{mt}"
         matrix = _diagonal_form(suite, 33, mt)
+        productions = [p.label for p in getattr(suite, "productions", ()) if p.label.startswith(f"MT{int(mt)} ")]
+        if matrix is None and productions:
+            raise ValueError(f"MT{mt} has no MF33 covariance but has productions {productions} (MF10, "
+                             f"with their MF40): a dosimetry reaction to a final state is one of those; "
+                             f"pass lfs= to read it")
     else:
         production = _production(suite, mt, lfs)
         chosen = production.crossSection[form]

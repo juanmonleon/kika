@@ -104,3 +104,8 @@ def test_a_production_state_reads_its_mf10_table_and_its_mf40_block():
 def test_a_final_state_that_names_no_production_raises():
     with pytest.raises(KeyError, match="LFS=0"):
         dosimeter_from_suite(kika.read(NB93), 4, lfs=0)
+
+
+def test_an_mt_with_productions_and_no_mf33_asks_for_the_final_state():
+    with pytest.raises(ValueError, match="pass lfs="):
+        dosimeter_from_suite(kika.read(NB93), 4)
