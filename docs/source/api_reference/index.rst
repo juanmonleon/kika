@@ -75,17 +75,15 @@ Inputs and outputs of MCNP and Serpent, material compositions and weight windows
    materials
    wwinp
 
-Experiments and benchmarks
---------------------------
+Experimental data
+-----------------
 
-Measured data from EXFOR, and the criticality and shielding benchmark collections.
+Measured data from EXFOR.
 
 .. toctree::
    :maxdepth: 2
 
    exfor
-   benchmarks
-   sinbad
 
 Energy grids and plotting
 -------------------------

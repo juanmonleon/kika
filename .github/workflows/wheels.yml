@@ -36,7 +36,11 @@ jobs:
         # Each macOS architecture on its own runner: cross-building x86_64 on
         # the arm64 runner gave a wheel of arm64 binaries tagged arm64 (poetry-core
         # builds for the interpreter it runs in), so v0.5.0's first run failed.
-        os: [ubuntu-latest, windows-latest, macos-14, macos-15-intel]
+        # Linux on ARM (aarch64) builds natively on GitHub's arm runner. Windows on
+        # ARM has no wheel: pyarrow publishes none for win_arm64, so kika could
+        # not be installed there even with its own; x64 Python runs the
+        # win_amd64 wheel under emulation.
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, macos-15, macos-15-intel]
     steps:
       - uses: actions/checkout@v4
 

@@ -53,7 +53,6 @@ Sensitivities and Uncertainty Propagation
   results, with second-order checks of linearity
 - Sensitivity Data Files (SDF) read and written in the SCALE format, from MCNP or Serpent
 - The sandwich rule, the similarity index :math:`c_k`, and Total Monte Carlo statistics
-- ICSBEP/DICE benchmarks ranked by similarity, and SINBAD experimental covariances
 
 Transport Codes
 ~~~~~~~~~~~~~~~
