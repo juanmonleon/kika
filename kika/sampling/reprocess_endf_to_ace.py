@@ -106,8 +106,11 @@ def _construct_endf_file_paths(
             missing_files.append(os.path.join(sample_dir, f"{prefix}.*"))
             continue
 
-        # Find any file starting with the prefix (ignores extension)
-        candidates = [os.path.join(sample_dir, f) for f in entries if f.startswith(prefix)]
+        candidates = sorted(os.path.join(sample_dir, f) for f in entries
+                            if f == prefix or f.startswith(prefix + "."))
+        if len(candidates) > 1 and logger:
+            logger.warning(f"[REPROCESS] [DISCOVERY] {len(candidates)} tapes named "
+                           f"{prefix}.* in {sample_dir}; taking {os.path.basename(candidates[0])}")
         if candidates:
             constructed_files.append((candidates[0], zaid, sample_index))
         else:
@@ -347,12 +350,11 @@ def reprocess_endf_to_ace(
     ----------
     output_dir : str
         Root of a perturbation run, holding ``endf/<zaid>/<NNNN>/``. A tape is the
-        first file in directory-listing order whose name starts with
-        ``<base_filename>_<NNNN>``, whatever its extension (``260560_0001.endf``,
-        ``jeff40_260560_0042.txt``). The summary file
-        ``<base_filename>_<NNNN>_summary.txt`` also starts with that prefix, so
-        when it is listed first it is taken as the tape. A sample with no such
-        file is skipped with a warning in the log.
+        file named ``<base_filename>_<NNNN>``, with or without an extension
+        (``260560_0001.endf``, ``jeff40_260560_0042.txt``); the summary file
+        ``<base_filename>_<NNNN>_summary.txt`` is not one. With several, the first
+        in sorted order is taken and the log says so. A sample with none is
+        skipped with a warning in the log.
     zaid : int
         ENDF ZAID of the isotope, Z*1000+A — 26056 for Fe-56. This is the key
         the endf/ and ace/ trees are built on; 260560 (Z*10000+A*10) is the

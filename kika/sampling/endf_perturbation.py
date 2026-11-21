@@ -890,12 +890,9 @@ def perturb_ENDF_files(
         to 0.85 MeV and from 4 MeV onward.
     only_xsdir : bool
         When true, nothing is perturbed and NJOY is not run: the xsdir snippets
-        found under ``output_dir/ace/<temp>/<zaid>/<NNNN>/`` for the ZAIDs of
+        this function wrote under ``output_dir/ace/<NNNN>/xsdir/`` for the ZAIDs of
         *endf_files* are re-wrapped and the master copies in ``output_dir/xsdir``
-        rebuilt from *xsdir_file*. This function writes its ACE files to
-        ``ace/<NNNN>/``, which that search does not visit, so on its own output
-        nothing is re-wrapped and no master is written. Cannot be combined with
-        *dry_run*.
+        rebuilt from *xsdir_file*. Cannot be combined with *dry_run*.
     log_file : str, optional
         Log file, to which this run appends. None starts a new
         ``endf_perturbation_<timestamp>.log`` in *output_dir*.

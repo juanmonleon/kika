@@ -726,7 +726,7 @@ def perturb_seprate_ACE_files(
         # Apply energy range masking if requested
         if energy_ranges is not None and factors is not None and mt_perturb_final:
             factors = _mask_factors_by_energy_range_ace(
-                factors, mt_perturb_final, energy_grid, energy_ranges, space
+                factors, mt_perturb_final, energy_grid, energy_ranges
             )
             _logger.info(f"  [INFO] [ACE] Applied energy range masking for {zaid}")
 
@@ -1087,7 +1087,6 @@ def _mask_factors_by_energy_range_ace(
     mt_numbers: List[int],
     energy_grid_mev: List[float],
     energy_ranges_ev: List[Tuple[float, float]],
-    space: str = "log",
 ) -> np.ndarray:
     """
     Mask perturbation factors for energy bins outside the requested ranges.
@@ -1102,15 +1101,14 @@ def _mask_factors_by_energy_range_ace(
         Energy bin boundaries in MeV
     energy_ranges_ev : List[Tuple[float, float]]
         List of (emin, emax) energy ranges in eV
-    space : str
-        "linear" or "log"
 
     Returns
     -------
     np.ndarray
-        Copy of factors with masked columns set to neutral value
+        Copy of factors with the columns of those bins set to 1 (the factors
+        are multiplicative whatever space they were drawn in)
     """
-    neutral = 1.0 if space == "linear" else 0.0
+    neutral = 1.0
     masked = factors.copy()
     n_groups = len(energy_grid_mev) - 1
 

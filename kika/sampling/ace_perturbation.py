@@ -145,12 +145,48 @@ def _process_sample(
     else:
         ace = read_ace(ace_file)
     try:
-        _perturb_and_write_sample(ace, writer, ace_file, sample, sample_index,
-                                  energy_grid, mt_numbers, output_dir,
-                                  xsdir_file, mt_request)
+        return _perturb_and_write_sample(ace, writer, ace_file, sample, sample_index,
+                                         energy_grid, mt_numbers, output_dir,
+                                         xsdir_file, mt_request)
     finally:
         if writer is not None:
             writer.restore(ace)
+
+
+def _run_samples(tasks, nprocs: int, verbose: bool) -> None:
+    """Write every sample of *tasks*, in a ``Pool`` when *nprocs* > 1, and log what each left unperturbed."""
+    logger = _get_logger()
+    report_interval = max(1, min(100, len(tasks) // 10))
+    if nprocs > 1:
+        with Pool(processes=nprocs) as pool:
+            pending = [pool.apply_async(_process_sample, args=args) for args in tasks]
+            pool.close()
+            pool.join()
+        results, failures = [], []
+        for args, result in zip(tasks, pending):
+            try:
+                results.append(result.get())
+            except Exception as exc:
+                failures.append((args[2], exc))
+                results.append([])
+        if failures:
+            names = ", ".join(f"{index + 1:04d}" for index, _ in failures)
+            raise RuntimeError(
+                f"{len(failures)} sample(s) failed in the worker processes ({names}); "
+                f"the first: {failures[0][1]!r}") from failures[0][1]
+    else:
+        results = []
+        for i, args in enumerate(tasks):
+            results.append(_process_sample(*args))
+            if verbose and logger and ((i + 1) % report_interval == 0 or i + 1 == len(tasks)):
+                progress = (i + 1) / len(tasks) * 100
+                logger.info(f"  [INFO] [ACE] Progress: {i + 1}/{len(tasks)} samples ({progress:.1f}%)")
+    for args, skipped in zip(tasks, results):
+        for mt, bad in skipped or []:
+            if logger:
+                logger.warning(
+                    f"  [WARN] [ACE] Sample {args[2] + 1:04d}, MT={mt}: negative or zero "
+                    f"factors ({bad}); reaction not perturbed in this sample.")
 
 
 #: Per process: ``ace_file -> (ace, AcePatchWriter)``, so a worker reads each
@@ -173,10 +209,10 @@ def _cached_ace(ace_file: str, template_path: str):
 def _perturb_and_write_sample(ace, writer, ace_file, sample, sample_index,
                               energy_grid, mt_numbers, output_dir, xsdir_file,
                               mt_request):
-    apply_perturbation_factor_to_ace(
+    skipped = apply_perturbation_factor_to_ace(
         ace, sample, sample_index, energy_grid, mt_numbers, False,
         mt_request=mt_request,
-    )  # Set verbose=False to reduce output
+    )
 
     # — write perturbed ACE —
     base, ext = os.path.splitext(os.path.basename(ace_file))
@@ -217,6 +253,7 @@ def _perturb_and_write_sample(ace, writer, ace_file, sample, sample_index,
         master_xsdir_file=xsdir_file,
         has_ptable=has_ptable,
     )
+    return skipped
 
 
 def _do_isotope_work(args: dict, log) -> dict:
@@ -675,7 +712,7 @@ def _do_isotope_work(args: dict, log) -> dict:
 
     if energy_ranges is not None and factors is not None and mt_perturb_final:
         factors = _mask_factors_by_energy_range_ace(
-            factors, mt_perturb_final, energy_grid, energy_ranges, space
+            factors, mt_perturb_final, energy_grid, energy_ranges
         )
         log.info(f"  [INFO] [ACE] Applied energy range masking for {zaid}")
 
@@ -905,11 +942,9 @@ def perturb_ACE_files(
         Progress messages of the run and of the draw. The factors applied are
         not reported.
     energy_ranges : list of tuple of float, optional
-        ``(emin, emax)`` windows in eV. A group that overlaps no window is set to
-        the neutral value, 1 in linear space and **0 in log space**: a reaction
-        with a zero factor is left unperturbed, so with the default ``"log"`` space
-        any reaction that has a group outside the windows is not perturbed at all.
-        Use ``space="linear"`` with *energy_ranges*. None perturbs every group.
+        ``(emin, emax)`` windows in eV. A group that overlaps no window gets
+        factor 1 (the factors are multiplicative in both spaces); a group that
+        overlaps one is perturbed whole. None perturbs every group.
     psd_method : {"auto", "higham", "clip", "clip_rescale", "none"}
         As in :func:`kika.sampling.core.draw_samples`.
     max_relative_std : float, optional
@@ -1638,7 +1673,7 @@ def perturb_ACE_files(
         # Apply energy range masking if requested
         if energy_ranges is not None and factors is not None and mt_perturb_final:
             factors = _mask_factors_by_energy_range_ace(
-                factors, mt_perturb_final, energy_grid, energy_ranges, space
+                factors, mt_perturb_final, energy_grid, energy_ranges
             )
             _logger.info(f"  [INFO] [ACE] Applied energy range masking for {zaid}")
 
@@ -1691,28 +1726,12 @@ def perturb_ACE_files(
         tasks = [(ace_file, factors[j], j, energy_grid, mt_perturb_final, output_dir, xsdir_file, mt_request, template_path) for j in range(num_samples)]
 
         if nprocs > 1:
-            # For parallel processing, just show start and end messages
             _logger.info(f"  [INFO] [ACE] Starting parallel sample generation (progress updates disabled in parallel mode)")
-
-            with Pool(processes=nprocs) as pool:
-                for args in tasks:
-                    pool.apply_async(_process_sample, args=args)
-                pool.close()
-                pool.join()
-
+        elif verbose:
+            _logger.info(f"  [INFO] [ACE] Generating samples (progress updates every {report_interval} samples)")
+        _run_samples(tasks, nprocs, verbose)
+        if nprocs > 1:
             _logger.info(f"  [INFO] [ACE] Completed generating {num_samples} samples")
-        else:
-            # For sequential processing, show periodic progress updates
-            if verbose:
-                _logger.info(f"  [INFO] [ACE] Generating samples (progress updates every {report_interval} samples)")
-
-            for i, args in enumerate(tasks):
-                _process_sample(*args)
-
-                # Report progress periodically TO LOG FILE
-                if verbose and ((i + 1) % report_interval == 0 or i + 1 == num_samples):
-                    progress = (i + 1) / num_samples * 100
-                    _logger.info(f"  [INFO] [ACE] Progress: {i + 1}/{num_samples} samples ({progress:.1f}%)")
 
         template.close()
         _ACE_SAMPLE_CACHE.clear()
@@ -1864,7 +1883,6 @@ def _mask_factors_by_energy_range_ace(
     mt_numbers: List[int],
     energy_grid_mev: List[float],
     energy_ranges_ev: List[Tuple[float, float]],
-    space: str = "log",
 ) -> np.ndarray:
     """
     Mask perturbation factors for energy bins outside the requested ranges.
@@ -1879,15 +1897,14 @@ def _mask_factors_by_energy_range_ace(
         Energy bin boundaries in MeV
     energy_ranges_ev : List[Tuple[float, float]]
         List of (emin, emax) energy ranges in eV
-    space : str
-        "linear" or "log"
 
     Returns
     -------
     np.ndarray
-        Copy of factors with masked columns set to neutral value
+        Copy of factors with the columns of those bins set to 1 (the factors
+        are multiplicative whatever space they were drawn in)
     """
-    neutral = 1.0 if space == "linear" else 0.0
+    neutral = 1.0
     masked = factors.copy()
     n_groups = len(energy_grid_mev) - 1
 
@@ -1970,6 +1987,9 @@ def apply_perturbation_factor_to_ace(
         the user explicitly named (see :func:`_partials_to_apply` for
         the full rule). ``None`` preserves the historical behavior of
         expanding every summary MT to its full partial range.
+
+    Returns ``[(mt, bad_factors_text), ...]``: the reactions left unperturbed
+    because a factor was zero or negative.
     """
     logger = _get_logger()
 
@@ -1982,6 +2002,7 @@ def apply_perturbation_factor_to_ace(
 
     boundaries = np.asarray(energy_grid)
     perturbed_mts = []  # collect the actual MT numbers
+    skipped = []
     ace_mts_set = set(ace.mt_numbers)
 
     for mt_idx, mt in enumerate(mt_numbers):
@@ -1992,14 +2013,14 @@ def apply_perturbation_factor_to_ace(
         if mt in _SUMMARY_MT_PARTIAL_RANGES:
             partial_range = _SUMMARY_MT_PARTIAL_RANGES[mt]
             targets = _partials_to_apply(mt, partial_range, ace_mts_set, mt_request)
-            for partial_mt in targets:
-                _apply_factors_to_mt(ace, partial_mt, factors, boundaries, verbose)
-                perturbed_mts.append(partial_mt)
         else:
-            # direct mt
-            if mt in ace_mts_set:
-                _apply_factors_to_mt(ace, mt, factors, boundaries, verbose)
-                perturbed_mts.append(mt)
+            targets = [mt] if mt in ace_mts_set else []
+        for target in targets:
+            bad = _apply_factors_to_mt(ace, target, factors, boundaries)
+            if bad is None:
+                perturbed_mts.append(target)
+            else:
+                skipped.append((target, bad))
 
     # remove duplicates and sort for neatness
     perturbed_mts = sorted(set(perturbed_mts))
@@ -2007,23 +2028,17 @@ def apply_perturbation_factor_to_ace(
     if verbose and logger:
         logger.info(f"  [INFO] [ACE] Applying factors for sample #{sample_index+1:04d}")
         logger.info(f"    Perturbed MT numbers: {perturbed_mts}")
+    return skipped
 
 
-def _apply_factors_to_mt(ace, mt, factors, boundaries, verbose=True):
-    """Multiply each cross-section value by factors[group] for this mt,
-    **unless any factor is non-positive**.
-    """
-    logger = _get_logger()
-    
-    # Convert factors to float32 if not already
+def _apply_factors_to_mt(ace, mt, factors, boundaries):
+    """Multiply each cross-section value of *mt* by its group's factor; with any
+    factor ≤ 0, leave it untouched and return those factors as text (else None)."""
     if factors.dtype != np.float32:
         factors = factors.astype(np.float32)
-    
+
     if (factors <= 0).any():
-        bad = ", ".join(f"{f:+.3e}" for f in factors if f <= 0)
-        if verbose and logger:
-            logger.warning(f"  [WARN] [ACE] MT={mt}: negative or zero factors detected ({bad}). Reaction not perturbed.")
-        return  # leave this reaction unperturbed
+        return ", ".join(f"{f:+.3e}" for f in factors if f <= 0)
 
     reac       = ace.cross_section.reaction[mt]
     energies   = np.asarray(reac.energies)
