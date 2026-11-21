@@ -2,7 +2,7 @@
 
 A dosimeter's rate in a spectrum of group fluxes ``phi_g`` is
 ``R = sum_g phi_g sigma_g`` with ``sigma_g`` the cross section averaged over the
-group with the prior's own shape inside it. Spectrum adjustment needs that rate
+group with the prior's own fine spectrum inside it. Spectrum adjustment needs that rate
 split twice: by flux group (how the rate moves when a group flux moves) and by
 the intervals of the cross section's covariance (how much of the rate each
 covariance interval carries). :func:`response_cells` gives the rate of every
@@ -59,7 +59,7 @@ class SpectrumPrior:
         ``n x n``, symmetric: the covariance of ``phi_g / phi_g`` (to first order,
         of ``ln phi_g``). It may be singular. It holds every uncertainty of the
         calculation, the normalisation included.
-    shape : tuple, optional
+    fine_shape : tuple, optional
         A fine spectrum per unit energy ``(x, y, laws)``, x in eV, used only as the
         weight inside each group when averaging a cross section; its scale does
         not matter. None weights each group flat in energy.
@@ -68,13 +68,13 @@ class SpectrumPrior:
     ------
     ValueError
         If a shape does not match, a flux is not positive, the covariance is not
-        symmetric, or *shape* is not a valid table.
+        symmetric, or *fine_shape* is not a valid table.
     """
 
     edges: np.ndarray
     flux: np.ndarray
     relative_covariance: np.ndarray
-    shape: Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]] = None
+    fine_shape: Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]] = None
 
     def __post_init__(self):
         edges = _increasing("edges", self.edges)
@@ -84,11 +84,11 @@ class SpectrumPrior:
         if not np.all(flux > 0):
             raise ValueError(f"flux must be positive in every group; group {int(np.argmin(flux > 0))} is not")
         cov = _symmetric("relative_covariance", np.asarray(self.relative_covariance, dtype=float), flux.size)
-        shape = None if self.shape is None else validate(*self.shape)
+        fine_shape = None if self.fine_shape is None else validate(*self.fine_shape)
         object.__setattr__(self, "edges", edges)
         object.__setattr__(self, "flux", flux)
         object.__setattr__(self, "relative_covariance", cov)
-        object.__setattr__(self, "shape", shape)
+        object.__setattr__(self, "fine_shape", fine_shape)
 
 
 @dataclass(frozen=True)
@@ -155,14 +155,14 @@ def response_cells(prior: SpectrumPrior, dosimeter: Dosimeter) -> np.ndarray:
     """The rate of a dosimeter in the prior spectrum, split by flux group and covariance interval.
 
     Cell ``(g, k)`` is ``1e-24 phi_g int_{g cap k} sigma w dE / int_g w dE``, with
-    ``w`` the prior's shape (flat when it has none). The last column holds the
+    ``w`` the prior's fine spectrum (flat when it has none). The last column holds the
     part of the rate that falls outside the covariance intervals (all of it for
     a dosimeter with no covariance), which carries no uncertainty.
 
     Parameters
     ----------
     prior : SpectrumPrior
-        The group spectrum and the shape inside each group.
+        The group spectrum and the fine spectrum inside each group.
     dosimeter : Dosimeter
         The cross section and its covariance intervals.
 
@@ -175,20 +175,20 @@ def response_cells(prior: SpectrumPrior, dosimeter: Dosimeter) -> np.ndarray:
     Raises
     ------
     ValueError
-        If the prior's shape has no weight in a group.
+        If the prior's fine spectrum has no weight in a group.
     """
     groups = prior.edges
     cov_edges = np.zeros(0) if dosimeter.covariance_edges is None else dosimeter.covariance_edges
     cuts = np.union1d(groups, cov_edges[(cov_edges > groups[0]) & (cov_edges < groups[-1])])
     sigma = (dosimeter.energies, dosimeter.cross_section, dosimeter.laws)
-    if prior.shape is None:
+    if prior.fine_shape is None:
         weight = (groups[[0, -1]], np.ones(2), 2)
     else:
-        weight = prior.shape
+        weight = prior.fine_shape
     pieces = product_group_integrals(sigma, weight, cuts)
     norm = group_integrals(*weight, groups)
     if np.any(norm <= 0):
-        raise ValueError(f"the prior's shape has no weight in group {int(np.argmin(norm > 0))}")
+        raise ValueError(f"the prior's fine spectrum has no weight in group {int(np.argmin(norm > 0))}")
 
     lower = cuts[:-1]
     g = np.searchsorted(groups, lower, side="right") - 1

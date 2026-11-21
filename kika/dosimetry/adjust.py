@@ -2,8 +2,10 @@
 
 The parameters are ``x_g = ln(phi_g / phi_g^prior)``, the data the logarithms of
 the measured rates. The model ``ln R_i(x)`` is not linear in ``x``, so the update
-is iterated (Gauss-Newton) to the maximum of the posterior; the first iteration
-is the one-step linear adjustment of Perey's STAY'SL in relative variables. The
+is iterated (Gauss-Newton) to the maximum of the posterior. The first iteration
+agrees to first order with Perey's one-step STAY'SL adjustment, which is linear in
+relative deviations; it is not equal to it (here the residual is ``ln(M/C)`` and
+the flux ``phi exp(x)``). The
 cross sections are not adjusted: their relative covariance is folded into that of
 the data, ``V + F C_sigma F^T`` with ``F`` the share of each rate in each
 covariance interval at the current spectrum. Each step is
@@ -54,7 +56,8 @@ class SpectrumAdjustment:
     log_covariance : numpy.ndarray
         The posterior covariance of ``ln phi_g``, ``n x n``.
     one_step_flux : numpy.ndarray
-        The flux after the first iteration alone (the linear one-step adjustment).
+        The flux after the first Gauss-Newton iteration alone; it agrees with a linear
+        one-step adjustment to first order.
     names : tuple of str
         The dosimeters, in the order of every per-dosimeter array.
     measured_rates, prior_rates, adjusted_rates : numpy.ndarray

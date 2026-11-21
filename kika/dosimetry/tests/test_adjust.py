@@ -144,3 +144,16 @@ def test_no_convergence_raises(monkeypatch):
     rates = np.array([response_cells(prior, d).sum() for d in dosimeters])
     with pytest.raises(AdjustmentNotConverged):
         adjust_spectrum(prior, dosimeters, rates * 1.3, np.diag(np.full(6, 0.04**2)))
+
+
+def test_the_folded_cross_section_covariance_is_the_interval_shares_sandwich():
+    prior = SpectrumPrior(EDGES, _flux(), _prior_covariance())
+    dosimeters = [_dosimeter(t) for t in THRESHOLDS]
+    cells = [response_cells(prior, d) for d in dosimeters]
+    x = np.random.default_rng(5).normal(scale=0.1, size=30)
+    _, _, folded = adjust_module._linearise(x, cells, [d.cell_covariance for d in dosimeters])
+    for i, (c, d) in enumerate(zip(cells, dosimeters)):
+        moved = c * np.exp(x)[:, None]
+        share = moved.sum(axis=0)[:-1] / moved.sum()
+        assert folded[i, i] == pytest.approx(share @ d.relative_covariance @ share, rel=1e-12)
+    assert np.count_nonzero(folded - np.diag(np.diag(folded))) == 0
