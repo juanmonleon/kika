@@ -270,3 +270,23 @@ def test_dosimeters_of_one_reaction_with_different_covariances_are_refused():
     b = Dosimeter("B", a.energies, a.cross_section, 2, a.covariance_edges, 2 * a.relative_covariance, reaction="A")
     with pytest.raises(ValueError, match="different covariances"):
         adjust_spectrum(prior, [a, b], [1.0, 1.0], np.eye(2) * 0.01)
+
+
+def test_a_free_normalization_of_one_group_is_the_weighted_mean_in_closed_form():
+    prior = SpectrumPrior([1e6, 2e6], [3e9], [[0.2**2]])
+    a = Dosimeter("a", [1e6, 2e6], [0.2, 0.2], 2)
+    b = Dosimeter("b", [1e6, 2e6], [0.5, 0.5], 2)
+    rates = np.array([response_cells(prior, d).sum() for d in (a, b)])
+    r = np.log([1.30, 1.10])
+    v = np.array([0.03**2, 0.05**2])
+    result = adjust_spectrum(prior, [a, b], rates * np.exp(r), np.diag(v), free_normalization=True)
+
+    w = (1 / v) / np.sum(1 / v)
+    mean = w @ r
+    assert result.dof == 1
+    assert result.normalization == pytest.approx(np.exp(mean), rel=1e-12)
+    assert result.chi2 == pytest.approx((r[0] - r[1]) ** 2 / v.sum(), rel=1e-4)
+    assert result.flux[0] == pytest.approx(3e9 * np.exp(mean), rel=1e-4)
+    left = v - 1 / np.sum(1 / v)
+    np.testing.assert_allclose(result.standardized_residuals, (r - mean) / np.sqrt(left), rtol=1e-9)
+    assert result.log_covariance[0, 0] == pytest.approx(1 / np.sum(1 / v), rel=1e-4)
