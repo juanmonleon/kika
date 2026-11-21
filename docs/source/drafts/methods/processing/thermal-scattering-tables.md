@@ -99,8 +99,10 @@ outgoing energy a set of equiprobable discrete cosines), and the highest inciden
 The S(α,β) path reproduces THERMR (`calcem`, `sigl`, `sig`, `terpq`) and ACER
 (`acesix` with `iwt=2`) step by step at each incident energy, with their roundings, and
 adds incident energies where THERMR's fixed grid is too coarse; the reasons are under
-*Conventions and choices*. The free-gas path keeps THERMR's incident grid and outgoing
-panels and replaces the angular integration and the final table by exact ones.
+*Conventions and choices*. One departure: where THERMR's `sigl` stops with "no legal
+solution" for a cosine bin, kika takes the end of the panel and goes on. The free-gas path
+keeps THERMR's incident grid and outgoing panels and replaces the angular integration and
+the final table by exact ones.
 
 ### Inputs from the scattering law
 

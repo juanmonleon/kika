@@ -1,13 +1,6 @@
-/* Thermal incoherent inelastic scattering, NJOY THERMR's calcem/sigl/sig/terpq
- * (thermr.f90, NJOY2016) ported line for line, for kika.processing.thermal.
- * iinc = 2 is the tabulated S(alpha,beta); iinc = 1 the free gas (sig label 200).
- *
- * One call computes one incident energy: the adaptive outgoing-energy grid,
- * sigma(E->E') and the nbin equiprobable cosines at each E', and the
- * integrated cross section, exactly as calcem writes them before ACER. The
- * control flow keeps THERMR's labels as gotos so it can be read beside the
- * Fortran. Float64 only, strict IEEE: no fast-math.
- */
+/* Derived from NJOY2016.80 (see NOTICE): THERMR's calcem/sigl/sig/terpq, util's sigfig and ACER's
+ * acesix (iwt = 2), keeping THERMR's labels as gotos. The free gas (iinc = 1) is kika's own closed-form
+ * angular integration, not THERMR's; the departures are listed in the thermal-scattering-tables page. */
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <float.h>
@@ -113,7 +106,7 @@ static double terpq(double x1, double y1, double x2, double y2,
     return y;
 }
 
-/* thermr.f90 sig: iinc=2 (tabulated S(alpha,beta)) or iinc=1 (free gas) */
+/* thermr.f90 sig for iinc = 2; iinc = 1 is its label 200 without the alpha floor and the sigmin cut */
 static double sig(const Ctx *c, double e, double ep, double u) {
     const double sigmin = 1e-10, amin = 1e-6, test1 = 0.2, test2 = 30.0;
     double tev = c->tev, rtev = 1.0 / tev;
@@ -506,7 +499,7 @@ l170:
     xn = xl + (fract - sum) / yl;
     if (xn > x[i]) goto l180;
     if (xn >= xl && xn <= x[i]) goto l190;
-    goto l180;  /* THERMR stops with 'no legal solution'; take the panel end */
+    goto l180;  /* here and after l175 THERMR stops with 'no legal solution'; kika takes the panel end */
 l175:
     f = (y[i] - yl) * xil;
     rf = 1 / f;

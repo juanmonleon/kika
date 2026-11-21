@@ -9,10 +9,11 @@ representation (ACER ``iwt = 2``) the official libraries carry. The method is
 documented in the manual (``methods/processing/thermal-scattering-tables``).
 
 - **THERMR** (``thermr.f90`` ``calcem``/``sigl``/``sig``/``terpq``) runs in C
-  (``kika/processing/_thermal_native.c``), ported line for line: the
-  quadratic interpolation of ln S, the liquid (diffusion) branch, the
-  short-collision-time tail, the adaptive outgoing-energy and cosine grids
-  with their ``sigfig`` roundings.
+  (``kika/processing/_thermal_native.c``, derived from NJOY2016: see ``NOTICE``),
+  step by step for S(alpha, beta): the quadratic interpolation of ln S, the
+  liquid (diffusion) branch, the short-collision-time tail, the adaptive
+  outgoing-energy and cosine grids with their ``sigfig`` roundings. Where THERMR
+  stops with "no legal solution" for a cosine bin, the kernel takes the panel end.
 - **ACER** (``aceth.f90`` ``acesix``, ``iwt = 2``) is the merge of every
   interval whose accumulated area is below 1e-6 b into the next, and the
   normalisation to pdf and cdf; the cosines of the first and last outgoing
