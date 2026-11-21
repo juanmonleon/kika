@@ -119,7 +119,7 @@ class Dosimeter:
     reaction : str, optional
         The reaction whose cross-section parameters the adjustment uses for this
         dosimeter; *name* by default. Two dosimeters of one reaction (a foil bare
-        and one covered, :func:`covered`) share those parameters, so they must
+        and one covered, :func:`~kika.dosimetry.covered`) share those parameters, so they must
         state the same covariance.
 
     Raises

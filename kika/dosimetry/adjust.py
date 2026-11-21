@@ -90,7 +90,7 @@ class SpectrumAdjustment:
     iterations : int
         The Gauss-Newton steps taken.
     cross_section_factors : dict
-        Reaction (:attr:`Dosimeter.reaction`) to the adjusted over prior cross section on each of its
+        Reaction (the dosimeters' *reaction*) to the adjusted over prior cross section on each of its
         covariance intervals (posterior median), for every reaction with a
         covariance.
     cross_section_log_covariance : dict
@@ -338,13 +338,13 @@ def adjust_spectrum(prior: SpectrumPrior, dosimeters: Sequence[Dosimeter], measu
         The calculated spectrum with its relative covariance.
     dosimeters : sequence of Dosimeter
         One per measured rate. Dosimeters of the same reaction
-        (:attr:`Dosimeter.reaction`: two foils, or one foil bare and one covered)
+        (their *reaction*: two foils, or one foil bare and one covered)
         share its cross-section parameters; different reactions' cross sections are
         taken as uncorrelated.
     measured_rates : array_like
         One positive rate per dosimeter, per target atom and per unit time of the
         prior's flux (saturation rates, with every decay and burn-up correction
-        already applied; a cover is part of the dosimeter, :func:`covered`).
+        already applied; a cover is part of the dosimeter, :func:`~kika.dosimetry.covered`).
     measured_covariance : array_like
         The relative covariance of the measured rates, square, symmetric;
         correlations between dosimeters are allowed.
@@ -352,11 +352,10 @@ def adjust_spectrum(prior: SpectrumPrior, dosimeters: Sequence[Dosimeter], measu
         Whether the absolute level of the prior is unknown and left to the data
         (a calculation in arbitrary units, or one whose source strength is not
         known). The prior is first scaled by the generalized least-squares estimate
-        of the common factor (:attr:`SpectrumAdjustment.normalization`), and that
-        factor then gets a prior variance of :data:`FREE_NORMALIZATION_VARIANCE` in
-        ``ln``, so its posterior comes from the data alone; the chi-square has one
-        degree of freedom fewer. False takes the prior's level, with the
-        uncertainty its covariance states.
+        of the common factor (the result's *normalization*), and that factor then
+        gets a prior variance of 100 in ``ln``, so its posterior comes from the
+        data alone; the chi-square has one degree of freedom fewer. False takes
+        the prior's level, with the uncertainty its covariance states.
 
     Returns
     -------

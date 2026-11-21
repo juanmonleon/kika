@@ -1,10 +1,12 @@
 """Covers: a foil inside an absorbing shell (cadmium, gadolinium, boron) sees less of the flux.
 
-For a thin foil inside a thin slab cover in an isotropic flux, the fraction of the
-scalar flux that reaches the foil is ``E2(N sigma_a(E))``, with ``N`` the cover's
-atoms per barn and ``sigma_a`` its absorption cross section (a scattered neutron is
-not lost in an isotropic field, to first order). ``E2`` is the second exponential
-integral; at normal incidence the fraction would be ``exp(-N sigma_a)``.
+The transmission is a function of the cover's optical thickness ``tau = N sigma(E)``
+(``N`` its atoms per barn, ``sigma`` the cross section the caller chooses: absorption,
+or absorption plus a fraction of scattering). Two limits are offered, and the choice
+is the caller's: ``exp(-tau)`` for a beam at normal incidence, the exponential
+attenuation most dosimetry codes apply with an effective thickness, and ``E2(tau)``
+for a thin foil inside a thin slab in an isotropic flux. Covers that need more (a
+thick cover, a sphere, scattering in the cover) need a transport calculation.
 """
 from __future__ import annotations
 
@@ -15,7 +17,7 @@ from kika.algebra import evaluate, refine, sample_on_union, union, validate
 
 from .response import Dosimeter
 
-__all__ = ["COVER_TOLERANCE", "covered", "cover_transmission"]
+__all__ = ["COVER_TOLERANCE", "INCIDENCES", "covered", "cover_transmission"]
 
 #: Relative tolerance of the lin-lin tables of a transmission and of a covered cross section.
 COVER_TOLERANCE = 1e-3
@@ -37,42 +39,54 @@ def _refined(x, y, value, tol):
     return result.x, result.y
 
 
-def cover_transmission(energies, cross_section, laws, areal_density: float,
+#: The transmission of each incidence, as a function of the optical thickness.
+INCIDENCES = {"normal": lambda tau: np.exp(-tau), "isotropic": lambda tau: expn(2, tau)}
+
+
+def cover_transmission(energies, cross_section, laws, areal_density: float, incidence: str,
                        tol: float = COVER_TOLERANCE):
-    """The fraction of an isotropic flux that reaches a thin foil inside a slab cover.
+    """The fraction of the flux that reaches a thin foil inside a cover.
 
     Parameters
     ----------
     energies, cross_section, laws
-        The cover's absorption cross section (eV, barns; one ENDF law per interval
-        or one for all), for an element its natural mixture (IRDFF-II gives Cd,
-        Gd and B as covers, MT101).
+        The cover's attenuating cross section (eV, barns; one ENDF law per interval
+        or one for all), for an element its natural mixture. IRDFF-II gives the
+        total, elastic and absorption cross sections of B, B-10, Cd and Gd for
+        this.
     areal_density : float
         The cover's atoms per barn: number density in atoms/(b cm) times the
-        thickness in cm.
+        thickness in cm (an effective thickness, for a code that fits one).
+    incidence : {"normal", "isotropic"}
+        ``"normal"``: ``exp(-tau)``, a beam through the cover. ``"isotropic"``:
+        ``E2(tau)``, a thin slab cover in an isotropic flux.
     tol : float
         Relative tolerance of the lin-lin table.
 
     Returns
     -------
     tuple of numpy.ndarray
-        ``(x, t)``, lin-lin: ``t = E2(areal_density x sigma_a)``, between 0 and 1,
-        on the cross section's grid refined to *tol*. Outside the table's
-        energies the cover is taken as transparent.
+        ``(x, t)``, lin-lin, ``t`` between 0 and 1 for ``tau = areal_density x
+        sigma``, on the cross section's grid refined to *tol*. Outside the
+        table's energies the cover is taken as transparent.
 
     Raises
     ------
     ValueError
-        If the table is not valid or *areal_density* is negative.
+        If the table is not valid, *areal_density* is negative or *incidence* is
+        not one of the two.
     """
     x, y, laws = validate(energies, cross_section, laws)
     if not areal_density >= 0:
         raise ValueError(f"areal_density must be zero or positive, got {areal_density!r}")
+    if incidence not in INCIDENCES:
+        raise ValueError(f"incidence must be one of {sorted(INCIDENCES)}, got {incidence!r}")
+    transmit = INCIDENCES[incidence]
 
     def value(q):
-        return expn(2, areal_density * evaluate(x, y, laws, q))
+        return transmit(areal_density * evaluate(x, y, laws, q))
 
-    return _refined(x, expn(2, areal_density * sample_on_union(x, y, laws, x)), value, tol)
+    return _refined(x, transmit(areal_density * sample_on_union(x, y, laws, x)), value, tol)
 
 
 def covered(dosimeter: Dosimeter, transmission, name: str = None,
@@ -94,7 +108,7 @@ def covered(dosimeter: Dosimeter, transmission, name: str = None,
     -------
     Dosimeter
         The covered response, lin-lin, with the bare dosimeter's covariance and
-        :attr:`~Dosimeter.reaction`: an adjustment gives both the same
+        *reaction*: an adjustment gives both the same
         cross-section parameters.
 
     Raises

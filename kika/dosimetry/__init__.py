@@ -8,13 +8,13 @@ adjusted spectrum, its covariance and the consistency of the measurements.
 """
 from .response import BARN_CM2, Dosimeter, SpectrumPrior, response_cells
 from .adjust import AdjustmentNotConverged, SpectrumAdjustment, adjust_spectrum
-from .cover import COVER_TOLERANCE, cover_transmission, covered
+from .cover import COVER_TOLERANCE, INCIDENCES, cover_transmission, covered
 from .model import dosimeter_from_suite
 from .prior import nuclear_data_covariance, prior_covariance
 
 __all__ = [
     "BARN_CM2", "Dosimeter", "SpectrumPrior", "response_cells",
     "AdjustmentNotConverged", "SpectrumAdjustment", "adjust_spectrum",
-    "COVER_TOLERANCE", "cover_transmission", "covered",
+    "COVER_TOLERANCE", "INCIDENCES", "cover_transmission", "covered",
     "dosimeter_from_suite", "nuclear_data_covariance", "prior_covariance",
 ]

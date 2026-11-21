@@ -1,4 +1,4 @@
-"""Cover transmission: E2 of the cover's optical thickness, and covered responses."""
+"""Cover transmission at normal and isotropic incidence, and covered responses."""
 import numpy as np
 import pytest
 from scipy.special import expn
@@ -6,15 +6,16 @@ from scipy.special import expn
 from kika.dosimetry import Dosimeter, cover_transmission, covered
 
 
-def test_a_constant_absorption_transmits_e2_of_the_optical_thickness():
-    x, t = cover_transmission([1e-5, 1e7], [2500.0, 2500.0], 2, 1e-3)
-    np.testing.assert_allclose(t, expn(2, 2.5), rtol=1e-12)
+@pytest.mark.parametrize("incidence, expected", [("isotropic", expn(2, 2.5)), ("normal", np.exp(-2.5))])
+def test_a_constant_cross_section_transmits_the_law_of_its_incidence(incidence, expected):
+    x, t = cover_transmission([1e-5, 1e7], [2500.0, 2500.0], 2, 1e-3, incidence)
+    np.testing.assert_allclose(t, expected, rtol=1e-12)
 
 
 def test_a_1_over_v_absorber_is_refined_to_the_tolerance():
     e = np.geomspace(1e-5, 1e3, 9)
     sigma = 2500.0 * np.sqrt(0.0253 / e)
-    x, t = cover_transmission(e, sigma, 5, 1e-3, tol=1e-4)
+    x, t = cover_transmission(e, sigma, 5, 1e-3, "isotropic", tol=1e-4)
     q = np.geomspace(1e-5, 1e3, 2000)
     exact = expn(2, 1e-3 * 2500.0 * np.sqrt(0.0253 / q))
     floor = 1e-9 * exact.max()
@@ -32,6 +33,8 @@ def test_a_covered_cross_section_is_the_product_and_keeps_steps():
     assert cut.energies[step].tolist() == [10.0]
 
 
-def test_a_negative_areal_density_is_refused():
+def test_a_negative_areal_density_or_an_unknown_incidence_is_refused():
     with pytest.raises(ValueError, match="areal_density"):
-        cover_transmission([1.0, 2.0], [1.0, 1.0], 2, -1.0)
+        cover_transmission([1.0, 2.0], [1.0, 1.0], 2, -1.0, "normal")
+    with pytest.raises(ValueError, match="incidence"):
+        cover_transmission([1.0, 2.0], [1.0, 1.0], 2, 1.0, "oblique")
