@@ -103,8 +103,8 @@ class SpectrumAdjustment:
         groups of zero prior flux; with a free normalization, that of its shape.
     notes : tuple of str
         What the report should say about the inputs: reactions with no covariance
-        (taken as exact), and covariances with negative eigenvalues no larger than
-        eigensolver round-off.
+        (taken as exact), covariances with negative eigenvalues no larger than
+        eigensolver round-off, and a free normalization with its factor.
     normalization : float
         The factor the prior was scaled by before the adjustment: the data's
         estimate with a free normalization, 1 otherwise.

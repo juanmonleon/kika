@@ -51,9 +51,7 @@ def cover_transmission(energies, cross_section, laws, areal_density: float, inci
     ----------
     energies, cross_section, laws
         The cover's attenuating cross section (eV, barns; one ENDF law per interval
-        or one for all), for an element its natural mixture. IRDFF-II gives the
-        total, elastic and absorption cross sections of B, B-10, Cd and Gd for
-        this.
+        or one for all), for an element its natural mixture.
     areal_density : float
         The cover's atoms per barn: number density in atoms/(b cm) times the
         thickness in cm (an effective thickness, for a code that fits one).
@@ -67,8 +65,9 @@ def cover_transmission(energies, cross_section, laws, areal_density: float, inci
     -------
     tuple of numpy.ndarray
         ``(x, t)``, lin-lin, ``t`` between 0 and 1 for ``tau = areal_density x
-        sigma``, on the cross section's grid refined to *tol*. Outside the
-        table's energies the cover is taken as transparent.
+        sigma``, on the cross section's grid refined to *tol*; it spans the cross
+        section's energies only (:func:`covered` takes the cover as transparent
+        outside them).
 
     Raises
     ------

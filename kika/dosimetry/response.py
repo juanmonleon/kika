@@ -7,7 +7,8 @@ split twice: by flux group (how the rate moves when a group flux moves) and by
 the intervals of the cross section's covariance (how much of the rate each
 covariance interval carries). :func:`response_cells` gives the rate of every
 **cell**, a flux group intersected with a covariance interval; both splits are
-its row and column sums. Every integral is exact (:func:`kika.algebra.product_group_integrals`).
+its row and column sums. The integrals are :func:`kika.algebra.product_group_integrals`:
+exact for histogram and lin-lin tables, to its tolerance for the log laws.
 
 Energies are in eV, cross sections in barns. A rate is per target atom and per
 unit time of the flux: ``1e-24 cm2/b x sigma x phi``.

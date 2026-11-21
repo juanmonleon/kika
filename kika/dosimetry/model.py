@@ -5,7 +5,8 @@ MF40, which is how dosimetry libraries state isomer activation). The cross secti
 is the tabulated form, with its own interpolation laws; the covariance is the
 diagonal section of the same quantity in the suite's ``covarianceSuite``, on the
 grid the evaluation states. An absolute covariance is made relative with the cross
-section averaged over each interval with a 1/E weight, as kika's MF33 reading does.
+section averaged over each interval: with a 1/E weight from the first interval whose
+lower edge is positive, flat below it, as kika's MF33 reading does.
 """
 from __future__ import annotations
 
@@ -113,7 +114,8 @@ def dosimeter_from_suite(suite, mt: int, lfs: Optional[int] = None, name: Option
     Returns
     -------
     Dosimeter
-        The cross section in eV and b with its interpolation laws, and the relative
+        The cross section with its interpolation laws (eV and b: checked for a
+        reaction, as ENDF states it for an MF10 production), and the relative
         covariance on the evaluation's own intervals; no covariance when the suite
         holds no diagonal section for it.
 
@@ -123,10 +125,11 @@ def dosimeter_from_suite(suite, mt: int, lfs: Optional[int] = None, name: Option
         If the reaction or the form is absent, or *mt*, *lfs* and *product* do not
         name exactly one production.
     TypeError
-        If the form is not a tabulated function (reconstruct resonances first).
+        If a reaction's form is not a tabulated function (reconstruct resonances
+        first).
     ValueError
-        If the cross section states units other than eV and b, the production is not
-        an MF10 table, the covariance section does not state one matrix (a GNDS
+        If a reaction's cross section states units other than eV and b, the
+        production is not an MF10 table, the covariance section does not state one matrix (a GNDS
         ``mixed`` or ``sum``), or *lfs* is None and *mt* has no MF33 covariance but
         has productions (the final state has to be named).
     """

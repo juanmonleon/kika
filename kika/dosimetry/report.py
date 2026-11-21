@@ -197,8 +197,10 @@ def adjustment_html(result) -> str:
     parts = [f'<h2 id="ka-notes">Notes</h2><ul class="notes">{notes}</ul>'] if notes else []
     parts += [
         '<h2 id="ka-dosimeters">Dosimeters</h2><p class="lead">M/C is the measured rate over the rate '
-        'computed from the spectrum, before and after the adjustment. The pull is the residual before '
-        'the adjustment over its predictive standard deviation (flux, cross section and measurement); '
+        'computed from the spectrum, before and after the adjustment. The pull is the residual of the '
+        'measurement against the prior, linearised at the result, over its predictive standard '
+        'deviation (flux, cross section and measurement), net of the fitted factor when the '
+        'normalization is free; '
         'Δχ² is what chi2 loses without that dosimeter.</p>'
         + _table([("Dosimeter", False), ("Measured", True), ("Prior rate", True), ("M/C before", True),
                   ("Adjusted rate", True), ("M/C after", True), ("Pull", True), ("Δχ²", True)],
