@@ -467,6 +467,28 @@ def _write_master_with_replacements(
         f.writelines(out)
 
 
+def _xsdir_snippet_dirs(ace_root: str, zaids_set: set) -> list:
+    """``(sample_index, directory)`` of every per-sample xsdir snippet directory, in either layout."""
+    found = []
+    for top in sorted(os.listdir(ace_root)):
+        top_dir = os.path.join(ace_root, top)
+        if not os.path.isdir(top_dir):
+            continue
+        snippets = os.path.join(top_dir, "xsdir")
+        if top.isdigit() and os.path.isdir(snippets):
+            found.append((int(top), snippets))
+            continue
+        for zaid_str in sorted(os.listdir(top_dir)):
+            zaid_dir = os.path.join(top_dir, zaid_str)
+            if zaid_str not in zaids_set or not os.path.isdir(zaid_dir):
+                continue
+            for sample_str in sorted(os.listdir(zaid_dir)):
+                sample_dir = os.path.join(zaid_dir, sample_str)
+                if sample_str.isdigit() and os.path.isdir(sample_dir):
+                    found.append((int(sample_str), sample_dir))
+    return found
+
+
 def _rewrite_xsdir_for_zaids(
     zaids,
     output_dir: str,
@@ -477,8 +499,10 @@ def _rewrite_xsdir_for_zaids(
     Regenerate xsdir output for the given zaids from scratch:
 
       1. Re-emit each per-sample .xsdir file (one entry, properly wrapped)
-         under output_dir/ace/<temp>/<zaid>/<sample>/ — fields are taken
-         from the existing per-sample .xsdir contents (no ACE parsing).
+         under output_dir/ace/<temp>/<zaid>/<sample>/ (the ACE sampler's
+         layout) or output_dir/ace/<sample>/xsdir/ (the ENDF, PENDF and
+         combined samplers') — fields are taken from the existing per-sample
+         .xsdir contents (no ACE parsing).
 
       2. For each sample, copy `xsdir_file` and substitute every perturbed
          zaid's entry with its wrapped version, writing the result to
@@ -498,45 +522,28 @@ def _rewrite_xsdir_for_zaids(
     per_sample: dict[int, dict[str, str]] = {}
     count = 0
 
-    for temp_str in os.listdir(ace_root):
-        temp_dir = os.path.join(ace_root, temp_str)
-        if not os.path.isdir(temp_dir):
-            continue
-        for zaid_str in os.listdir(temp_dir):
-            if zaid_str not in zaids_set:
+    for sample_index, snippet_dir in _xsdir_snippet_dirs(ace_root, zaids_set):
+        for fname in os.listdir(snippet_dir):
+            if not fname.endswith(".xsdir"):
                 continue
-            zaid_dir = os.path.join(temp_dir, zaid_str)
-            if not os.path.isdir(zaid_dir):
-                continue
-            for sample_str in os.listdir(zaid_dir):
-                sample_dir = os.path.join(zaid_dir, sample_str)
-                if not os.path.isdir(sample_dir):
+            path = os.path.join(snippet_dir, fname)
+            try:
+                with open(path, 'r') as f:
+                    content = f.read()
+                fields = _parse_xsdir_entry(content)
+                if not fields or fields[0].split(".")[0] not in zaids_set:
                     continue
-                try:
-                    sample_index = int(sample_str)
-                except ValueError:
-                    continue
-                for fname in os.listdir(sample_dir):
-                    if not fname.endswith(".xsdir"):
-                        continue
-                    path = os.path.join(sample_dir, fname)
-                    try:
-                        with open(path, 'r') as f:
-                            content = f.read()
-                        fields = _parse_xsdir_entry(content)
-                        if not fields:
-                            continue
-                        new_entry = _wrap_xsdir_fields(fields)
-                        if new_entry + "\n" != content:
-                            with open(path, 'w') as f:
-                                f.write(new_entry + "\n")
-                            count += 1
-                        per_sample.setdefault(sample_index, {})[fields[0]] = new_entry
-                    except Exception as e:
-                        if logger:
-                            logger.error(
-                                f"  [ERROR] [XSDIR] Failed to rewrap {path}: {e}"
-                            )
+                new_entry = _wrap_xsdir_fields(fields)
+                if new_entry + "\n" != content:
+                    with open(path, 'w') as f:
+                        f.write(new_entry + "\n")
+                    count += 1
+                per_sample.setdefault(sample_index, {})[fields[0]] = new_entry
+            except Exception as e:
+                if logger:
+                    logger.error(
+                        f"  [ERROR] [XSDIR] Failed to rewrap {path}: {e}"
+                    )
 
     if xsdir_file and os.path.isfile(xsdir_file):
         with open(xsdir_file, 'r') as f:
