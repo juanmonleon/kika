@@ -421,10 +421,10 @@ def pointwise_cross_sections(endf, *, tolerance: float = 0.001,
     """σ(E) of every MT of a parsed tape, without NJOY, and where it came from.
 
     ``endf.pendf`` is used as it is when set: that is how a caller chooses NJOY
-    (:func:`attach_pendf`) or any other source. Otherwise a tape whose MF3 is
+    (:func:`~kika.processing.njoy_pendf_cache.attach_pendf`) or any other source. Otherwise a tape whose MF3 is
     complete (LRP≠1, or no resolved or unresolved range in MF2) gives its own
     MF3. A tape with resonance ranges is reconstructed by kika at *tolerance*,
-    through the cache of :func:`kika.sampling.resonance_region.reconstructPendf`,
+    through the cache of ``kika.sampling.resonance_region.reconstructPendf``,
     and the result is set as ``endf.pendf``. MF1, MF2 or MF3 the object was read
     without are read from ``endf.source_path``.
 
@@ -454,7 +454,8 @@ def pointwise_cross_sections(endf, *, tolerance: float = 0.001,
     ~kika.processing.resonances.UnsupportedResonanceError
         If the tape uses resonance data kika does not reconstruct; and
         ``ReconstructionConvergenceError`` if a budget runs out or a check fails.
-        Setting ``endf.pendf`` first (for instance with :func:`attach_pendf`)
+        Setting ``endf.pendf`` first (for instance with
+        :func:`~kika.processing.njoy_pendf_cache.attach_pendf`)
         avoids the reconstruction.
     """
     if getattr(endf, "pendf", None):

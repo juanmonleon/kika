@@ -319,8 +319,7 @@ def test_an_object_read_without_mf1_and_mf2_reads_them_from_its_tape(no_njoy):
 
 
 def test_a_tape_with_resonance_ranges_is_reconstructed_by_kika(monkeypatch, tmp_path):
-    # Fe-56 states a resolved range, so its MF3 is a background there; read
-    # without MF1 and MF2, the object must still not be taken for a complete one.
+    # Read without MF1/MF2, a tape with a resolved range must not pass for a complete MF3.
     from kika.endf import read_endf
     from kika.sampling import resonance_region
 

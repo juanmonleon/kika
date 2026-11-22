@@ -18,6 +18,12 @@
 
 ### Changed results
 
+- An MF33 block that sums absolute (LB=0/8/9) and relative components no longer needs NJOY.
+  `decodeCovarianceSuite` (and `kika.read`) takes σ(E) from the tape's own MF3 when it has no
+  resonance ranges, and from kika's reconstruction at 1e-3 otherwise; a PENDF set on
+  `endf.pendf` first (NJOY's, through `attach_pendf`) is still used as it is. New:
+  `kika.processing.pointwise_cross_sections`. The matrices move by at most 2e-7 (relative) from
+  the NJOY RECONR ones on the IRDFF-II and ENDF/B-VIII.1 tapes compared.
 - Atomic masses come from AME2020. U-234, U-235 and U-238 had no mass (it fell back to the mass
   number: 235.0 for 235.0439), so weight/atom conversions with uranium, the EXFOR target mass and
   the mass fallbacks of MF1/451 and MF6 move by up to about 2e-4.
@@ -32,11 +38,6 @@
 
 ### Changed
 
-- An MF33 block that sums absolute (LB=0/8/9) and relative components no longer needs NJOY.
-  `decodeCovarianceSuite` (and `kika.read`) takes σ(E) from the tape's own MF3 when it has no
-  resonance ranges, and from kika's reconstruction otherwise; a PENDF set on `endf.pendf` first
-  (NJOY's, through `attach_pendf`) is still used as it is. New:
-  `kika.processing.pointwise_cross_sections`. Against NJOY RECONR the matrices agree to 2e-7.
 - MCNP and Serpent cards are written with every number in its shortest exact form and read back
   before they are returned; a card that does not read back raises.
 - The material readers refuse what they used to skip: a nuclide listed twice for the same data
