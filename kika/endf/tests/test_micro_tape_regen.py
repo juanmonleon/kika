@@ -336,6 +336,13 @@ PHOTON_FIXTURES = {
 }
 
 
+#: MF33/MT28 of ENDF/B-VIII.1 F-19 sums LB=5 and LB=8 on a tape with no resonance
+#: ranges (LRP=0), with the MF3/MT28 that makes it relative. The section has no
+#: partner, so the cut is closed.
+MIXED_MF33 = DATA / "micro_f19_mixed_mf33.endf"
+KEEP_MIXED_MF33 = {1: {451}, 2: {151}, 3: {28}, 33: {28}}
+
+
 def activation_fixture_path(key: str) -> Path:
     """Committed activation (MF8-10) micro-tape *key*."""
     return DATA / f"micro_{key}_activation.endf"
@@ -922,9 +929,20 @@ def test_regenerate_activation_micro_tapes(co59_jendl_tape, am241_b81_tape, requ
     assert all(activation_fixture_path(k).stat().st_size > 0 for k in ACTIVATION_FIXTURES)
 
 
+@pytest.mark.skipif(not REGEN, reason="set REGEN_MICRO_TAPES=1 to rebuild the fixtures")
+def test_regenerate_mixed_mf33_micro_tape(f19_b81_tape):
+    build_cov_check(Path(f19_b81_tape), MIXED_MF33, KEEP_MIXED_MF33)
+    assert MIXED_MF33.stat().st_size > 0
+
+
 # ---------------------------------------------------------------------------
 # What the committed fixtures must satisfy
 # ---------------------------------------------------------------------------
+
+def test_mixed_mf33_inventory_is_exactly_what_we_kept():
+    inventory = section_inventory(MIXED_MF33.read_text())
+    assert {mf: set(mts) for mf, mts in inventory.items()} == KEEP_MIXED_MF33
+
 
 @pytest.mark.parametrize("key", sorted(ACTIVATION_FIXTURES))
 def test_activation_inventories_are_exactly_what_we_kept(key):

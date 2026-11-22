@@ -36,6 +36,7 @@ from .njoy_pendf_cache import (
     NjoyNotFoundError,
     attach_pendf,
     find_njoy_executable,
+    pointwise_cross_sections,
     mf33_needs_pendf,
     get_or_create_pendf,
     read_pendf_mf3_sections,
@@ -66,4 +67,5 @@ __all__ = [
     "NjoyNotFoundError",
     "attach_pendf",
     "find_njoy_executable",
+    "pointwise_cross_sections",
 ]

@@ -1,0 +1,366 @@
+ ENDF/B-VIII.1                                                         0  0
+ 9.019000+3 1.883520+1          0          0          0          1 925 1451
+ 0.000000+0 0.000000+0          0          0          0          6 925 1451
+ 1.000000+0 2.000000+7          1          0         10          8 925 1451
+ 0.000000+0 0.000000+0          0          0        235          4 925 1451
+  9-F - 19 INDEN      EVAL-DEC22 R.Capote,A.Trkov,M.Kostal+        925 1451
+  f19e80_zt9_ENDF     DIST-AUG24 REV1-NOV23            20240830    925 1451
+---- ENDF/B-VIII.1    MATERIAL  925         REVISION 1             925 1451
+----- INCIDENT-NEUTRON DATA                                        925 1451
+------ ENDF-6                                                      925 1451
+ ****************************************************************  925 1451
+ Evaluation based on ENDF/B-VIII.0 (INDEN collaboration)           925 1451
+ MT51 and MT52 reconstructed from Morgan (n,n'g) data              925 1451
+ EXFOR 10583003, 10583004 (mult.by 4pi)                            925 1451
+ Orig.Authors: CNDC,ORNL,OCT03 Z.X.Zhao,C.Y.Fu,D.C.Larson, Leal+   925 1451
+ ****************************************************************  925 1451
+Date: November 13, 2023                                            925 1451
+Evaluator: E. Chimanski                                            925 1451
+Primary cap gammas were flagged following ENSDF-TH.                925 1451
+ ****************************************************************  925 1451
+   ENDF/B-VII Evaluation, January 2015, B. W. Sleaford (LLNL)      925 1451
+            R. F. Firestone (LBNL)                                 925 1451
+The prompt gamma-ray spectrum for thermal radiative capture        925 1451
+(MF12 MT102) has been updated with new experimental data [Fi07],   925 1451
+[IAEA07]. This entailed installing new capture lines and scaling   925 1451
+the yields using the total thermal cross section in (MF 3  MT 102) 925 1451
+to conserve total decay energy compared to the thermal Q value.    925 1451
+File 15 continuum Spectra above 200 keV had errors corrected but   925 1451
+were left unchanged otherwise.                                     925 1451
+                                                                   925 1451
+ ****************************************************************  925 1451
+   ENDF/B-VII: Only high quality covariance data were migrated     925 1451
+               from ENDF/B-VI.8 (M. Herman)                        925 1451
+               For the remaining reaction channels, namely elastic 925 1451
+               scattering and radiative capture, covariances were  925 1451
+               estimated at LANL based on a brief analysis of      925 1451
+               experimental data and their agreement with the      925 1451
+               ENDF/B-VII.0 central values.                        925 1451
+ ****************************************************************  925 1451
+                                                                   925 1451
+Reevaluation of the F-19 resonance parameters in the energy range  925 1451
+up 1 MeV done by  L. C. Leal, H. Derrien (and) N. M. Greene (ORNL) 925 1451
+                                                                   925 1451
+Reevalaution of the F-19 cross sections up to 1 MeV.  Resoanance   925 1451
+parameters were obtained with the computer code SAMMY by           925 1451
+fitting three transmission measurements of Larson with thicknesses 925 1451
+of 0.13093 at/b, 0.016886 at/b, and 0.024184 at/b, respectively,   925 1451
+measured on the 80-m flight path at the Oak Ridge Linear (ORELA)   925 1451
+Accelerator, one capture cross section of Guber measure up to      925 1451
+700 keV and one inelastic cross section measumrement of Broder up  925 1451
+to 1 MeV. The result of the resonance analysis is a set of         925 1451
+resonance parameters containing thirty-five resonances which one   925 1451
+resonance is negative to account for the bound levels and three    925 1451
+lies above the cutoff energy of 1 MeV to account for the effect    925 1451
+for the truncated resonances above 1 MeV. The 31 resonances in the 925 1451
+the energy range up to 1 MeV are 2 s-wave, 5 p-wave, 17 d-wave,    925 1451
+and 7 f-wave.  In the energy up 1 MeV F-19 has inelastic channels  925 1451
+starting at the energies 109.9 keV with spin 1/2- and 197.2 keV    925 1451
+with spin 5/2+.  These two channels were included in the Reich-    925 1451
+Moore evalaution with SAMMY. At the present time, cross section    925 1451
+processing codes do not have capability to include inelastic       925 1451
+channels.  Therefore, the evaluation presented here is the         925 1451
+pointwise cross section processed with SAMMY.  The resonance       925 1451
+parameters evaluation will be released  as soon as the processing  925 1451
+codes are able to process Reich-Moore parameters with inelastic    925 1451
+channels.                                                          925 1451
+                                                                   925 1451
+The cross sections at 300 K at thermal are the following:          925 1451
+                                                                   925 1451
+                   Total    3.7496 b                               925 1451
+                   Scatting 3.7400 b                               925 1451
+                   Capture  9.5784-3 b                             925 1451
+                                                                   925 1451
+ ****************************************************************  925 1451
+                                                                   925 1451
+ ENDF/B-VI MOD 1 Evaluation, June 1990, Z.X.Zhao, C.Y. Fu,         925 1451
+                 D.C. Larson (ORNL)                                925 1451
+                                                                   925 1451
+ This evaluation is based on measured data available on csisrs     925 1451
+ and a theoretical calculation using the TNG statistical and       925 1451
+ precompound theory code [SH86,FU88].                              925 1451
+                                                                   925 1451
+ FILE 2. RESONANCE PARAMETERS                                      925 1451
+   SECTION 151 Only scattering length [KO79] is given.             925 1451
+ FILE 3.  NEUTRON CROSS SECTION                                    925 1451
+   SECTION 1.  TOTAL INTERACTION                                   925 1451
+     1.0E-05 to 10 eV: Sum of free atom scattering cross           925 1451
+       section and the capture cross section.                      925 1451
+     10 Ev to 2.0 MeV: Calculated from a set of resonance          925 1451
+     parameters which were adjusted to fit the high                925 1451
+     resolution measured total cross sections [LA76] by            925 1451
+     using the SAMMY multi-level R-matrix analysis code [LA87].    925 1451
+     2.0 MeV to 20 MeV: The values of ENDF/B-V are used.           925 1451
+   SECTION 2.  ELASTIC SCATTERING                                  925 1451
+     Obtained by subtracting the non-elastic cross section         925 1451
+     from total cross section.                                     925 1451
+   SECTION 3.  NON-ELASTIC SCATTERING                              925 1451
+     Obtained by setting MT3 =                                     925 1451
+             MT4+MT16+MT22+MT28+MT102+MT103+MT104+MT105+MT107.     925 1451
+   SECTION 4. TOTAL INELASTIC SCATTERING                           925 1451
+     Obtained by summing MT=51-71 and 91.                          925 1451
+   SECTION 16. (N,2N) REACTION                                     925 1451
+     Calculated by TNG code.                                       925 1451
+   SECTION 22. (N,NA)+(N,AN) REACTION                              925 1451
+     Calculated by TNG code.                                       925 1451
+   SECTION 28. (N,NP)+N,PN) REACTION                               925 1451
+     Calculated by TNG code.                                       925 1451
+   SECTIONS 51 AND 52. INELASTIC SCATTERING FOR FIRST AND SECOND   925 1451
+                       LEVELS                                      925 1451
+     Obtained by CS(EX)/MG(TNG), where CS(EX) denotes measured     925 1451
+     110 keV and 197 keV gamma-ray production cross section        925 1451
+     [MO74], MG(TNG) are multiplicities for 110 and 197 keV        925 1451
+     calculated by TNG.                                            925 1451
+   SECTIONS 53 - 71. INELASTIC SCATTERING FOR OTHER LEVELS         925 1451
+     Calculated by TNG and DWUCK [KU72].                           925 1451
+   SECTION 91. CONTINUUM INELASTIC SCATTERING                      925 1451
+     Calculated by TNG.                                            925 1451
+   SECTION 102. (N,GAMMA) REACTION                                 925 1451
+     1.0E-05 eV to 2.0 MeV: Calculated by SAMMY code using a set   925 1451
+     of resonance parameters used in the calculation for total     925 1451
+     cross sections, but gamma-widths were adjusted to fit the     925 1451
+     measured data of Macklin [MA63] and Gabbard [GA59].           925 1451
+     Above 2.0 MeV, capture cross sections are very small so 1/E   925 1451
+     is used to extrapolate to 20 MeV.                             925 1451
+   SECTION 103. (N,P) REACTION                                     925 1451
+     For energies < 8.0 MeV, ENDF/B-V remains unchanged.           925 1451
+     Above 8.0 MeV: Calculated by TNG code.                        925 1451
+   SECTION 104. (N,D) REACTION                                     925 1451
+     Calculated from systematics [ZH88].                           925 1451
+     The excitation function was normalized to 22 mb given by      925 1451
+     integrating early angular distribution data of Fazio [FA68],  925 1451
+     and [RE68] at 14 MeV.                                         925 1451
+   SECTION 105. (N,T) REACTION                                     925 1451
+     Calculated from systematics [ZH88]. The excitation function   925 1451
+     was normalized to spectrum averaged measured data of Qaim     925 1451
+     [QA78].                                                       925 1451
+   SECTION 107. (N,A) REACTION                                     925 1451
+     For energies < 9.0 MeV, ENDF/B-V remains unchanged.           925 1451
+     Above 9.0 MeV, calculated by TNG code.                        925 1451
+ FILE 4. ANGULAR DISTRIBUTIONS OF SECONDARY NEUTRONS               925 1451
+   SECTION 2. ELASTIC SCATTERING                                   925 1451
+     The Legendre coefficients are calculated by the GENOA         925 1451
+     optical model code [PE67] with compound cross sections        925 1451
+     and Legendre coefficients calculated by TNG as input.         925 1451
+     Before calculation, optical model parameters were adjusted    925 1451
+     to fit measured angular distributions of Baba [BA85] and      925 1451
+     Clarke [CL70]. Same optical model parameters were used in     925 1451
+     TNG, DWUCK and GENOA calculations.                            925 1451
+   SECTIONS 51-71. INELASTIC SCATTERING                            925 1451
+     The cross sections CS(D), Legendre coefficients FL(D)         925 1451
+     contributed from direct interaction were calculated by        925 1451
+     DWUCK and CS(S), FL(S) are from statistical model by          925 1451
+     TNG, using                                                    925 1451
+                       CS(D)*FL(D) + CS(S)*FL(S)                   925 1451
+                FL = ------------------------------                925 1451
+                             CS(D) + CS(S)                         925 1451
+ FILE 6. DOUBLE DIFFERENTIAL CROSS SECTIONS(DDCS)                  925 1451
+   The cross sections for all sections were obtained based on      925 1451
+   TNG calculations for the first outgoing neutrons only.  For     925 1451
+   the second outgoing neutrons and both the first and second      925 1451
+   outgoing charged particles, the angular distributions were      925 1451
+     assumed isotropic. Recoil spectra are generated as the        925 1451
+     calculated particle spectra were inverted to the laboratory   925 1451
+     system.                                                       925 1451
+ FILE 8. RADIOACTIVE DECAY DATA                                    925 1451
+ FILE 9. MULTIPLICITIES FOR PRODUCTION OF RADIOACTIVE NUCLIDES     925 1451
+ FILE 12. TRANSITION PROBABILITY ARRAYS                            925 1451
+   SECTIONS 51-71.                                                 925 1451
+     Based on [AJ87].                                              925 1451
+ FILE 14. PHOTON ANGULAR DISTRIBUTION                              925 1451
+   SECTIONS 51-71. INELASTIC SCATTERING                            925 1451
+     Isotropic.                                                    925 1451
+ FILE 33. UNCERTANTIES OF FILE 3                                   925 1451
+                                                                   925 1451
+   ENDF/B-VII: Only high quality covariance data were migrated     925 1451
+               form ENDF/B-VI.8 (M. Herman)                        925 1451
+                                                                   925 1451
+   SECTIONS 4,16,22 AND 28:                                        925 1451
+     Calculated  from a covariance matrix of theoretical           925 1451
+     parameters (several most sensitive parameters were chosen     925 1451
+     as follows: energy level density parameters for 19F, 19O      925 1451
+     and 16N; optical model parameters for 19F: V0 and W for       925 1451
+     real and imaginary well depths, RU and RW for the radius      925 1451
+     of real and imaginary potential).  The covariance matrix      925 1451
+     for theoretical parameters was estimated based on scatter     925 1451
+     of measured data available around theoretical values and      925 1451
+     systematic error of measured data. A sub-subsection of LB=8   925 1451
+     is also given for every section.                              925 1451
+ ****************************************************************  925 1451
+                                                                   925 1451
+ REFERENCES                                                        925 1451
+                                                                   925 1451
+[AJ88] F. Ajzenberg-Selove, A475, 1 (1987)                         925 1451
+[BA85] M. Baba et al., Proc. Conf. on Nucl.Data for Basic          925 1451
+   and Applied Science, Santa Fe, May 1985                         925 1451
+[CL70] W. Clarke et al., Nucl.Phys., A147, 174 and 1970)           925 1451
+[CS90] CSISRS/EXFOR data.                                          925 1451
+[FA68] M. Fazio et al., Nucl.Phys., A111, 255                      925 1451
+[Fi07] Data derived from the Evaluated Gamma-ray Activation File   925 1451
+   (EGAF) as described in "Database of Prompt Gamma Rays from      925 1451
+   Slow Neutron Capture for Elemental Analysis", R.B.              925 1451
+   Firestone, H.D. Choi, R.M. Lindstrom, G.L. Molnar, S.F.         925 1451
+   Mughabghab, R. Paviotti-Corcuera, Zs. Revay, V. Zerkin,         925 1451
+   and C.M. Zhou, IAEA Technical Report Series, STI/PUB/1263(2007) 925 1451
+[FU88] C.Y. Fu, Nucl.Sci.Eng., 100, 61 (1988)                      925 1451
+[GA59] F. Gabbard et al., Phys.Rev., 114, 201 (1959)               925 1451
+[KO79] L. Koester et al., Z.Physik, A292, 95 (1979)                925 1451
+[KU72] P.D. Kunz, "Distored Wave Code DWUCK72", University of      925 1451
+   Colorado (1972)                                                 925 1451
+[LA76] D.C.Larson et al., Oak Ridge report ORNL-TM-5612 (1976)     925 1451
+[LA87] N.M. Larson, Oak Ridge report ORNL/TM-9179 (1987)           925 1451
+[MA63] R.L. Macklin et al., Phys.Rev., C7, 1766 (1963)             925 1451
+[M074] G.L. Morgan and J.K. Dickens, Oak Ridge report ORNL/TM-4823 925 1451
+   (1974)                                                          925 1451
+[PE67] F.G. Perey, computer code GENOA, ORNL, unpublished (1967)   925 1451
+[QA78] S.M. Qaim et al., Nucl.Phys., A295, 150 (1978)              925 1451
+[SH86] K. Shibata and C.Y. Fu, Oak Ridge report ORNL/TM-10093      925 1451
+   (1986)                                                          925 1451
+[ZH88] Z. Zhao and Z. Zhou, Nucl.Sci.Eng., 99, 367 (1988)          925 1451
+                                                                   925 1451
+ ************************ C O N T E N T S ***********************  925 1451
+ **************** Program DICTIN (VERSION 2012-1) **************** 925 1451
+ ***************** Program LINEAR (VERSION 2018-1) *************** 925 1451
+ For All Data Greater than 1.0000E-10 barns in Absolute Value      925 1451
+ Data Linearized to Within an Accuracy of .100000000 per-cent      925 1451
+ ***************** Program FIXUP (Version 2018-1) **************** 925 1451
+ Corrected ZA/AWR in All Sections-----------------------------Yes  925 1451
+ Corrected Thresholds-----------------------------------------No   925 1451
+ Extended Cross Sections to 20 MeV----------------------------Yes  925 1451
+ Allow Cross Section Deletion---------------------------------Yes  925 1451
+ Allow Cross Section Reconstruction---------------------------Yes  925 1451
+ Make All Cross Sections Non-Negative-------------------------No   925 1451
+ Delete Energies Not in Ascending Order-----------------------Yes  925 1451
+ Deleted Duplicate Points-------------------------------------No   925 1451
+ Check for Ascending MAT/MF/MT Order--------------------------Yes  925 1451
+ Check for Legal MF/MT Numbers--------------------------------Yes  925 1451
+ Allow Creation of Missing Sections---------------------------No   925 1451
+ Allow Insertion of Energy Points-----------------------------Yes  925 1451
+ Uniform Energy Grid for ALL MT-------------------------------Yes  925 1451
+ Delete Section if Cross Section =0 at All Energies-----------Yes  925 1451
+                                1        451        243          0 925 1451
+                                2        151          4          0 925 1451
+                                3         28         96          0 925 1451
+                               33         28         12          0 925 1451
+ 0.000000+0 0.000000+0          0          0          0          0 925 1  0
+ 0.000000+0 0.000000+0          0          0          0          0 925 0  0
+ 9.019000+3 1.883520+1          0          0          1          0 925 2151
+ 9.019000+3 1.000000+0          0          0          1          0 925 2151
+ 1.000000-5 2.000000+7          0          0          0          0 925 2151
+ 5.000000-1 5.360000-1          0          0          0          0 925 2151
+ 0.000000+0 0.000000+0          0          0          0          0 925 2  0
+ 0.000000+0 0.000000+0          0          0          0          0 925 0  0
+ 9.019000+3 1.883520+1          0          0          0          0 925 3 28
+-7.993000+6-7.993000+6          0          0          1        279 925 3 28
+        279          2          0          0          0          0 925 3 28
+ 8.417400+6 0.000000+0 8.418000+6 6.802270-9 8.450000+6 3.695900-7 925 3 28
+ 8.480000+6 7.097030-7 8.485281+6 7.695740-7 8.500000+6 9.364450-7 925 3 28
+ 8.530000+6 1.276560-6 8.577980+6 1.820510-6 8625000.01 2.353580-6 925 3 28
+ 8.631000+6 2.421610-6 8.638780+6 2.509810-6 8.660000+6 2.750380-6 925 3 28
+ 8.670000+6 2.863750-6 8.675000+6 2.920440-6 8.699590+6 3.199220-6 925 3 28
+ 8.700000+6 3.203870-6 8.701200+6 3.217470-6 8.719850+6 3.428910-6 925 3 28
+ 8.720000+6 3.430610-6 8.750000+6 3.770720-6 8.780660+6 4.118320-6 925 3 28
+ 8812500.01 4.479290-6 8.860000+6 5.017800-6 8.875000+6 5.187860-6 925 3 28
+ 8.922540+6 5.726830-6 8.975000+6 6.321570-6 9.000000+6 6.605000-6 925 3 28
+ 9.003610+6 6.825690-6 9007812.51 7.082600-6 9015502.95 7.586460-6 925 3 28
+ 9023073.22 8.117440-6 9030525.22 8.676400-6 9037860.77 9.264210-6 925 3 28
+ 9045081.71 9.881720-6 9052189.81 1.052980-5 9059186.86 1.120920-5 925 3 28
+ 9066074.57 1.192080-5 9072854.67 1.266540-5 9079528.82 1.344370-5 925 3 28
+  9086098.7 1.425660-5 9092565.91 1.510480-5 9098932.08 1.598910-5 925 3 28
+ 9105198.78 1.691000-5 9111367.55 1.786840-5 9117439.95 1.886480-5 925 3 28
+ 9123417.46 1.989980-5 9.125220+6 2.022890-5 9129301.57 2.097420-5 925 3 28
+ 9135093.74 2.208840-5 9140795.41 2.324300-5 9146407.99 2.443850-5 925 3 28
+ 9151932.88 2.567540-5 9157371.44 2.695400-5 9162725.02 2.827480-5 925 3 28
+ 9167994.95 2.963830-5 9173182.54 3.104450-5 9178289.07 3.249400-5 925 3 28
+ 9183315.81 3.398690-5 9193212.21 3.712950-5 9202799.33 4.045080-5 925 3 28
+ 9212086.86 4.395120-5 9221084.16 4.763090-5 9.226560+6 5.005480-5 925 3 28
+ 9229800.29 5.148920-5 9238244.04 5.552460-5 9246423.92 5.973530-5 925 3 28
+ 9250000.01 6.171350-5 9254348.19 6.411870-5 9262024.81 6.867170-5 925 3 28
+ 9269461.55 7.339040-5 9276665.88 7.827060-5 9283645.09 8.330760-5 925 3 28
+ 9290406.19 8.849610-5 9.296956+6 9.383040-5 9303301.14 9.930450-5 925 3 28
+ 9309447.99 1.049120-4 9315402.75 1.106460-4 9321171.42 1.164990-4 925 3 28
+ 9326759.82 1.224650-4 9332173.59 1.285350-4 9337418.17 1.347020-4 925 3 28
+ 9342498.87 1.409590-4 9.348170+6 1.484270-4  9352342.7 1.539210-4 925 3 28
+ 9361571.29 1.671520-4 9370223.09 1.805880-4 9378334.16 1.941640-4 925 3 28
+ 9385938.28 2.078160-4 9393067.15 2.214860-4 9399750.46 2.351170-4 925 3 28
+ 9406016.07 2.486570-4 9411890.07 2.620580-4 9417396.95 2.752760-4 925 3 28
+ 9422559.65 2.882740-4  9432239.7 3.143210-4 9440709.75 3.390350-4 925 3 28
+ 9448121.04 3.622490-4 9454605.92 3.838620-4 9460280.19 4.038280-4 925 3 28
+ 9.464700+6 4.205070-4 9.469780+6 4.396770-4 9470210.15 4.413000-4 925 3 28
+ 9477657.62 4.716690-4 9483243.22 4.958100-4 9.486833+6 5.123250-4 925 3 28
+ 9491621.62 5.343560-4 9.500000+6 5.759000-4 9515625.01 6.056350-4 925 3 28
+ 9530761.74 6.359040-4 9545425.44 6.666700-4 9559630.91 6.978920-4 925 3 28
+ 9587153.98 7.626080-4 9.591390+6 7.734610-4 9612956.87 8.287190-4 925 3 28
+ 9625000.01 8.621620-4 9637147.08 8.958940-4 9659825.39 9.638070-4 925 3 28
+ 9681086.31 1.032144-3 9701018.43 1.100605-3 9.712990+6 1.144362-3 925 3 28
+ 9.719200+6 1.167060-3 9719704.79 1.168905-3 9737223.25 1.236781-3 925 3 28
+  9753646.8 1.303990-3 9769043.89 1.370311-3 9783478.65 1.435548-3 925 3 28
+ 9810543.83 1.566354-3 9834225.86 1.690550-3 9854947.64 1.807274-3 925 3 28
+ 9873079.19 1.916000-3  9888944.3 2.016487-3 9902826.27 2.108727-3 925 3 28
+ 9927119.71 2.280416-3 9945339.79 2.418296-3 9.950000+6 2.456254-3 925 3 28
+  9972669.9 2.640902-3 9.976480+6 2.674792-3 9.982400+6 2.727450-3 925 3 28
+ 1.000000+7 2.884000-3 10031250.1 3.046184-3 10060547.1 3.206506-3 925 3 28
+   10088013 3.364462-3 1.010000+7 3.436686-3 10113762.2 3.519606-3 925 3 28
+ 10162042.1 3.830041-3 1.020000+7 4.094218-3 10204286.9 4.124053-3 925 3 28
+ 10241251.1 4.399769-3 10273594.8 4.656100-3 10301895.5 4.892611-3 925 3 28
+ 10351421.7 5.335778-3 1.038100+7 5.621271-3 10388566.4 5.694303-3 925 3 28
+ 1.040120+7 5.823375-3 10416424.9 5.978920-3 10458212.5 6.432737-3 925 3 28
+ 1.050000+7 6.921000-3 10562500.1 7.438458-3 10617187.7 7.922874-3 925 3 28
+ 1.062420+7 7.988771-3 10665039.3 8.372547-3 10706909.5 8.786898-3 925 3 28
+ 1.077280+7 9.483876-3 10780182.2 9.561963-3 10835136.7 .010187805 925 3 28
+ 1.085200+7 1.039079-2 10876352.6 .010683924 10938176.3 .011473767 925 3 28
+ 1.098000+7 .012047596 1.098500+7 .012116197 1.098540+7 .012121685 925 3 28
+ 1.098590+7 .012128545 1.098700+7 .012143637 1.099580+7 .012264375 925 3 28
+ 1.100000+7 1.232200-2 11062500.1 .012978124 1.110000+7 .013392082 925 3 28
+ 11121093.9 .013624936 11176025.7 .014260569 1.120000+7 .014556841 925 3 28
+ 11279022.5 .015533392 1.129300+7 .015720525 1.130000+7 .015814242 925 3 28
+ 11369144.8 .016739966 1.140000+7 .017183048 1.144170+7 .017781862 925 3 28
+ 11448001.8 .017872356 1.150000+7 .018666275 11517001.7 1.892586-2 925 3 28
+ 11577376.5 .019898495 1.159030+7 .020121591 1.160000+7 .020289041 925 3 28
+ 11683032.5 .021722421 1.170000+7 .022038647 11762274.4 .023199266 925 3 28
+ 1.180000+7 .023943957 1.181320+7 .024204521 11821705.9 .024372425 925 3 28
+ 1.190000+7 .026016439   11910853 .026244329 1.195700+7 .027287742 925 3 28
+ 1.200000+7 2.826000-2 1.210000+7 2.971726-2 12125000.1 .030081576 925 3 28
+ 1.218480+7 .031005538 1.220000+7 .031240392 12234375.2 .031771519 925 3 28
+ 1.230000+7 .032838761 12330078.4 .033327918 1.240000+7 .034542566 925 3 28
+ 1.248210+7 .035968772 12497558.8 .036237316 1.250000+7 .036282939 925 3 28
+ 1.260000+7 .038151847 12623169.2 .038584858 1.270000+7 .040101717 925 3 28
+ 1.270500+7 .040200431   12717377 .040444788 1.280000+7 .042175075 925 3 28
+ 1.285370+7 .043299658 12858688.5 .043404128 1.300000+7 4.658000-2 925 3 28
+ 13250000.1 .049865708 1.329960+7 .050557595 1.330000+7 .050563175 925 3 28
+ 13437500.1 .052481214 1.350000+7 .053410704 1.369700+7 .056340463 925 3 28
+ 13718750.1 .056663928 1.374550+7 .057093455 1.396840+7 .060672594 925 3 28
+ 1.400000+7 6.118000-2 1.410000+7 .061993929 1.419140+7 6.273786-2 925 3 28
+ 1.434000+7 .063947359 1.450000+7 .065249646 14500000.1 .065249646 925 3 28
+ 1.454850+7 6.567066-2 1.463730+7 .066441507 1.480000+7 .067853858 925 3 28
+ 1.490000+7 .068721929 1.493450+7 .069021414 1.500000+7 6.959000-2 925 3 28
+ 1.508320+7 .070196455 1.530000+7 .071776738 1.550000+7 .073234564 925 3 28
+ 15500000.1 .073234564 1.560100+7 .074009322 1.560340+7 .074027732 925 3 28
+ 1.570000+7 .074768738 1.590000+7 .076302913 1.600000+7 7.707000-2 925 3 28
+ 1.610000+7 .077832157 1.619790+7 .078578309 1.642090+7 8.027792-2 925 3 28
+ 1.650000+7 .080880787 16500000.1 .080880787 1.671810+7 .082625243 925 3 28
+ 1.690000+7 .084080157 1.700000+7 8.488000-2 1.720000+7 8.613400-2 925 3 28
+ 1.730000+7 8.676100-2 1.750000+7 8.801500-2 17500000.1 8.801500-2 925 3 28
+ 1.770000+7 8.926900-2 1.790720+7 .090568144 1.792100+7 9.065467-2 925 3 28
+ 1.800000+7 9.115000-2 1.810000+7 9.176400-2 1.825000+7 9.268500-2 925 3 28
+ 1.850000+7 9.422000-2 1.875000+7 9.575500-2 1.890000+7 9.667600-2 925 3 28
+ 1.900000+7 9.729000-2 1.925000+7 9.864250-2 1.940000+7 9.945400-2 925 3 28
+ 1.950000+7 9.999500-2 1.990000+7 1.021590-1 2.000000+7 1.027000-1 925 3 28
+ 0.000000+0 0.000000+0          0          0          0          0 925 3  0
+ 0.000000+0 0.000000+0          0          0          0          0 925 0  0
+ 9.019000+3 1.883520+1          0          0          0          1 92533 28
+ 0.000000+0 0.000000+0          0         28          0          2 92533 28
+ 0.000000+0 0.000000+0          1          5         28          7 92533 28
+ 1.000000-5 8.417400+6 1.200000+7 1.400000+7 1.600000+7 1.800000+7 92533 28
+ 2.000000+7 0.000000+0 0.000000+0 0.000000+0 0.000000+0 0.000000+0 92533 28
+ 0.000000+0 2.528000-2 1.672000-2 1.108800-2 8.370600-3 7.659900-3 92533 28
+ 1.322600-2 1.042900-2 9.082000-3 8.635400-3 1.111000-2 1.124800-2 92533 28
+ 1.082000-2 1.263200-2 1.285100-2 1.376400-2                       92533 28
+ 0.000000+0 0.000000+0          0          8         14          7 92533 28
+ 1.000000-5 0.000000+0 8.417400+6 5.27750-11 1.200000+7 2.869600-9 92533 28
+ 1.400000+7 5.380300-9 1.600000+7 9.099400-9 1.800000+7 1.302400-8 92533 28
+ 2.000000+7 0.000000+0                                             92533 28
+ 0.000000+0 0.000000+0          0          0          0          0 92533  0
+ 0.000000+0 0.000000+0          0          0          0          0 925 0  0
+ 0.000000+0 0.000000+0          0          0          0          0   0 0  0
+ 0.000000+0 0.000000+0          0          0          0          0  -1 0  0

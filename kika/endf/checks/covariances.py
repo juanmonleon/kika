@@ -55,9 +55,9 @@ Policy (decided with the maintainer): every finding only informs. Nothing here
 raises on a bad section, changes it or proposes a remedy.
 
 A block that mixes absolute (LB=0/8/9) and relative components needs sigma(E)
-to be summed (``MF33NeedsCrossSections``). Pass ``xs_sections`` or attach a
-PENDF to the tape (``kika.processing.attach_pendf``); otherwise only its
-relative part is checked, and a note says so.
+to be summed (``MF33NeedsCrossSections``). Pass ``xs_sections`` (for instance
+from ``kika.processing.pointwise_cross_sections``) or set ``endf.pendf``;
+otherwise only its relative part is checked, and a note says so.
 """
 from __future__ import annotations
 

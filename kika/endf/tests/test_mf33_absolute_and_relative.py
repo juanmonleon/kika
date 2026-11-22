@@ -8,12 +8,13 @@ found it counts
 15 039 mixed blocks in 500 JEFF-4.0 tapes, and the summed LB=8 dominates in the
 tail: x6400 on Eu-154 MT3.
 
-The synthetic cases pin the rules; the Si-28 case runs the whole path through
-NJOY on a real LB=5+8 evaluation.
+The synthetic cases pin the rules; the F-19 cut runs the whole path on a real
+LB=5+8 block without NJOY, and the Si-28 case runs it through NJOY.
 """
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -143,7 +144,7 @@ def test_a_mixed_block_without_sigma_refuses_and_says_how_to_fix_it():
         _section([rel, lb8])._process_ni_records_to_matrix([rel, lb8], mt_label="MT1")
     text = str(err.value)
     assert "LB=[8]" in text and "LB=[5]" in text
-    assert "attach_pendf" in text and "NJOY" in text
+    assert "pointwise_cross_sections" in text
 
 
 def test_to_xs_covmat_reads_sigma_from_mf3_sections():
@@ -228,13 +229,13 @@ def test_lb8_no_longer_counts_as_relative_for_the_pendf_sentinel():
     assert cache.mf33_needs_pendf(mf33, 2) is True
 
 
-def test_the_suite_decode_refuses_a_mixed_block_when_it_has_nothing_to_run_njoy_on():
+def test_the_suite_decode_refuses_a_mixed_block_when_it_has_no_tape_to_read_sigma_from():
     from kika.endf.model_adapter import decodeCovarianceSuite
     endf = ENDF()
     mf = MF(number=33)
     mf.add_section(_section([_lb5([0.01, 0.002, 0.04]), _table(8, [0.04, 0.09])]))
     endf.add_file(mf)
-    with pytest.raises(cache.NjoyNotFoundError, match="does not know which file"):
+    with pytest.raises(ValueError, match="does not know which file"):
         decodeCovarianceSuite(endf)
 
 
@@ -247,8 +248,106 @@ def test_the_suite_decode_uses_a_pendf_already_attached():
     endf.pendf = {1: _xs(2.0)}
     suite, report = decodeCovarianceSuite(endf, target="Si28")
     (section,) = suite.covarianceSections
-    assert any("NJOY" in w for w in report.warnings)
+    assert any("σ(E) from `endf.pendf`" in w for w in report.warnings)
     assert section is not None
+
+
+# --------------------------------------------------------------------------
+# σ(E) without NJOY: the tape's MF3, or kika's reconstruction
+# --------------------------------------------------------------------------
+
+MIXED_F19 = Path(__file__).resolve().parent / "data" / "micro_f19_mixed_mf33.endf"
+
+
+@pytest.fixture
+def no_njoy(monkeypatch):
+    """NJOY, the cache that runs it and kika's reconstruction all raise if reached."""
+    import importlib
+
+    from kika.sampling import resonance_region
+
+    reconstruct = importlib.import_module("kika.processing.njoy_reconstruct")
+
+    def reached(*args, **kwargs):
+        raise AssertionError("σ(E) was reconstructed")
+
+    monkeypatch.setattr(cache, "find_njoy_executable", reached)
+    monkeypatch.setattr(reconstruct, "njoy_reconstruct_stream", reached)
+    monkeypatch.setattr(resonance_region, "reconstructPendf", reached)
+
+
+def test_a_tape_without_resonance_ranges_makes_the_block_relative_with_its_own_mf3(no_njoy):
+    from kika.endf import read_endf
+    from kika.endf.model_adapter import decodeCovarianceSuite
+
+    endf = read_endf(str(MIXED_F19))
+    sec = endf.mf[33].mt[28]
+    (sub,) = sec.subsections
+    assert sorted(int(r.lb) for r in sub.ni_records) == [5, 8]
+
+    suite, report = decodeCovarianceSuite(endf, target="F19", checks=False)
+    assert endf.pendf is None
+    assert any("σ(E) from the tape's MF3" in w for w in report.warnings)
+    (block,) = [s for s in suite.covarianceSections if s.label == "MF33-MT28"]
+    matrix = np.asarray(block.form.matrix, float)
+    grid = list(block.form.rowGrid)
+
+    relative = [r for r in sub.ni_records if r.lb == 5]
+    absolute = [r for r in sub.ni_records if r.lb == 8]
+    rel, _, _ = sec._process_ni_records_to_matrix(relative, target_grid=grid)
+    absolute, _, _ = sec._process_ni_records_to_matrix(absolute, target_grid=grid)
+    sigma = MF33MT._bin_average_xs(endf.mf[3].mt[28], grid)
+    k = int(np.argmax(np.diag(absolute)))
+    assert sigma[k] > 0
+    assert matrix[k, k] == pytest.approx(rel[k, k] + absolute[k, k] / sigma[k] ** 2, rel=1e-12)
+
+
+def test_kika_read_of_a_mixed_block_needs_no_njoy(no_njoy):
+    import kika
+
+    suite = kika.read(MIXED_F19)
+    labels = [s.label for s in suite.covarianceSuite.covarianceSections]
+    assert "MF33-MT28" in labels
+
+
+def test_an_object_read_without_mf1_and_mf2_reads_them_from_its_tape(no_njoy):
+    from kika.endf import read_endf
+
+    endf = read_endf(str(MIXED_F19), mf_numbers=[33])
+    sections, source = cache.pointwise_cross_sections(endf)
+    assert "tape's MF3" in source and set(sections) == {28}
+
+
+def test_a_tape_with_resonance_ranges_is_reconstructed_by_kika(monkeypatch, tmp_path):
+    # Fe-56 states a resolved range, so its MF3 is a background there; read
+    # without MF1 and MF2, the object must still not be taken for a complete one.
+    from kika.endf import read_endf
+    from kika.sampling import resonance_region
+
+    tape = Path(__file__).resolve().parent / "data" / "micro_fe56_structural.endf"
+    calls = []
+
+    def reconstruct(source, *, engine, tolerance, cacheDir=None, **_):
+        calls.append((Path(source).name, engine, tolerance))
+        return tmp_path / "kika.pendf"
+
+    monkeypatch.setattr(resonance_region, "reconstructPendf", reconstruct)
+    monkeypatch.setattr(cache, "read_pendf_mf3_sections", lambda path: {1: _xs(3.0)})
+    monkeypatch.setattr(cache, "find_njoy_executable", lambda *a, **k: pytest.fail("NJOY"))
+    endf = read_endf(str(tape), mf_numbers=[3])
+    sections, source = cache.pointwise_cross_sections(endf, tolerance=1e-3)
+    assert calls == [(tape.name, "kika", 1e-3)]
+    assert "kika's resonance reconstruction" in source
+    assert endf.pendf is sections
+
+
+def test_an_lrp1_tape_without_mf2_is_not_taken_for_a_complete_mf3(no_njoy):
+    from kika.endf import read_endf
+
+    tape = Path(__file__).resolve().parent / "data" / "micro_si28_covcheck.endf"
+    endf = read_endf(str(tape))
+    with pytest.raises(ValueError, match="LRP=1 but has no MF2"):
+        cache.pointwise_cross_sections(endf)
 
 
 # --------------------------------------------------------------------------

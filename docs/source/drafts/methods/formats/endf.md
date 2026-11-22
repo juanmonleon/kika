@@ -176,8 +176,11 @@ readers for MF 33 and 34 skip blank fields instead. How a short last line was pa
   is not 0, 1 or 2 is dropped.
 - **MT 452 and MT 455 without MT 456**: the multiplicities are decoded and a warning says
   the prompt part is missing.
-- **MF 33 blocks mixing absolute and relative components**: NJOY RECONR is run (and
-  cached) to express them relative to the cross-section, with a warning.
+- **MF 33 blocks mixing absolute and relative components**: the absolute part is divided
+  by the bin averages of the cross sections, with a warning that names where they came
+  from. A tape with no resonance ranges gives them from its own MF 3. A tape with
+  resonance ranges is reconstructed by kika (tolerance 10⁻³, cached). A PENDF the caller
+  attached first (`endf.pendf`, for instance NJOY's through `attach_pendf`) is used as it is.
 - **An MF 4 section with no MF 3 for its reaction** is reported as lost. **An MF 34 with
   no MF 4** gives a warning.
 - **An MF 1/455 with LDG=1** (energy-dependent delayed groups): reported as unsupported,

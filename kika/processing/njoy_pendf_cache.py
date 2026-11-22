@@ -16,6 +16,8 @@ This module provides:
                                   how to point kika at one.
   - ``attach_pendf``            — the above in one step for a parsed tape: sets
                                   ``endf.pendf`` from a cached RECONR run.
+  - ``pointwise_cross_sections`` — σ(E) for a parsed tape without NJOY: its own
+                                  MF3, or kika's reconstruction when it has resonances.
 
 The default cache directory resolves via ``tempfile.gettempdir()`` so the
 module works on any machine without machine-specific paths baked in.
@@ -411,3 +413,88 @@ def attach_pendf(endf, *, endf_path: str | Path | None = None,
                                      cache_dir=cache_dir)
     endf.pendf = read_pendf_mf3_sections(pendf_path)
     return endf.pendf
+
+
+def pointwise_cross_sections(endf, *, tolerance: float = 0.001,
+                             cache_dir: str | Path | None = None,
+                             why: str = "this operation") -> tuple[Dict[int, object], str]:
+    """σ(E) of every MT of a parsed tape, without NJOY, and where it came from.
+
+    ``endf.pendf`` is used as it is when set: that is how a caller chooses NJOY
+    (:func:`attach_pendf`) or any other source. Otherwise a tape whose MF3 is
+    complete (LRP≠1, or no resolved or unresolved range in MF2) gives its own
+    MF3. A tape with resonance ranges is reconstructed by kika at *tolerance*,
+    through the cache of :func:`kika.sampling.resonance_region.reconstructPendf`,
+    and the result is set as ``endf.pendf``. MF1, MF2 or MF3 the object was read
+    without are read from ``endf.source_path``.
+
+    Parameters
+    ----------
+    endf
+        A parsed tape.
+    tolerance
+        Relative tolerance of the reconstruction, as a fraction.
+    cache_dir
+        Directory of the reconstruction cache; None is ``DEFAULT_PENDF_CACHE_DIR``.
+    why
+        What σ(E) is for, quoted in the error messages.
+
+    Returns
+    -------
+    tuple of (dict of int to object, str)
+        The MF3-like sections keyed by MT, and a phrase naming their source:
+        ``endf.pendf``, the tape's MF3, or kika's reconstruction.
+
+    Raises
+    ------
+    ValueError
+        If something has to be read from the tape or reconstructed and
+        ``endf.source_path`` is not set, or the tape lacks the MF1/451 or MF2
+        that say whether its MF3 is complete.
+    ~kika.processing.resonances.UnsupportedResonanceError
+        If the tape uses resonance data kika does not reconstruct; and
+        ``ReconstructionConvergenceError`` if a budget runs out or a check fails.
+        Setting ``endf.pendf`` first (for instance with :func:`attach_pendf`)
+        avoids the reconstruction.
+    """
+    if getattr(endf, "pendf", None):
+        return endf.pendf, "`endf.pendf`"
+    from kika.sampling.resonance_region import _lrp, needsReconstruction, reconstructPendf
+
+    path = getattr(endf, "source_path", None)
+    mf = getattr(endf, "mf", None) or {}
+
+    def fromTape(mfNumbers):
+        if path is None:
+            raise ValueError(
+                f"{why} needs σ(E), and this ENDF object was read without MF"
+                f"{'/'.join(map(str, mfNumbers))} and does not know which file it was "
+                f"read from. Read it with kika.endf.read_endf(path), or set endf.pendf.")
+        from kika.endf import read_endf
+        return read_endf(str(path), mf_numbers=list(mfNumbers))
+
+    header = endf
+    if _lrp(endf) is None or (_lrp(endf) == 1 and 2 not in mf):
+        header = fromTape((1, 2))
+    lrp = _lrp(header)
+    if lrp is None or (lrp == 1 and 2 not in (getattr(header, "mf", None) or {})):
+        raise ValueError(
+            f"{why} needs σ(E), and the tape {'has no MF1/451' if lrp is None else 'states LRP=1 but has no MF2'}, "
+            f"so whether its MF3 is the whole cross section cannot be told. Set endf.pendf.")
+    if not needsReconstruction(header):
+        mf3 = mf.get(3) if 3 in mf else fromTape((3,)).mf.get(3)
+        return ({int(mt): section for mt, section in getattr(mf3, "mt", {}).items()},
+                "the tape's MF3 (no resonance ranges)")
+    if path is None:
+        raise ValueError(
+            f"{why} needs σ(E) reconstructed from the resonance parameters, and this "
+            f"ENDF object does not know which file it was read from. Read it with "
+            f"kika.endf.read_endf(path), or set endf.pendf.")
+    try:
+        pendf = reconstructPendf(path, engine="kika", tolerance=tolerance, cacheDir=cache_dir)
+    except Exception as failure:
+        failure.add_note(f"{why}: kika could not reconstruct σ(E). Set endf.pendf first, for "
+                         f"instance with kika.processing.attach_pendf(endf, njoy_executable=...).")
+        raise
+    endf.pendf = read_pendf_mf3_sections(pendf)
+    return endf.pendf, f"kika's resonance reconstruction (tolerance {tolerance:g})"

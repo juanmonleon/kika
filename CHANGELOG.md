@@ -32,6 +32,11 @@
 
 ### Changed
 
+- An MF33 block that sums absolute (LB=0/8/9) and relative components no longer needs NJOY.
+  `decodeCovarianceSuite` (and `kika.read`) takes σ(E) from the tape's own MF3 when it has no
+  resonance ranges, and from kika's reconstruction otherwise; a PENDF set on `endf.pendf` first
+  (NJOY's, through `attach_pendf`) is still used as it is. New:
+  `kika.processing.pointwise_cross_sections`. Against NJOY RECONR the matrices agree to 2e-7.
 - MCNP and Serpent cards are written with every number in its shortest exact form and read back
   before they are returned; a card that does not read back raises.
 - The material readers refuse what they used to skip: a nuclide listed twice for the same data

@@ -27,8 +27,9 @@ class MF33NeedsCrossSections(ValueError):
 
     Summing them needs the absolute part divided by σ̄_i·σ̄_j, and below the
     resolved-resonance upper limit MF3 holds only the background, so σ(E) has
-    to come from a reconstruction. kika takes it from an NJOY RECONR PENDF:
-    ``kika.processing.attach_pendf(endf)`` does that for a whole tape.
+    to come from a reconstruction. ``kika.processing.pointwise_cross_sections(endf)``
+    gives it for a whole tape: its MF3 when it has no resonance ranges, kika's
+    reconstruction otherwise.
     """
 
 
@@ -546,7 +547,7 @@ class MF33MT(MT):
         xs_row, xs_col : MF3MT or CrossSection, optional
             σ(E) of the row and column reaction. Only read when the block
             mixes absolute and relative components; below the resolved
-            resonance upper limit it must be reconstructed (an NJOY PENDF).
+            resonance upper limit it must be reconstructed.
 
         Returns
         -------
@@ -628,10 +629,10 @@ class MF33MT(MT):
                 f"(LB={sorted(set(lbs) & RELATIVE_LB)}) components. They can only "
                 f"be summed after dividing the absolute part by σ_i·σ_j, and "
                 f"below the resolved-resonance upper limit σ(E) has to be "
-                f"reconstructed. Pass the reconstructed sections as "
-                f"`mf3_sections` (an NJOY PENDF: `kika.processing.attach_pendf"
-                f"(endf)` sets `endf.pendf`), or decode through "
-                f"`decodeCovarianceSuite(endf)`, which does it on its own."
+                f"reconstructed. Pass σ(E) as `mf3_sections` (the first value of "
+                f"`kika.processing.pointwise_cross_sections(endf)`: the tape's "
+                f"MF3, or kika's reconstruction when it has resonances), or decode "
+                f"through `decodeCovarianceSuite(endf)`, which does it on its own."
             )
         s_row = self._bin_average_xs(xs_row, output_grid)
         s_col = s_row if xs_col is xs_row else self._bin_average_xs(xs_col, output_grid)

@@ -89,7 +89,7 @@ Reconstruction and PENDF through NJOY
    :members: njoy_reconstruct, njoy_reconstruct_stream, NjoyReconstructError, NjoyDecimalLocaleReconstructError
 
 .. automodule:: kika.processing.njoy_pendf_cache
-   :members: get_or_create_pendf, mf33_needs_pendf, read_pendf_mf3_sections, find_njoy_executable, attach_pendf, NjoyNotFoundError
+   :members: get_or_create_pendf, mf33_needs_pendf, read_pendf_mf3_sections, find_njoy_executable, attach_pendf, pointwise_cross_sections, NjoyNotFoundError
 
 Photo-atomic tables
 -------------------

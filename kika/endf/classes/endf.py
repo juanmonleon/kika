@@ -31,8 +31,8 @@ class ENDF:
         The MAT number of the tape's material.
     source_path : str or None
         The absolute path of the file the object was read from, set by
-        :func:`kika.endf.read_endf`. NJOY runs on that file when a cross-section
-        has to be reconstructed.
+        :func:`kika.endf.read_endf`. A cross section that has to be
+        reconstructed is reconstructed from that file.
     tape_id : str or None
         The tape identification record (the whole first line as read), or None
         when the file does not start with one.
@@ -41,8 +41,7 @@ class ENDF:
     metadata: Dict[str, Any] = field(default_factory=dict)
     mat: Optional[int] = None  # MAT number from ENDF file
     _pendf: Optional[Dict] = field(default=None, repr=False)
-    #: The file this object was read from, set by ``read_endf``. It is what
-    #: NJOY runs on when σ(E) has to be reconstructed (``attach_pendf``).
+    #: The file this object was read from, set by ``read_endf``; σ(E) is reconstructed from it.
     source_path: Optional[str] = field(default=None, repr=False)
     #: The tape identification record (§0.6.2), the whole first line as read,
     #: or None when the file does not start with one. ``writeEndfTape`` writes
@@ -237,11 +236,11 @@ class ENDF:
 
             endf.pendf = njoy_reconstruct(path, njoy_executable=njoy)
 
-        Nothing populates it on its own any more. ``ENDF.reconstruct_xs()``
-        used to, silently, using an in-Python reconstructor its own docstring
-        called "not working correctly" — so every consumer of ``pendf`` was
-        quietly weighted by numbers nobody trusted. Choosing the source is the
-        caller's, and it is now visible in their code.
+        Reading does not fill it. ``decodeCovarianceSuite`` does, through
+        ``kika.processing.pointwise_cross_sections``, when an MF33 block that
+        mixes absolute and relative components needs σ(E) of a tape with
+        resonance ranges: kika's reconstruction, unless the caller set another
+        source first (NJOY with ``kika.processing.attach_pendf``, for instance).
 
         Expects ``{MT: section}``. Both ``MF3MT`` and ``CrossSection`` qualify,
         but they do **not** spell sigma the same way: ``MF3MT`` exposes
