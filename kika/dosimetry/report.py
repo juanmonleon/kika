@@ -61,8 +61,8 @@ def _verdict(result) -> Tuple[str, str, str]:
 def _dosimeter_rows(result) -> List[str]:
     rows = []
     for i, name in enumerate(result.names):
-        before = result.measured_rates[i] / result.prior_rates[i]
-        after = result.measured_rates[i] / result.adjusted_rates[i]
+        before = result.prior_rates[i] / result.measured_rates[i]
+        after = result.adjusted_rates[i] / result.measured_rates[i]
         z = result.standardized_residuals[i]
         hot = ' class="n hot"' if abs(z) > 2 else ' class="n"'
         rows.append(f"<tr><td>{_esc(name)}</td><td class=\"n\">{_num(result.measured_rates[i])}</td>"
@@ -196,14 +196,15 @@ def adjustment_html(result) -> str:
     notes = "".join(f"<li>{_esc(n)}</li>" for n in result.notes)
     parts = [f'<h2 id="ka-notes">Notes</h2><ul class="notes">{notes}</ul>'] if notes else []
     parts += [
-        '<h2 id="ka-dosimeters">Dosimeters</h2><p class="lead">M/C is the measured rate over the rate '
-        'computed from the spectrum, before and after the adjustment. The pull is the residual of the '
-        'measurement against the prior, linearised at the result, over its predictive standard '
+        '<h2 id="ka-dosimeters">Dosimeters</h2><p class="lead">C/E is the rate computed from the '
+        'spectrum over the measured rate, before and after the adjustment. The pull is the residual of '
+        'the measurement against the prior, linearised at the result, over its predictive standard '
         'deviation (flux, cross section and measurement), net of the fitted factor when the '
-        'normalization is free; '
+        'normalization is free; it is positive when the measurement is above the calculation '
+        '(C/E below 1). '
         'Δχ² is what chi2 loses without that dosimeter.</p>'
-        + _table([("Dosimeter", False), ("Measured", True), ("Prior rate", True), ("M/C before", True),
-                  ("Adjusted rate", True), ("M/C after", True), ("Pull", True), ("Δχ²", True)],
+        + _table([("Dosimeter", False), ("Measured", True), ("Prior rate", True), ("C/E before", True),
+                  ("Adjusted rate", True), ("C/E after", True), ("Pull", True), ("Δχ²", True)],
                  _dosimeter_rows(result)),
         '<h2 id="ka-integrals">Integrals</h2>'
         + _table([("Flux", False), ("Prior", True), ("Prior 1σ", True), ("Adjusted", True),
