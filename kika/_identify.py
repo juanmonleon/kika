@@ -127,7 +127,7 @@ def identify(path) -> str:
             f"so it is not a binary COVERX file, the only other binary format kika reads"
         )
 
-    text = raw.decode("utf-8", errors="replace")
+    text = raw.decode("utf-8-sig", errors="replace")
     lines = text.splitlines()
 
     from ._read import _looksLikeAce
@@ -402,7 +402,7 @@ def _looksLikeBoxer(lines) -> bool:
     headers = 0
     for line in lines[:200]:
         padded = line.rstrip("\r").ljust(80)
-        if padded[0] not in "01234" or len(line.rstrip()) < 60 or "," in line:
+        if padded[0] not in "01234" or len(line.rstrip()) < 60 or "," in padded[:5] + padded[36:]:
             continue
         try:
             mat, mt = int(padded[36:41]), int(padded[41:45])

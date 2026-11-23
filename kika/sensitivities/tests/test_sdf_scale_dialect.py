@@ -139,3 +139,12 @@ def test_header_counts_may_be_followed_by_several_spaces(tmp_path):
     p.write_text(text)
     assert identify(str(p)) == "sdf"
     assert len(read_sdf(str(p)).data) == 3
+
+def test_a_latin1_title_is_read(tmp_path):
+    """Titles copied from a SCALE input written in a cp1252 editor carry non-UTF-8 bytes."""
+    text = _scale_sdf("  1.003930 +/-   0.000290  k-eff from the forward case")
+    p = tmp_path / "latin1.sdf"
+    p.write_bytes(text.replace("/some/scale/path/test.inp", "Evaluación ZPR-9").encode("latin-1"))
+    sdf = read_sdf(str(p))
+    assert sdf.title.startswith("Evaluaci") and sdf.title.endswith("n ZPR-9")
+    assert len(sdf.data) == 3

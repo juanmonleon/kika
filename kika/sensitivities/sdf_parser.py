@@ -119,7 +119,7 @@ def read_sdf(
     if not p.is_file():
         raise FileNotFoundError(path)
 
-    with p.open("r", encoding="utf-8") as f:
+    with p.open("r", encoding="utf-8-sig", errors="replace") as f:
         lines = [ln.rstrip("\n") for ln in f]
 
     idx = 0
@@ -452,7 +452,7 @@ def roundtrip_equal(path: str, tmp_dir: Optional[str] = None) -> bool:
     """
     import tempfile
 
-    first_line = Path(path).read_text(encoding="utf-8").splitlines()[0]
+    first_line = Path(path).read_text(encoding="utf-8-sig", errors="replace").splitlines()[0]
     convention = "relative" if HEADER_RE.match(first_line) else "absolute"
     sdf = read_sdf(path, uncertainty_convention=convention)
     if tmp_dir is None:

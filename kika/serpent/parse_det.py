@@ -134,7 +134,7 @@ def read_detector_file(path_or_text: Union[str, Path]) -> DetectorFile:
     """
     p = Path(path_or_text) if not isinstance(path_or_text, Path) else path_or_text
     if p.exists():
-        text = p.read_text(encoding="utf-8")
+        text = p.read_text(encoding="utf-8-sig", errors="replace")
     else:
         text = str(path_or_text)
     return parse_detector_text(text)

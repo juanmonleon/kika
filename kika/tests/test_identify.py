@@ -340,3 +340,25 @@ def test_photoatomic_data_is_read_by_the_reader_of_its_format():
     for table in (EPRDATA14_FE, MCPLIB84_FE):
         if table.is_file():
             assert identify(table) == "ace"
+
+def test_a_byte_order_mark_does_not_hide_an_njoy_deck(tmp_path):
+    from kika.njoy.reader import read_deck_file
+
+    path = tmp_path / "deck.njoy"
+    path.write_text(NJOY_DECK, encoding="utf-8-sig")
+    assert identify(path) == "njoy-input"
+    assert [m.name for m in read_deck_file(path).modules][:2] == ["moder", "reconr"]
+
+
+def test_a_comma_in_the_boxer_label_does_not_hide_its_header_cards(samples, tmp_path):
+    cards = []
+    for line in samples["boxer"][0].read_text().splitlines():
+        padded = line.ljust(80)
+        try:
+            is_header = padded[0] in "01234" and int(padded[36:41]) > 0
+        except ValueError:
+            is_header = False
+        cards.append(padded[:5] + "JEFF-3.3, Fe".ljust(31) + padded[36:] if is_header else line)
+    path = tmp_path / "boxer_label.txt"
+    path.write_text("\n".join(cards) + "\n")
+    assert identify(path) == "boxer"
