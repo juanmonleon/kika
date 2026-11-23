@@ -44,6 +44,7 @@ Quick Links
    user_guide/reading_files
    user_guide/working-with-endf
    user_guide/checking-evaluations
+   user_guide/covariance-checks
    user_guide/processing-an-evaluation
    user_guide/running-a-perturbation
    user_guide/legacy-samplers
