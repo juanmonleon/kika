@@ -122,3 +122,20 @@ def test_compact_dialect_uncertainties_are_unknown_not_zero(tmp_path):
     assert reaction.error_known is False
     profile = sdf.to_sensitivity_profile()
     assert profile.reactions[0].uncertainty is None
+
+def test_header_counts_may_be_followed_by_several_spaces(tmp_path):
+    """MCNP-to-SDF scripts pad the counts of lines 2 and 3 with more than one space."""
+    from kika import identify
+
+    text = _scale_sdf("  1.003930 +/-   0.000290  k-eff from the forward case")
+    text = text.replace(
+        "         4 number of neutron groups",
+        "         4   number of neutron groups",
+    ).replace(
+        "         3   number of sensitivity profiles          2 are region integrated",
+        "         3 number of sensitivity profiles          2   are region integrated",
+    )
+    p = tmp_path / "padded.sdf"
+    p.write_text(text)
+    assert identify(str(p)) == "sdf"
+    assert len(read_sdf(str(p)).data) == 3

@@ -29,8 +29,8 @@ logger = logging.getLogger(__name__)
 # matches we recover the bare title before migrating to the standard dialect.
 # Foreign files (free-form first line) don't match and the whole line is the title.
 HEADER_RE = re.compile(r"^(?P<title>.+) MCNP to SCALE sdf (?P<ngroups>\d+)gr\s*$")
-NGROUP_LINE_RE = re.compile(r"^\s*(?P<ngroups>\d+) number of neutron groups\s*$")
-NPROF_LINE_RE = re.compile(r"^\s*(?P<nprofiles>\d+)\s+ number of sensitivity profiles\s+(?P<nprofiles2>\d+) are region integrated\s*$")
+NGROUP_LINE_RE = re.compile(r"^\s*(?P<ngroups>\d+)\s+number of neutron groups\s*$")
+NPROF_LINE_RE = re.compile(r"^\s*(?P<nprofiles>\d+)\s+number of sensitivity profiles\s+(?P<nprofiles2>\d+)\s+are region integrated\s*$")
 # The second and third fixed lines inside a reaction block are literal
 FIXED_LINE_1 = "      0      0"
 FIXED_LINE_2 = "  0.000000E+00  0.000000E+00      0      0"
