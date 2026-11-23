@@ -48,6 +48,11 @@ FLOAT_PATTERN = r"[+-]?\d*\.?\d+(?:[eE][+-]?\d+)?"
 _META1_RE = re.compile(r"^\s*(-?\d+)\s+(-?\d+)")
 
 
+def _header_error(lines: List[str], idx: int, expected: str) -> str:
+    found = repr(lines[idx]) if idx < len(lines) else "the end of the file"
+    return f"Line {idx + 1} should read '{expected}'; found {found}"
+
+
 def _parse_scientific_numbers(line: str) -> List[float]:
     return [float(x) for x in re.findall(FLOAT_PATTERN, line)]
 
@@ -142,13 +147,13 @@ def read_sdf(
     # absent, so we always read ngroups from here).
     m = NGROUP_LINE_RE.match(lines[idx]) if idx < len(lines) else None
     if not m:
-        raise ValueError("Missing/invalid neutron groups line")
+        raise ValueError(_header_error(lines, idx, "<N> number of neutron groups"))
     ngroups_declared = int(m.group("ngroups"))
     idx += 1
 
     m = NPROF_LINE_RE.match(lines[idx]) if idx < len(lines) else None
     if not m:
-        raise ValueError("Missing/invalid sensitivity profiles line")
+        raise ValueError(_header_error(lines, idx, "<N> number of sensitivity profiles <M> are region integrated"))
     nprofiles_declared = int(m.group("nprofiles"))
     # Cross check second number. In standard SCALE/TSUNAMI files line 3 carries
     # both the total profile count and the smaller energy-integrated count, so a
@@ -166,7 +171,7 @@ def read_sdf(
     # files omit the uncertainty entirely ("1.000717    k-eff from the forward
     # case"); in that case e0 is taken as 0.
     if idx >= len(lines):
-        raise ValueError("Missing r0/e0 line")
+        raise ValueError(_header_error(lines, idx, "<response> +/- <uncertainty>"))
     kline = lines[idx]
     if "+/-" in kline:
         before, _, after = kline.partition("+/-")
@@ -187,7 +192,7 @@ def read_sdf(
     idx += 1
 
     if idx >= len(lines) or lines[idx].strip() != "energy boundaries:":
-        raise ValueError("Expected 'energy boundaries:' line")
+        raise ValueError(_header_error(lines, idx, "energy boundaries:"))
     idx += 1
 
     # Collect energy boundary numbers until we have ngroups+1 values.
