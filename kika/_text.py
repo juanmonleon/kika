@@ -60,5 +60,7 @@ def sniff_csv(text: str, max_rows: int = 20) -> tuple[str, int] | None:
 
 
 def read_lines(path) -> list[str]:
-    """``read_text`` split as ``readlines`` would, line endings kept and normalised to ``\\n``."""
-    return read_text(path).replace("\r\n", "\n").replace("\r", "\n").splitlines(keepends=True)
+    """``read_text`` split exactly as ``open(path).readlines()`` would (universal newlines)."""
+    import io
+
+    return io.StringIO(read_text(path), newline=None).readlines()
