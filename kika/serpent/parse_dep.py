@@ -13,6 +13,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Tuple, Union
 
+from kika._text import read_text
 from kika.serpent.depletion import DepletionFile, DepletionMaterial
 
 
@@ -164,7 +165,7 @@ def read_depletion_file(path_or_text: Union[str, Path]) -> DepletionFile:
     """
     p = Path(path_or_text) if not isinstance(path_or_text, Path) else path_or_text
     if p.exists():
-        text = p.read_text(encoding="utf-8-sig", errors="replace")
+        text = read_text(p)
     else:
         text = str(path_or_text)
     return parse_depletion_text(text)

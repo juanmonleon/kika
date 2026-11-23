@@ -109,6 +109,6 @@ def test_the_method_no_longer_reaches_a_dead_module():
     ``kika.cov.mf34cov_heatmap`` is gone; this asserts nothing quietly
     reintroduces a delegation to it or to any other ``kika.cov.legacy`` shim.
     """
-    source = (Path(__file__).resolve().parents[1] / "legendre_covariance.py").read_text()
+    source = (Path(__file__).resolve().parents[1] / "legendre_covariance.py").read_text(encoding="utf-8")
     assert "kika.cov.legacy" not in source
     assert "mf34cov_heatmap" not in source

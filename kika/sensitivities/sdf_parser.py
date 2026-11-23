@@ -21,6 +21,7 @@ import logging
 import re
 import numpy as np
 
+from .._text import read_lines, read_text
 from .sdf import SDFData, SDFReactionData
 
 logger = logging.getLogger(__name__)
@@ -119,8 +120,7 @@ def read_sdf(
     if not p.is_file():
         raise FileNotFoundError(path)
 
-    with p.open("r", encoding="utf-8-sig", errors="replace") as f:
-        lines = [ln.rstrip("\n") for ln in f]
+    lines = [ln.rstrip("\n") for ln in read_lines(p)]
 
     idx = 0
     if idx >= len(lines):
@@ -452,7 +452,7 @@ def roundtrip_equal(path: str, tmp_dir: Optional[str] = None) -> bool:
     """
     import tempfile
 
-    first_line = Path(path).read_text(encoding="utf-8-sig", errors="replace").splitlines()[0]
+    first_line = read_text(path).splitlines()[0]
     convention = "relative" if HEADER_RE.match(first_line) else "absolute"
     sdf = read_sdf(path, uncertainty_convention=convention)
     if tmp_dir is None:

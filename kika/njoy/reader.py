@@ -207,4 +207,6 @@ def read_deck_file(path: str | Path) -> ParsedDeck:
     ParsedDeck
         As ``read_deck`` returns it.
     """
-    return read_deck(Path(path).read_text(encoding="utf-8-sig", errors="replace"))
+    from .._text import read_text
+
+    return read_deck(read_text(path))

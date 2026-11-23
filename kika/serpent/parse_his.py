@@ -12,6 +12,7 @@ import numpy as np
 from pathlib import Path
 from typing import Dict, List, Union
 
+from kika._text import read_text
 from kika.serpent.history import HistoryFile, HistoryVariable
 
 
@@ -159,7 +160,7 @@ def read_history_file(path_or_text: Union[str, Path]) -> HistoryFile:
     """
     p = Path(path_or_text) if not isinstance(path_or_text, Path) else path_or_text
     if p.exists():
-        text = p.read_text(encoding="utf-8-sig", errors="replace")
+        text = read_text(p)
     else:
         text = str(path_or_text)
     return parse_history_text(text)

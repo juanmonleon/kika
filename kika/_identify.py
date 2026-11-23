@@ -100,6 +100,7 @@ def identify(path) -> str:
         and an HDF5 or binary file kika does not read are refused the same way.
     """
     from ._read import UnknownFormatError, sniff_format
+    from ._text import UTF16_BOMS, decode_text, utf16_message
 
     path = os.fspath(path)
     if not os.path.exists(path):
@@ -113,6 +114,8 @@ def identify(path) -> str:
     if not raw.strip():
         raise UnknownFormatError(f"{path} is empty")
 
+    if raw.startswith(UTF16_BOMS):
+        raise UnknownFormatError(utf16_message(path))
     if _isBinary(raw):
         if _looksLikeCoverxBinary(raw):
             return "coverx"
@@ -127,7 +130,7 @@ def identify(path) -> str:
             f"so it is not a binary COVERX file, the only other binary format kika reads"
         )
 
-    text = raw.decode("utf-8-sig", errors="replace")
+    text = decode_text(raw, path)
     lines = text.splitlines()
 
     from ._read import _looksLikeAce
@@ -554,11 +557,6 @@ def _inputDeckKind(lines):
 
 
 def _looksLikeCsv(lines) -> bool:
-    """A header and rows with the same number of commas, at least one."""
-    rows = [ln for ln in lines[:20] if ln.strip()]
-    if len(rows) < 2:
-        return False
-    if rows[0].lstrip().startswith(("{", "[")):
-        return False                    # JSON lines carry commas too
-    count = rows[0].count(",")
-    return count >= 1 and all(r.count(",") == count for r in rows[1:])
+    """A delimited table, as ``kika._text.sniff_csv`` defines it (``,``, ``;`` or tab)."""
+    from ._text import sniff_csv
+    return sniff_csv("\n".join(lines[:200])) is not None

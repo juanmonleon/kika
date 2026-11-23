@@ -12,6 +12,7 @@ from typing import Dict, Tuple, List, Optional, Union
 import numpy as np
 import pandas as pd
 
+from kika._text import read_lines
 from kika._constants import MT_TO_REACTION, ENDF_MAT_TO_ZAID, ZAID_TO_ENDF_MAT
 from kika.cov.cross_section_covariance import CrossSectionCovariance
 from kika.cov.legendre_covariance import LegendreCovariance
@@ -136,10 +137,9 @@ def _detect_coverx_format(file_path: str) -> str:
         header = f.read(4)
     if len(header) < 4:
         raise InvalidDataFormatError(f"File too small: {file_path}")
-    if all(b == 0x09 or b == 0x0A or b == 0x0D or (0x20 <= b <= 0x7E)
-           for b in header):
-        return 'text'
-    return 'binary'
+    # A record marker of a few hundred bytes has a zero byte in either byte order;
+    # a text title has none, whatever its encoding or accents.
+    return 'binary' if b"\x00" in header else 'text'
 
 
 def _detect_endianness(file_path: str) -> str:
@@ -281,9 +281,7 @@ def _read_coverx_text(file_path: str, ascending: bool = True, energy_unit: str =
     FileNotFoundError
         If the input file does not exist
     """
-    # Read the file
-    with open(file_path, "r") as f:
-        file_lines = f.readlines()
+    file_lines = read_lines(file_path)
 
     # Parse the group number from the second line
     num_groups = int(file_lines[1].split()[0])
@@ -1192,8 +1190,7 @@ def read_boxer(file_path: str, energy_unit: str = 'eV') -> CrossSectionCovarianc
         If *energy_unit* is not ``'eV'`` or ``'MeV'``.
     """
     _ev_grid_in([], energy_unit)  # validates the unit before reading anything
-    with open(file_path, 'r') as f:
-        lines = f.readlines()
+    lines = read_lines(file_path)
 
     covmat = CrossSectionCovariance(energy_unit=energy_unit)
     stddevs: Dict[Tuple[int, int], np.ndarray] = {}  # for correlation→covariance
@@ -1804,8 +1801,7 @@ def read_covfil(file_path: str, energy_unit: str = 'eV') -> Union[CrossSectionCo
         If *energy_unit* is not ``'eV'`` or ``'MeV'``, or an MF34 file holds
         Legendre coefficients and blocks of more than one reaction.
     """
-    with open(file_path, 'r') as f:
-        lines = f.readlines()
+    lines = read_lines(file_path)
 
     # Line 0 is tape header — skip it
     cursor = 1
