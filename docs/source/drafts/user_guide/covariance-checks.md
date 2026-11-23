@@ -1,7 +1,7 @@
 # The covariance checks, one by one
 
 This page lists every check {py:func}`kika.check` runs on the covariance files of an
-ENDF-6 tape (MF 31, 32, 33, 34, 35 and 40): what it looks at, what a finding means for
+ENDF-6 (Evaluated Nuclear Data File) tape (MF 31, 32, 33, 34, 35 and 40): what it looks at, what a finding means for
 whoever uses the file, and when it gives each level. How to run the checks and read
 their reports is in {doc}`/user_guide/checking-evaluations`.
 
@@ -16,9 +16,9 @@ Every finding has one level. In the code and on the command line they are writte
 
 - **Defect**: the data are not what the format or physics allows, and using them gives a
   wrong result. A negative variance is one: no variance can be negative.
-- **Warning**: it can change a result and needs judgement. An MF 34 block in the LAB
-  frame for a reaction whose MF 4 is in the CM frame is one: ENDF-6 allows it, but kika's
-  samplers convert only two-body scattering and refuse the others.
+- **Warning**: it can change a result and needs judgement. An MF 34 block in a frame
+  other than MF 4's, for a reaction other than elastic or discrete inelastic scattering,
+  is one: ENDF-6 allows it, but kika's samplers refuse to sample it.
 - **Note**: true and worth knowing, not a fault. Rows of a matrix that are all zero are
   one: those energies are given no uncertainty, which is legal and common at the edges of
   a grid.
@@ -52,7 +52,7 @@ to.
 
 Whether what a covariance refers to is there: the self block of each reaction, the
 central values in MF 1, MF 3 or MF 4, the partner of each cross block, the reactions
-named by the NC derivations of MF 31 and MF 33, and a grid that covers the cross section.
+named by the NC derivations of MF 31 and MF 33, and a grid that covers the cross-section.
 
 ```{kika-covariance-checks} completeness
 ```

@@ -39,7 +39,8 @@ class CheckDescription:
     description : str
         What the check looks at and what a finding means for a user of the file.
     group : str
-        For a covariance check, the group it belongs to (a key of ``GROUPS``):
+        For a covariance check, the group it belongs to (a key of
+        ``kika.endf.checks.descriptions.GROUPS``):
         ``"structure"``, ``"values"``, ``"completeness"``, ``"mf32_vs_mf2"`` or
         ``"mf35_vs_mf5"``. Empty for a data check.
     """
