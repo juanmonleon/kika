@@ -10,13 +10,13 @@ step: a new ``check`` name without an entry here fails it.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Dict, Iterable, List, Mapping, Tuple
 
 from .findings import DEFECT, NOTE, WARN
 from .symbols import to_symbols
 
-__all__ = ["CheckDescription", "CHECKS", "describe"]
+__all__ = ["CheckDescription", "CHECKS", "GROUPS", "describe"]
 
 
 @dataclass(frozen=True)
@@ -38,12 +38,17 @@ class CheckDescription:
         it gives it, with the thresholds the check uses.
     description : str
         What the check looks at and what a finding means for a user of the file.
+    group : str
+        For a covariance check, the group it belongs to (a key of ``GROUPS``):
+        ``"structure"``, ``"values"``, ``"completeness"``, ``"mf32_vs_mf2"`` or
+        ``"mf35_vs_mf5"``. Empty for a data check.
     """
 
     title: str
     mf: Tuple[int, ...]
     levels: Mapping[str, str]
     description: str
+    group: str = ""
 
     def to_dict(self) -> Dict[str, object]:
         """Plain data, with Greek letters and math signs (the texts here are ASCII)."""
@@ -64,8 +69,7 @@ def _build() -> Dict[str, CheckDescription]:
     ALL = (31, 32, 33, 34, 35, 40)
     XS = (31, 33, 34, 40)  # the NI/NC-record files
     D = CheckDescription
-    return {
-        # ---- structure ------------------------------------------------------
+    structure = {
         "parse_error": D(
             "Section dropped by the parser", ALL,
             {DEFECT: "always"},
@@ -169,7 +173,8 @@ def _build() -> Dict[str, CheckDescription]:
             "present, the |rho| > 1, covariance-without-variance and not-PSD findings on "
             "the same block are usually its consequences, not separate problems: fix this "
             "one first."),
-        # ---- values ---------------------------------------------------------
+    }
+    values = {
         "correlation_out_of_bounds": D(
             "|rho| > 1", ALL,
             {DEFECT: f"|rho| > 1 + {c.RHO_DEFECT:g}",
@@ -282,7 +287,8 @@ def _build() -> Dict[str, CheckDescription]:
             "An LB=0 (absolute) record summed with relative ones. kika sums them all as "
             "relative, so the assembled block is wrong by the absolute part; only the "
             "relative part was checked."),
-        # ---- completeness ---------------------------------------------------
+    }
+    completeness = {
         "missing_self_block": D(
             "Cross covariances without the self block", XS,
             {DEFECT: "always"},
@@ -406,7 +412,8 @@ def _build() -> Dict[str, CheckDescription]:
             {NOTE: "always"},
             "The covariance does not reach the whole range where the cross section is "
             "non-zero. Outside it the reaction is given no uncertainty."),
-        # ---- MF32 -----------------------------------------------------------
+    }
+    mf32_vs_mf2 = {
         "correlation_index_out_of_range": D(
             "Correlation index outside the matrix", (32,),
             {DEFECT: "always"},
@@ -444,7 +451,8 @@ def _build() -> Dict[str, CheckDescription]:
             {WARN: "always"},
             "Resonance energies in MF32 that MF2 does not list: the covariance is about "
             "parameters the cross section is not built from."),
-        # ---- MF35 -----------------------------------------------------------
+    }
+    mf35_vs_mf5 = {
         "missing_distribution": D(
             "Spectrum covariance without the spectrum", (35,),
             {DEFECT: "always"},
@@ -476,9 +484,19 @@ def _build() -> Dict[str, CheckDescription]:
             {NOTE: "always"},
             "The bands do not reach every incident energy of MF5."),
     }
+    groups = {"structure": structure, "values": values, "completeness": completeness,
+              "mf32_vs_mf2": mf32_vs_mf2, "mf35_vs_mf5": mf35_vs_mf5}
+    return {name: replace(d, group=group)
+            for group, entries in groups.items() for name, d in entries.items()}
 
 
 CHECKS: Dict[str, CheckDescription] = _build()
+
+#: The covariance checks by group, each in the order of ``CHECKS``.
+GROUPS: Dict[str, Tuple[str, ...]] = {
+    group: tuple(name for name, d in CHECKS.items() if d.group == group)
+    for group in dict.fromkeys(d.group for d in CHECKS.values())
+}
 
 
 def describe(checks: Iterable[str]) -> List[Tuple[str, CheckDescription]]:

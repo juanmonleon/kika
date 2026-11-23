@@ -4,6 +4,7 @@ import sys
 from importlib import metadata
 
 sys.path.insert(0, os.path.abspath('../..'))
+sys.path.insert(0, os.path.abspath('_ext'))
 
 # -- Project information -----------------------------------------------------
 project = 'KIKA'
@@ -37,6 +38,7 @@ extensions = [
     'myst_parser',
     'sphinx.ext.viewcode',
     'sphinx.ext.intersphinx',
+    'kika_checks',
 ]
 
 # $...$ and $$...$$ math, and amsmath environments (docs/WRITING_MANUAL.md §8).

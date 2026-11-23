@@ -303,6 +303,15 @@ def test_every_check_is_described():
         assert d.title and d.description and d.mf and set(d.levels) <= set(LEVELS)
 
 
+def test_every_check_is_in_one_group():
+    from kika.endf.checks.descriptions import GROUPS
+
+    assert list(GROUPS) == ["structure", "values", "completeness", "mf32_vs_mf2", "mf35_vs_mf5"]
+    assert sum(len(names) for names in GROUPS.values()) == len(CHECKS)
+    assert all(CHECKS[n].mf == (32,) for n in GROUPS["mf32_vs_mf2"])
+    assert all(CHECKS[n].mf == (35,) for n in GROUPS["mf35_vs_mf5"])
+
+
 def test_the_legend_agrees_with_what_the_cuts_give():
     report = check_covariance_library(CUTS, progress=False)
     for _, f in report:
