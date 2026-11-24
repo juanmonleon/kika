@@ -228,7 +228,9 @@ def test_an_anisotropic_capture_photon_comes_back_from_gnds_as_law_2(h1_b81_tape
     out = tmp_path / "h1.gnds.xml"
     kika.write(kika.read(h1_b81_tape), out)
     tape = tmp_path / "h1.endf"
-    kika.write(kika.read(out), tape, format="endf")
+    report = kika.write(kika.read(out), tape, format="endf")
+    # Every section comes back, so the report must not claim a loss.
+    assert [m for m in report.losses if "tape identification" not in m] == []
 
     def mf6Mt102(path):
         return [line[:66] for line in Path(path).read_text().splitlines()

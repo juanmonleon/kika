@@ -88,6 +88,9 @@ PENDING = {
         "Cf-252's cut keeps MF5/MT18 and not its MF4: the decoder gives the "
         "neutron an isotropic angular half, which derives an MF4 the cut lacks",
     ("Product", "headerFields.li"): "see ltt",
+    ("Resonances", "headerFields.regions"):
+        "F-19's cut keeps MF3 from 8.4 MeV and MF2's radius-only range from "
+        "1e-5 eV; the derived range takes the cut's evaluation domain",
     ("Product", "headerFields.lct"): "see ltt",
     ("ReactionSuite", "headerFields.awi"):
         "alpha on He-4, d on H-2: projectile and target share one id, and one "
@@ -110,6 +113,7 @@ ONLY_ON = {
     ("Product", "headerFields.ltt"): {"micro_cf252_pfns"},
     ("Product", "headerFields.li"): {"micro_cf252_pfns"},
     ("Product", "headerFields.lct"): {"micro_cf252_pfns"},
+    ("Resonances", "headerFields.regions"): {"micro_f19_mixed_mf33"},
     # U-238 cut to MT2 keeps the fissile LFI=1 with no fission reaction left.
     ("ReactionSuite", "headerFields.lfi"): {"micro_cm243_photons", "micro_am241_activation",
                                             "micro_u238_ltt2_mf34",

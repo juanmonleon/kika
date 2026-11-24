@@ -223,10 +223,17 @@ def deriveEndfProvenance(suite, report=None, *, mat: Optional[int] = None,
     # What is still without ENDF bookkeeping is not written, and a tape that is
     # missing it has to say so: the writer only emits a section a provenance
     # asks for, so without this the gap would be silent.
+    from kika.nuclear_data.model import Product, Reaction
+
     nubars = set(nubarMts)
     underived = Counter()
+    reaction = None
     for path, node in provenanceNodes(suite):
+        if isinstance(node, Reaction):
+            reaction = node
         if hasEndfProvenance(node) or not _carriesData(node, nubars) or outside(path, node):
+            continue
+        if isinstance(node, Product) and _writtenByItsReaction(node, reaction):
             continue
         underived[type(node).__name__] += 1
     for kind, count in sorted(underived.items()):
@@ -236,6 +243,45 @@ def deriveEndfProvenance(suite, report=None, *, mat: Optional[int] = None,
             f"in the written tape"
         )
     return report
+
+
+def _writtenByItsReaction(product, reaction) -> bool:
+    """Whether a product's data goes out in a section its reaction's provenance owns."""
+    # MF6 and MF12-15 hang their bookkeeping on the reaction, not on each product,
+    # and FUDGE's implicit residual is written nowhere on purpose.
+    from .energy_angle import _implicitResidual
+    from ..photon_lines import lineSpectrumLabels
+
+    if reaction is None:
+        return False
+    fields = getattr(getattr(reaction, "provenance", None), "headerFields", None) or {}
+    delayed = getattr(getattr(reaction.outputChannel, "fissionFragmentData", None),
+                      "delayedNeutrons", None)
+    if delayed is not None and any(getattr(d, "product", None) is product for d in delayed):
+        # MF5/MT455 states the families; its bookkeeping is on the container.
+        return hasEndfProvenance(delayed)
+    direct = any(p is product for p in reaction.outputChannel.products)
+    if product.pid == "photon" and ("mf12" in fields or "mf13" in fields):
+        # A level's cascade photons hang under the residual; MF12 LO=2 states them.
+        return direct or _descends(product, reaction.outputChannel)
+    if not direct:
+        return False
+    if _implicitResidual(product, reaction.outputChannel):
+        return True
+    form = next(iter(product.distribution.values()), None) if product.distribution is not None else None
+    if reaction.outputChannel.genre == "twoBody" and getattr(form, "recoilHref", None):
+        # A two-body recoil ENDF never states (FUDGE adds the target's to MT2).
+        return True
+    records =(fields.get("mf6") or {}).get("products") or []
+    labels = {label for record in records for label in lineSpectrumLabels(record)}
+    return product.label in labels
+
+
+def _descends(product, channel) -> bool:
+    for child in getattr(channel, "products", None) or ():
+        if child is product or _descends(product, getattr(child, "outputChannel", None)):
+            return True
+    return False
 
 
 def sectionSelected(mf: int, mt: Optional[int], selection) -> bool:
@@ -300,4 +346,6 @@ def _carriesData(node, nubars=frozenset()) -> bool:
         distribution = getattr(node, "distribution", None)
         forms = list(distribution.values()) if distribution is not None else []
         return any(not isinstance(form, Unspecified) for form in forms)
-    return True
+    # A reaction suite's PoPs has no section of its own: its masses, spins and
+    # levels reach the tape through AWR, SPI, Q and MF12 LO=2.
+    return type(node).__name__ != "PoPs"

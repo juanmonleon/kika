@@ -815,9 +815,14 @@ def _encodeMF15(node, fields, mt, mat, host):
 
 
 def _hasPhotons(channel) -> bool:
+    from kika.nuclear_data.model import Unspecified
+
     for product in getattr(channel, "products", None) or ():
         if product.pid == "photon" and product.multiplicity is not None:
-            return True
+            # A residual's placeholder photon (unspecified, as FUDGE writes it) states nothing.
+            forms = list(product.distribution.values()) if product.distribution is not None else []
+            if not forms or any(not isinstance(form, Unspecified) for form in forms):
+                return True
         if product.outputChannel is not None and _hasPhotons(product.outputChannel):
             return True
     return False
