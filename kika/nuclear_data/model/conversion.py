@@ -18,8 +18,9 @@ is missing. An approximation looks like data.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
-from typing import List
+from typing import Dict, List
 
 __all__ = ["ConversionReport"]
 
@@ -186,5 +187,80 @@ class ConversionReport:
                 parts.append(f"{len(entries)} {name}")
         return ", ".join(parts) if parts else "clean"
 
+    def describe(self) -> str:
+        """Every entry, grouped by kind, with near-identical messages folded into one line.
+
+        Kinds come in the order losses, approximations, unsupported, warnings, each under
+        a heading with its count. Messages that differ only in their numbers (one per MT,
+        per resonance group, per covariance section) are folded into one line that keeps
+        every number that varied, as compact ranges (``MT51-89``), and ends with
+        ``(×n)``. Folding is only in the text: the lists keep one entry per occurrence.
+
+        Returns
+        -------
+        str
+            The text that ``print(report)`` shows; ``"clean"`` when the report has no
+            entry at all.
+        """
+        if self.isEmpty:
+            return "clean"
+        blocks = []
+        for kind, heading in _HEADINGS:
+            entries = getattr(self, kind)
+            if not entries:
+                continue
+            lines = [f"{heading} ({len(entries)})"]
+            lines.extend(f"  - {line}" for line in _foldMessages(entries))
+            blocks.append("\n".join(lines))
+        return "\n".join(blocks)
+
+    def __str__(self) -> str:
+        return self.describe()
+
     def __repr__(self) -> str:
         return f"ConversionReport({self.summary()})"
+
+
+_HEADINGS = (("losses", "Losses"), ("approximations", "Approximations"),
+             ("unsupported", "Unsupported"), ("warnings", "Warnings"))
+
+_NUMBER = re.compile(r"\d+(?:\.\d+)?(?:[eE][+-]?\d+)?")
+
+
+def _foldMessages(messages: List[str]) -> List[str]:
+    """One line per template (the message with its numbers blanked), in first-seen order."""
+    groups: Dict[tuple, List[List[str]]] = {}
+    for message in messages:
+        template = tuple(_NUMBER.split(message))
+        groups.setdefault(template, []).append(_NUMBER.findall(message))
+    lines = []
+    for template, occurrences in groups.items():
+        slots = [_slotText([numbers[i] for numbers in occurrences])
+                 for i in range(len(template) - 1)]
+        text = template[0] + "".join(slot + rest for slot, rest in zip(slots, template[1:]))
+        lines.append(text if len(occurrences) == 1 else f"{text} (×{len(occurrences)})")
+    return lines
+
+
+def _slotText(values: List[str]) -> str:
+    """The values one number slot took: the value itself, or ``{a, b-c}``."""
+    distinct = list(dict.fromkeys(values))
+    if len(distinct) == 1:
+        return distinct[0]
+    if all(value.isdigit() for value in distinct):
+        pieces = _ranges(sorted({int(value) for value in distinct}))
+    else:
+        pieces = sorted(distinct, key=float)
+    if len(pieces) > 8:
+        pieces = pieces[:3] + ["…"] + pieces[-2:]
+    joined = ", ".join(pieces)
+    return joined if len(pieces) == 1 else "{" + joined + "}"
+
+
+def _ranges(numbers: List[int]) -> List[str]:
+    pieces, start = [], numbers[0]
+    for previous, current in zip(numbers, numbers[1:] + [None]):
+        if current != previous + 1:
+            pieces.append(str(start) if start == previous else f"{start}-{previous}")
+            start = current
+    return pieces
