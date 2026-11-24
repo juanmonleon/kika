@@ -680,14 +680,19 @@ def _evaluated(product):
 
 
 def _sigmaOf(suite, node):
-    """σ of *node*: its own, or the sum its ``reference`` points at."""
+    """σ of *node* as MF3 states it: its own, or the sum its ``reference`` points at."""
     from kika.nuclear_data.model.cross_section_forms import Reference
+
+    from .encode import mf3Table
 
     form = node.crossSection.get(EVAL_LABEL) if hasattr(node.crossSection, "get") else None
     if isinstance(form, Reference):
-        target = suite.findReactionByENDF_MT(node.ENDF_MT)
-        return target.crossSection[EVAL_LABEL] if target is not None else None
-    return form
+        node = suite.findReactionByENDF_MT(node.ENDF_MT)
+        if node is None:
+            return None
+    elif form is None:
+        return None
+    return mf3Table(node)
 
 
 def _encodeProduction(suite, node, fields, mf, mt, mat, report):
