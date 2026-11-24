@@ -339,7 +339,9 @@ def _function(parent: ET.Element, form, report: ConversionReport,
         for child in form.function1ds:
             _function(container, child, report, where, nested=True,
                       parentAxes=form.axes)
-        _dropRepeatedOuter(container, report, where)
+        steps = _dropRepeatedOuter(container, report, where, warn=index is not None)
+        if steps:
+            return _stepRegions2d(parent, element, container, steps)
         return element
     if isinstance(form, XYs3d):
         element = ET.SubElement(parent, "XYs3d")
@@ -470,7 +472,7 @@ def _stepPieces(form, report: Optional[ConversionReport] = None) -> list:
 
 
 def _dropRepeatedOuter(container: ET.Element, report: ConversionReport,
-                       where: str) -> None:
+                       where: str, warn: bool = True) -> List[int]:
     """Drop a child that repeats the previous one's ``outerDomainValue`` and
     says exactly the same thing.
 
@@ -479,20 +481,52 @@ def _dropRepeatedOuter(container: ET.Element, report: ConversionReport,
     that does not increase (``multiD_XYs.py:393``), and its ENDF→GNDS drops the
     repeat; nothing is lost by doing the same, since the two are the same
     serialised node. A repeat that *differs* is a step in the incident energy,
-    which is not this case: it is left in place and reported.
+    which is not this case: it is left in place and its position returned, so
+    the caller can split there; with ``warn`` it is reported as well.
     """
     previous = None
+    steps = []
     for child in list(container):
         outer = child.attrib.get("outerDomainValue")
         if previous is not None and outer is not None                 and outer == previous.attrib.get("outerDomainValue"):
             if ET.tostring(child) == ET.tostring(previous):
                 container.remove(child)
                 continue
-            report.warn(
-                f"{where}: two different distributions at outerDomainValue="
-                f"{outer}; written both, which GNDS readers reject"
-            )
+            steps.append(list(container).index(child))
+            if warn:
+                report.warn(
+                    f"{where}: two different distributions at outerDomainValue="
+                    f"{outer}; written both, which GNDS readers reject"
+                )
         previous = child
+    return [] if warn else steps
+
+
+def _stepRegions2d(parent: ET.Element, element: ET.Element, container: ET.Element,
+                   steps: List[int]) -> ET.Element:
+    """An ``XYs2d`` with a step in its outer axis → the ``regions2d`` FUDGE writes.
+
+    One region per side of each step, the two sharing the outer value (U-238
+    B-VIII.1 MF5/MT18 steps at 20 MeV). The wrapper takes the attributes and the
+    axes; each region keeps the interpolation and gets its index.
+    """
+    shape = ("interpolation", "interpolationQualifier")
+    regions = ET.Element("regions2d", {k: v for k, v in element.attrib.items()
+                                       if k not in shape})
+    axes = element.find("axes")
+    if axes is not None:
+        regions.append(axes)
+    function2ds = ET.SubElement(regions, "function2ds")
+    children = list(container)
+    for position, (low, high) in enumerate(zip([0, *steps], [*steps, len(children)])):
+        region = ET.SubElement(function2ds, "XYs2d", {"index": str(position)})
+        region.attrib.update({k: v for k, v in element.attrib.items() if k in shape})
+        function1ds = ET.SubElement(region, "function1ds")
+        function1ds.extend(children[low:high])
+    where = list(parent).index(element)
+    parent.remove(element)
+    parent.insert(where, regions)
+    return regions
 
 
 def _hasDecreasingXYs1d(element: ET.Element) -> bool:

@@ -643,6 +643,16 @@ def isLinePiece(product) -> bool:
     return isinstance(form.angular, Isotropic2d) and hasattr(form.energy, "function1ds")
 
 
+def _spectrumPoints(node):
+    """A continuum node's (E', f): a Regions1d (a step in E', as GNDS writes one) is
+    flattened with the step's two values at the shared E', as LAW=1 states it."""
+    from kika.nuclear_data.model import Regions1d
+    if isinstance(node, Regions1d):
+        xs, ys, _ = node.toEndfRegions()
+        return xs, ys
+    return node.xs, node.ys
+
+
 def deriveLineSpectrum(pieces, total, awr: Optional[float], index: int, mt: int, report):
     """Photon products → one LAW=1 record whose nodes open with their lines.
 
@@ -725,9 +735,7 @@ def deriveLineSpectrum(pieces, total, awr: Optional[float], index: int, mt: int,
         if e in contNodes:
             node = contNodes[e]
             scale = float(multiplicities[cont.label].evaluate(e)) / tAt[e] if tAt[e] else 1.0
-            from .energy_angle import _points
-
-            for x, f in zip(*_points(node)):
+            for x, f in zip(*_spectrumPoints(node)):
                 row.extend([float(x), float(f) * scale])
         values.append(row)
 
@@ -736,7 +744,9 @@ def deriveLineSpectrum(pieces, total, awr: Optional[float], index: int, mt: int,
     if cont is not None:
         energy = forms[cont.label].energy
         outer = int(getattr(energy, "endfInterpolationCode", 2) or 2)
-        lep = int(getattr(energy.function1ds[0], "endfInterpolationCode", 2) or 2)
+        first = energy.function1ds[0]
+        first = first.function1ds[0] if isinstance(first, Regions1d) else first
+        lep = int(getattr(first, "endfInterpolationCode", 2) or 2)
     fields = {
         "pieces": meta,
         "continuum": cont.label if cont is not None else None,

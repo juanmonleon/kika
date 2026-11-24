@@ -18,8 +18,9 @@ is missing. An approximation looks like data.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
-from typing import List
+from typing import Dict, List
 
 __all__ = ["ConversionReport"]
 
@@ -186,5 +187,104 @@ class ConversionReport:
                 parts.append(f"{len(entries)} {name}")
         return ", ".join(parts) if parts else "clean"
 
+    def describe(self) -> str:
+        """Every entry, grouped by kind, with near-identical messages folded into one line.
+
+        Kinds come in the order losses, approximations, unsupported, warnings, each under
+        a heading with its count. Messages that differ only in their numbers (one per MT,
+        per resonance group, per covariance section) are folded into one line that keeps
+        every number that varied, as compact ranges (``MT51-89``), and ends with
+        ``(×n)``. Folding is only in the text: the lists keep one entry per occurrence.
+
+        Returns
+        -------
+        str
+            The text that ``print(report)`` shows; ``"clean"`` when the report has no
+            entry at all.
+        """
+        if self.isEmpty:
+            return "clean"
+        blocks = []
+        for kind, heading in _HEADINGS:
+            entries = getattr(self, kind)
+            if not entries:
+                continue
+            lines = [f"{heading} ({len(entries)})"]
+            lines.extend(f"  - {line}" for line in _foldMessages(entries))
+            blocks.append("\n".join(lines))
+        return "\n".join(blocks)
+
+    def __str__(self) -> str:
+        return self.describe()
+
     def __repr__(self) -> str:
         return f"ConversionReport({self.summary()})"
+
+
+_HEADINGS = (("losses", "Losses"), ("approximations", "Approximations"),
+             ("unsupported", "Unsupported"), ("warnings", "Warnings"))
+
+_NUMBER = re.compile(r"\d+(?:\.\d+)?(?:[eE][+-]?\d+)?")
+
+
+def _foldMessages(messages: List[str]) -> List[str]:
+    """One line per template (the message with its numbers blanked), in first-seen order."""
+    groups: Dict[tuple, List[List[str]]] = {}
+    for message in messages:
+        template = tuple(_NUMBER.split(message))
+        groups.setdefault(template, []).append(_NUMBER.findall(message))
+    lines = []
+    for template, occurrences in groups.items():
+        lines.extend(_foldGroup(template, occurrences))
+    return lines
+
+
+def _foldGroup(template: tuple, occurrences: List[List[str]]) -> List[str]:
+    """Fold only numbers that vary one-to-one with the first varying one.
+
+    Any other varying number splits the group: 'H1' and 'H2' are two particles, and
+    URR (L, J) pairs folded slot by slot would claim combinations that never occurred.
+    """
+    varying = [i for i in range(len(template) - 1)
+               if len({numbers[i] for numbers in occurrences}) > 1]
+    if varying:
+        first = varying[0]
+        splitting = [i for i in varying[1:] if not _oneToOne(occurrences, first, i)]
+        if splitting:
+            parts: Dict[tuple, List[List[str]]] = {}
+            for numbers in occurrences:
+                parts.setdefault(tuple(numbers[i] for i in splitting), []).append(numbers)
+            return [line for part in parts.values() for line in _foldGroup(template, part)]
+    slots = [_slotText([numbers[i] for numbers in occurrences])
+             for i in range(len(template) - 1)]
+    text = template[0] + "".join(slot + rest for slot, rest in zip(slots, template[1:]))
+    return [text if len(occurrences) == 1 else f"{text} (×{len(occurrences)})"]
+
+
+def _oneToOne(occurrences: List[List[str]], a: int, b: int) -> bool:
+    pairs = {(numbers[a], numbers[b]) for numbers in occurrences}
+    return len(pairs) == len({x for x, _ in pairs}) == len({y for _, y in pairs})
+
+
+def _slotText(values: List[str]) -> str:
+    """The values one number slot took: the value itself, or ``{a, b-c}``."""
+    distinct = list(dict.fromkeys(values))
+    if len(distinct) == 1:
+        return distinct[0]
+    if all(value.isdigit() for value in distinct):
+        pieces = _ranges(sorted({int(value) for value in distinct}))
+    else:
+        pieces = sorted(distinct, key=float)
+    if len(pieces) > 8:
+        pieces = pieces[:3] + ["…"] + pieces[-2:]
+    joined = ", ".join(pieces)
+    return joined if len(pieces) == 1 else "{" + joined + "}"
+
+
+def _ranges(numbers: List[int]) -> List[str]:
+    pieces, start = [], numbers[0]
+    for previous, current in zip(numbers, numbers[1:] + [None]):
+        if current != previous + 1:
+            pieces.append(str(start) if start == previous else f"{start}-{previous}")
+            start = current
+    return pieces
