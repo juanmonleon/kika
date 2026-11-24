@@ -955,7 +955,11 @@ def encodeMF2MT151(resonances: Resonances, provenance, report=None):
                     f"provenance records more resolved ranges than the model has "
                     f"regions ({len(resonances.resolved)})"
                 )
-            parameters = _encodeResolved(region.formalism, fields, report)
+            if (isinstance(region.formalism, RMatrix) and fields["lrf"] == 3
+                    and not any(group.spins for group in region.formalism.spinGroups)):
+                parameters = _encodeReichMooreSpinGroups(resonances, region, fields)
+            else:
+                parameters = _encodeResolved(region.formalism, fields, report)
             if isinstance(region.formalism, BreitWigner) or fields["lrf"] == 3:
                 bw = region.formalism
                 policy = bw.radiusPolicy
@@ -1077,6 +1081,178 @@ def _encodeResolved(formalism, fields: dict, report: ConversionReport):
         nlsc=fields["nlsc"] if getattr(formalism,'angularLCount',None) is None else formalism.angularLCount,
         lad=fields["lad"], l_values=lValues,
     )
+
+
+def _reichMooreRole(reaction) -> Optional[str]:
+    mt = reaction.reactionMT
+    if mt == 2 or (mt is None and reaction.label == "elastic"):
+        return "neutron"
+    if mt == 102 or (mt is None and reaction.label == "capture"):
+        return "capture"
+    if mt in (18, 19) or (mt is None and reaction.label in ("fission", "fissionA", "fissionB")):
+        return "fission"
+    return None
+
+
+def _channelRadius(holder) -> Optional[float]:
+    """The one radius a Reich-Moore channel or reaction states, in fm, or ``None``."""
+    radii = {r for r in (holder.hardSphereRadius, holder.scatteringRadius) if r is not None}
+    if len(radii) > 1:
+        raise ValueError(f"{holder.label!r} states a scattering radius and a different "
+                         f"hard-sphere radius; LRF=3 has one radius per l")
+    if radii and getattr(holder, "radiusUnit", None) not in (None, MODEL_RADIUS_UNIT):
+        raise ValueError(f"{holder.label!r} states its radius in {holder.radiusUnit!r}")
+    return radii.pop() if radii else None
+
+
+def _entranceSpinAllowed(l, s, j) -> bool:
+    return abs(l - s) <= j <= l + s and float(j - abs(l - s)).is_integer()
+
+
+def _signedJ(l, j, channelSpin, targetSpin) -> float:
+    """ENDF's AJ for total spin *j* entered with *channelSpin*: negative for the
+    lower channel spin (FUDGE's rule), checked against the reading every
+    reconstructor applies to AJ, so the sign cannot pick the other channel."""
+    low, high = abs(targetSpin - 0.5), targetSpin + 0.5
+
+    def read(aj):
+        s = low if aj < 0 else high
+        if not _entranceSpinAllowed(l, s, j):
+            s = high if aj < 0 else low
+        return s
+
+    for aj in ((-j, j) if channelSpin < targetSpin else (j, -j)):
+        if (aj != 0 or j == 0) and read(aj) == channelSpin:
+            return float(aj) + 0.0
+    raise ValueError(f"L={l} J={j:g} with channel spin {channelSpin:g} cannot be "
+                     f"stated by the sign of AJ")
+
+
+def reichMooreLBlocks(formalism, rangeRadius: float, targetSpin: float,
+                      atomicWeightRatio: Optional[float]) -> List[dict]:
+    """A Reich-Moore ``RMatrix`` grouped by (L, J, channel spin), as GNDS holds
+    it → LRF=3's l-blocks: ``{"l", "awri", "apl", "rows"}``, one per L in
+    ascending order.
+
+    ``apl`` is the l's own radius in fm, ``None`` where it is *rangeRadius*. A
+    row is ``(E, AJ, GN, GG, GFA, GFB)``, sorted as tuples within its L, which
+    is the order FUDGE writes. Raises ``ValueError`` naming the first thing LRF=3
+    cannot state.
+    """
+    if formalism.approximation != "ReichMoore":
+        raise ValueError(f"approximation {formalism.approximation!r} is not ReichMoore")
+    if formalism.boundaryCondition not in (None, "EliminateShiftFunction"):
+        raise ValueError(f"boundary condition {formalism.boundaryCondition!r}")
+    if formalism.reducedWidthAmplitudes:
+        raise ValueError("the widths are reduced-width amplitudes")
+    if formalism.relativisticKinematics:
+        raise ValueError("relativistic kinematics")
+    policy = formalism.radiusPolicy
+    if policy is not None and (policy.channelMode == "constant" or policy.phaseRadius is not None):
+        raise ValueError("a radius policy with its own channel or phase radius")
+    reactions = {r.label: r for r in formalism.resonanceReactions}
+    roles = {label: _reichMooreRole(r) for label, r in reactions.items()}
+    for label, role in roles.items():
+        if role is None:
+            raise ValueError(f"resonance reaction {label!r} is not elastic, capture or "
+                             f"fission (that is LRF=7)")
+        reaction = reactions[label]
+        if reaction.kinematics is not None or reaction.eliminated != (role == "capture"):
+            raise ValueError(f"resonance reaction {label!r} is not one LRF=3 implies")
+    elasticRadius = next((_channelRadius(r) for r in reactions.values()
+                          if roles[r.label] == "neutron"), None)
+
+    byL: dict = {}
+    for group in formalism.spinGroups:
+        if group.spins:
+            raise ValueError(f"spin group {group.label!r} states J per resonance")
+        if group.spin is None:
+            raise ValueError(f"spin group {group.label!r} states no J")
+        kinds = [roles.get(channel.resonanceReaction) for channel in group.channels]
+        if kinds.count("neutron") != 1 or kinds.count("capture") != 1 \
+                or kinds.count("fission") > 2 or len(kinds) != 2 + kinds.count("fission"):
+            raise ValueError(f"spin group {group.label!r} has channels {kinds}, not one "
+                             f"neutron, one capture and up to two fission")
+        for channel in group.channels:
+            if (channel.externalRMatrix is not None or channel.tabulatedBackground is not None
+                    or channel.additionalPhaseShift is not None or channel.phaseShiftMode
+                    or channel.boundaryConditionValue not in (None, 0.0)):
+                raise ValueError(f"channel {channel.label!r} of {group.label!r} carries "
+                                 f"a term LRF=3 has no field for")
+        entrance = group.channels[kinds.index("neutron")]
+        l = entrance.L
+        if entrance.channelSpin is None:
+            raise ValueError(f"spin group {group.label!r} states no entrance channel spin")
+        radius = _channelRadius(entrance)
+        radius = radius if radius is not None else elasticRadius
+        apl = None if radius is None or radius == rangeRadius else radius
+        awri = group.atomicWeightRatio if group.atomicWeightRatio is not None else atomicWeightRatio
+        if awri is None:
+            raise ValueError("no target mass to write AWRI from")
+        block = byL.setdefault(l, {"l": l, "awri": awri, "apl": apl, "rows": []})
+        if (block["apl"], block["awri"]) != (apl, awri):
+            raise ValueError(f"the spin groups of L={l} disagree on the radius or AWRI; "
+                             f"LRF=3 states one per l")
+        aj = _signedJ(l, float(group.spin), float(entrance.channelSpin), targetSpin)
+        neutron, capture = kinds.index("neutron"), kinds.index("capture")
+        fission = [k for k, kind in enumerate(kinds) if kind == "fission"]
+        for energy, widths in zip(group.energies, group.widths):
+            gf = [widths[k] for k in fission] + [0.0] * (2 - len(fission))
+            block["rows"].append((energy, aj, widths[neutron], widths[capture], *gf))
+    for block in byL.values():
+        block["rows"].sort()
+    return [byL[l] for l in sorted(byL)]
+
+
+def formalismAtomicWeightRatio(formalism) -> Optional[float]:
+    """AWRI as a resolved range states it: its own target's mass over the neutron's."""
+    pops = getattr(formalism, "PoPs", None)
+    particles = list(pops.particles.values()) if pops is not None else []
+    mass = particles[0].mass if len(particles) == 1 else None
+    if mass is None or mass.unit != "amu":
+        return None
+    return float(mass.value) / NEUTRON_MASS_AMU
+
+
+def resolvedRangeRadius(resonances, region):
+    """The radius a resolved range's AP states, in fm, as the encoder picks it:
+    the region's, else the formalism's, else the evaluation's."""
+    for radius in (region.scatteringRadius, region.formalism.scatteringRadius,
+                   resonances.scatteringRadius):
+        if radius is None:
+            continue
+        if isinstance(radius, ScatteringRadius):
+            if radius.isEnergyDependent or radius.constant is None:
+                return None
+            return float(radius.constant)
+        return float(radius)
+    return None
+
+
+def _encodeReichMooreSpinGroups(resonances, region, fields: dict):
+    """LRF=3 from a Reich-Moore range grouped by (L, J, channel spin)."""
+    from kika.endf.classes.mf2.mf2mt151 import (LValueBlock, ResolvedResonanceRange,
+                                                Resonance as EndfResonance)
+
+    formalism = region.formalism
+    radius = resolvedRangeRadius(resonances, region)
+    if radius is None:
+        raise ValueError("MF2/151 LRF=3: the range states no constant radius for AP")
+    awri = formalismAtomicWeightRatio(formalism)
+    blocks = reichMooreLBlocks(formalism, radius, float(fields["spi"]),
+                               awri if awri is not None else fields.get("awri"))
+    lValues = [
+        LValueBlock(awri=block["awri"], l=block["l"], num_resonances=len(block["rows"]),
+                    apl_or_qx=0.0 if block["apl"] is None else radiusToEndf(block["apl"]),
+                    lrx=0,
+                    resonances=[EndfResonance(energy=e, spin=aj, c3=gn, c4=gg, c5=gfa, c6=gfb)
+                                for e, aj, gn, gg, gfa, gfb in block["rows"]])
+        for block in blocks
+    ]
+    return ResolvedResonanceRange(
+        spi=fields["spi"], ap=fields["ap"], nls=len(lValues),
+        nlsc=formalism.angularLCount if formalism.angularLCount is not None else fields["nlsc"],
+        lad=fields["lad"], l_values=lValues)
 
 
 def _encodeRMLExtras(group, perGroup):
