@@ -58,6 +58,8 @@ def tapeOnlyData(suite, written: str = "the GNDS file") -> List[str]:
             raw = [p["lf"] for p in mf5.get("partials", ()) if "raw_lines" in p]
             if raw:
                 found["mf5"].append((_mt(path), raw))
+        if "mf7" in fields:
+            found["mf7"].append(getattr(node, "ENDF_MT", None) or _mt(path))
         mf6 = fields.get("mf6")
         if isinstance(mf6, dict):
             # Only the negative LAWs: a positive one kika does not map leaves its
@@ -101,6 +103,12 @@ def tapeOnlyData(suite, written: str = "the GNDS file") -> List[str]:
     if photons:
         sentences.append(f"photons: the sections kika could not model "
                          f"(MF{', MF'.join(photons)})")
+    if found["mf7"]:
+        sentences.append(f"MF7: the B array's digits, LLN, each TAB1 and TAB2's interpolation "
+                         f"regions and each temperature's LI "
+                         f"({', '.join(f'MT{mt}' for mt in dict.fromkeys(found['mf7']))})")
+    if "mf7mt451" in suiteFields:
+        sentences.append("MF7/MT451: NAS and the digits of SFI as the tape writes them")
     sentences.extend(_levelQmSentences(suite))
     return [f"not in {written}, kept only in the suite's ENDF provenance to write "
             f"the tape back: {sentence}" for sentence in sentences]
@@ -109,6 +117,7 @@ def tapeOnlyData(suite, written: str = "the GNDS file") -> List[str]:
 def decayTapeOnlyData(pops, written: str = "the GNDS file") -> List[str]:
     """:func:`tapeOnlyData` for a decay or fission-yield ``PoPs`` read from ENDF."""
     from .decay_sublibrary import DECAY_KEY, VERBATIM_KEY
+    from .fission_yields import FPY_KEY
 
     provenance = getattr(pops, "provenance", None)
     if not isinstance(provenance, EndfProvenance):
@@ -125,6 +134,15 @@ def decayTapeOnlyData(pops, written: str = "the GNDS file") -> List[str]:
             sentences.append("MF8/MT457: the section as read, which the model does not rebuild")
         elif overrides.get("fields"):
             sentences.append(f"MF8/MT457: the text of {len(overrides['fields'])} field(s) the "
+                             f"model holds as another number or not at all")
+    for mt, entry in sorted((fields.get(FPY_KEY) or {}).items()):
+        if len(entry.get("interp") or ()) > 1:
+            sentences.append(f"MF8/MT{mt}: the interpolation between incident energies (I)")
+        fpyOverrides = entry.get("overrides") or {}
+        if "verbatim" in fpyOverrides:
+            sentences.append(f"MF8/MT{mt}: the section as read, which the model does not rebuild")
+        elif fpyOverrides.get("fields"):
+            sentences.append(f"MF8/MT{mt}: the text of {len(fpyOverrides['fields'])} field(s) the "
                              f"model holds as another number or not at all")
     kept = fields.get(VERBATIM_KEY) or []
     if kept:

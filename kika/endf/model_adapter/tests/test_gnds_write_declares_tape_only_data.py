@@ -105,3 +105,21 @@ def test_a_level_qm_off_its_pops_energy_is_declared(zr90_b81_tape):
     found = [s.split("back: ", 1)[1] for s in tapeOnlyData(kika.read(zr90_b81_tape, covariances=False))]
     assert [s for s in found if s.startswith("MF3/")] == [
         "MF3/MT651: QM -6128816 eV; QI plus Y89_e1's energy gives -6128786 eV"]
+
+
+@pytest.mark.parametrize("tape, expected", [
+    ("micro_tsl_sch4.endf", ["MF7: the B array's digits, LLN, each TAB1 and TAB2's "
+                             "interpolation regions and each temperature's LI (MT2, MT4)"]),
+    ("micro_tsl_bemetal_elastic.endf", ["MF7: the B array's digits, LLN, each TAB1 and TAB2's "
+                                        "interpolation regions and each temperature's LI (MT2)",
+                                        "MF7/MT451: NAS and the digits of SFI as the tape "
+                                        "writes them"]),
+])
+def test_a_thermal_scattering_suite_declares_its_mf7_bookkeeping(tape, expected, tmp_path):
+    report = _writeGnds(kika.read(DATA / tape), tmp_path)
+    assert [m.split("back: ", 1)[1] for m in _tapeOnlyLosses(report)] == expected
+
+
+def test_a_fission_yield_tape_at_one_energy_declares_nothing(tmp_path):
+    report = kika.write(kika.read(DATA / "nfy-096_Cm_242.endf"), tmp_path / "out.xml", format="gnds")
+    assert not [m for m in report.losses if "kept only in the PoPs' ENDF provenance" in m]
