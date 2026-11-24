@@ -1069,8 +1069,11 @@ def _encodeResolved(formalism, fields: dict, report: ConversionReport):
             ]
             l = group.channels[0].L if group.channels else None
 
+        awri = group.atomicWeightRatio
+        if awri is None:
+            awri = formalismAtomicWeightRatio(formalism)
         lValues.append(LValueBlock(
-            awri=group.atomicWeightRatio, l=l,
+            awri=awri if awri is not None else fields.get("awri"), l=l,
             num_resonances=block["num_resonances"],
             apl_or_qx=c2, lrx=(1 if isinstance(formalism, BreitWigner) and group.competitiveChannel is not None
                               else block["lrx"]), resonances=records,

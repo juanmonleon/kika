@@ -1,6 +1,6 @@
 """MF2/151 for a suite whose resonances came without ENDF bookkeeping.
 
-Two cases are derived, both as FUDGE writes them
+Three cases are derived, as FUDGE writes them
 (``brownies/legacy/toENDF6/resonances``).
 
 **The scattering radius alone** (no ``resolved`` or ``unresolved`` region) is
@@ -29,9 +29,14 @@ them by L when the tape is written. Per range:
                 written
 ==============  ===========================================================
 
-Not derived, and reported lost: Breit-Wigner and R-Matrix Limited ranges (MF2
-is then not written at all, since a resolved range cannot be skipped) and the
-unresolved range (the resolved ones are written without it).
+**Breit-Wigner resolved ranges** are LRF=1/2, already one spin group per L. The
+fields are the same, less APL, AJ's sign, LAD and NLSC, which LRF=1/2 does not
+have; QX and LRX come from the group's competitive channel, else 0, reported
+where GT is not GN+GG+GF.
+
+Not derived, and reported lost: R-Matrix Limited ranges (MF2 is then not
+written at all, since a resolved range cannot be skipped) and the unresolved
+range (the resolved ones are written without it).
 """
 from __future__ import annotations
 
@@ -109,17 +114,7 @@ def _radiusOnly(resonances, context, report):
     return _provenance(context, [region])
 
 
-def _reichMooreRange(resonances, region, context, report) -> dict:
-    """The fields of one LRF=3 range; raises ``ValueError`` saying why it cannot be one."""
-    from kika.nuclear_data.model.resonances import RMatrix, radiusToEndf
-    from ..resonances import (formalismAtomicWeightRatio, reichMooreLBlocks,
-                              resolvedRangeRadius)
-
-    formalism = region.formalism
-    where = f"the resolved range {region.domainMin:g}-{region.domainMax:g} eV"
-    if not isinstance(formalism, RMatrix):
-        raise ValueError(f"{where} is {type(formalism).__name__}, whose ENDF "
-                         f"bookkeeping kika does not derive yet")
+def _rangeSpin(formalism, context, where) -> float:
     suiteSpin = _targetSpin(context.suite)
     pops = formalism.PoPs
     particles = list(pops.particles.values()) if pops is not None else []
@@ -129,19 +124,100 @@ def _reichMooreRange(resonances, region, context, report) -> dict:
     spin = rangeSpin if rangeSpin is not None else suiteSpin
     if spin is None:
         raise ValueError(f"{where}: no target spin is stated, and SPI is not assumed")
+    return spin
+
+
+def _fallbackAwri(formalism, groups, context, report, lrf, where) -> Optional[float]:
+    """MF1's AWR for the blocks the model gives no mass, or ``None`` when it gives all one."""
+    from ..resonances import formalismAtomicWeightRatio
+
+    if formalismAtomicWeightRatio(formalism) is not None             or all(g.atomicWeightRatio is not None for g in groups):
+        return None
+    if context.awr is None:
+        raise ValueError(f"{where}: no target mass to write AWRI from")
+    report.approximated(
+        f"MF2/151 LRF={lrf}, {where}: the range states no target mass, so AWRI "
+        f"is MF1's AWR {float(context.awr):g}")
+    return float(context.awr)
+
+
+def _breitWignerRange(resonances, region, context, report, where) -> dict:
+    """The fields of one LRF=1/2 range; raises ``ValueError`` saying why it cannot be one."""
+    import math
+
+    from kika.nuclear_data.model.resonances import BreitWignerApproximation, radiusToEndf
+    from ..resonances import resolvedRangeRadius
+
+    formalism = region.formalism
+    lrf = {BreitWignerApproximation.singleLevel: 1,
+           BreitWignerApproximation.multiLevel: 2}[BreitWignerApproximation(formalism.approximation)]
+    spin = _rangeSpin(formalism, context, where)
+    radius = resolvedRangeRadius(resonances, region)
+    policy = formalism.radiusPolicy
+    if radius is None or (policy is not None and policy.phaseRadius is not None):
+        raise ValueError(f"{where} states no constant scattering radius for AP")
+    if policy is not None and policy.channelMode == "constant":
+        raise ValueError(f"{where} states a channel radius of its own (NAPS=2)")
+    groups = formalism.resonanceParameters.spinGroups
+    if len({g.L for g in groups}) != len(groups):
+        raise ValueError(f"{where} has two spin groups of one L")
+    for group in groups:
+        if group.scatteringRadius is not None and group.scatteringRadius != radius:
+            raise ValueError(f"{where}: L={group.L} states its own radius, which "
+                             f"LRF={lrf} has no field for")
+    awri = _fallbackAwri(formalism, groups, context, report, lrf, where)
+    unlisted = sum(1 for g in groups if g.competitiveChannel is None for r in g.resonances
+                   if r.totalWidth and not math.isclose(
+                       r.totalWidth, r.neutronWidth + r.captureWidth + r.fissionWidth,
+                       rel_tol=5e-6, abs_tol=1e-12))
+    if unlisted:
+        report.approximated(
+            f"MF2/151 LRF={lrf}, {where}: {unlisted} resonance(s) have GT unequal "
+            f"to GN+GG+GF and the model states no competitive channel, so LRX is "
+            f"written 0 and the difference stays in GT as the model has it")
+    calculate = (policy.channelMode == "mass" if policy is not None
+                 else bool(formalism.calculateChannelRadius))
+    return {"kind": "resolved", "lru": 1, "lrf": lrf, "nro": 0, "naps": 0 if calculate else 1,
+            "el": float(region.domainMin), "eh": float(region.domainMax),
+            "spi": spin, "ap": float(radiusToEndf(radius)), "nls": len(groups),
+            "nlsc": 0, "lad": 0, "abn": 1.0, "isotope_index": 0,
+            **({} if awri is None else {"awri": awri}),
+            "l_blocks": [{"l": g.L,
+                          "lrx": 0 if g.competitiveChannel is None else 1,
+                          "qx": 0.0 if g.competitiveChannel is None else g.competitiveChannel.Q,
+                          "num_resonances": len(g.resonances)} for g in groups]}
+
+
+def _resolvedRange(resonances, region, context, report) -> dict:
+    from kika.nuclear_data.model.resonances import BreitWigner, RMatrix
+
+    where = f"the resolved range {region.domainMin:g}-{region.domainMax:g} eV"
+    if isinstance(region.formalism, BreitWigner):
+        return _breitWignerRange(resonances, region, context, report, where)
+    if isinstance(region.formalism, RMatrix):
+        return _reichMooreRange(resonances, region, context, report, where)
+    raise ValueError(f"{where} is {type(region.formalism).__name__}, whose ENDF "
+                     f"bookkeeping kika does not derive")
+
+
+def _reichMooreRange(resonances, region, context, report, where) -> dict:
+    """The fields of one LRF=3 range; raises ``ValueError`` saying why it cannot be one."""
+    from kika.nuclear_data.model.resonances import radiusToEndf
+    from ..resonances import (formalismAtomicWeightRatio, reichMooreLBlocks,
+                              resolvedRangeRadius)
+
+    formalism = region.formalism
+    if formalism.approximation != "ReichMoore":
+        raise ValueError(f"{where} is an R-Matrix Limited range (LRF=7), whose ENDF "
+                         f"bookkeeping kika does not derive yet")
+    spin = _rangeSpin(formalism, context, where)
     radius = resolvedRangeRadius(resonances, region)
     if radius is None:
         raise ValueError(f"{where} states no constant scattering radius for AP")
-    awri = formalismAtomicWeightRatio(formalism)
-    if awri is None and any(g.atomicWeightRatio is None for g in formalism.spinGroups):
-        if context.awr is None:
-            raise ValueError(f"{where}: no target mass to write AWRI from")
-        awri = float(context.awr)
-        report.approximated(
-            f"MF2/151 LRF=3, {where}: the range states no target mass, so AWRI "
-            f"is MF1's AWR {awri:g}")
+    awri = _fallbackAwri(formalism, formalism.spinGroups, context, report, 3, where)
     try:
-        blocks = reichMooreLBlocks(formalism, radius, spin, awri)
+        blocks = reichMooreLBlocks(formalism, radius, spin,
+                                   formalismAtomicWeightRatio(formalism) or awri)
     except ValueError as why:
         raise ValueError(f"{where} cannot be LRF=3: {why}") from None
     policy = formalism.radiusPolicy
@@ -158,7 +234,7 @@ def _reichMooreRange(resonances, region, context, report) -> dict:
             "el": float(region.domainMin), "eh": float(region.domainMax),
             "spi": spin, "ap": float(radiusToEndf(radius)), "nls": len(blocks),
             "nlsc": 0 if nlsc is None else int(nlsc), "lad": 0, "abn": 1.0,
-            "isotope_index": 0, "awri": awri,
+            "isotope_index": 0, **({} if awri is None else {"awri": awri}),
             "l_blocks": [{"l": b["l"], "lrx": 0, "qx": 0.0, "num_resonances": len(b["rows"])}
                          for b in blocks]}
 
@@ -170,7 +246,7 @@ def deriveResonances(resonances, path, context: DerivationContext, report):
     regions = []
     for region in resonances.resolved:
         try:
-            regions.append(_reichMooreRange(resonances, region, context, report))
+            regions.append(_resolvedRange(resonances, region, context, report))
         except ValueError as why:
             report.lost(f"MF2/151: {why}, so MF2 is not written")
             return None
