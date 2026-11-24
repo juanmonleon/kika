@@ -725,7 +725,9 @@ def deriveLineSpectrum(pieces, total, awr: Optional[float], index: int, mt: int,
         if e in contNodes:
             node = contNodes[e]
             scale = float(multiplicities[cont.label].evaluate(e)) / tAt[e] if tAt[e] else 1.0
-            for x, f in zip(node.xs, node.ys):
+            from .energy_angle import _points
+
+            for x, f in zip(*_points(node)):
                 row.extend([float(x), float(f) * scale])
         values.append(row)
 
