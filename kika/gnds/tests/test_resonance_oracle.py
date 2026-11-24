@@ -193,8 +193,7 @@ def test_the_resonance_reactions_name_the_same_two_channels(fromGnds, fromEndf):
     }
     assert fromEndfReactions["capture"] == ("photon", True)
     assert fromEndfReactions["elastic"] == ("n", False)
-    # Both sides link each channel to its reaction node; ENDF's decoder does it
-    # by MT, and only for an MT the suite holds (not Fe-56's empty fission pair).
+    # ENDF's decoder links by MT, and only an MT the suite holds (not Fe-56's empty fission pair).
     def linked(suite):
         byLabel = {r.label: r.ENDF_MT for r in suite.reactions}
         return {r.reactionMT: byLabel[r.href.split("'")[1]]
