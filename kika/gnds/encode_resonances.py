@@ -201,7 +201,7 @@ def _rMatrix(parent: ET.Element, formalism: RMatrix,
     element = ET.SubElement(parent, "RMatrix")
     if formalism.radiusPolicy is not None and (formalism.radiusPolicy.channelMode=='constant' or formalism.radiusPolicy.phaseRadius is not None):
         report.unsupportedNode('independent RM radiusPolicy requires channel-radius normalization before GNDS serialization')
-    if formalism.angularLCount not in (None, 0):
+    if formalism.angularLCount not in (None, 0) and formalism.approximation != "ReichMoore":
         report.lost('RMatrix angularLCount (ENDF NLSC) has no native attribute in this GNDS writer')
     _set(element, label=formalism.label or "eval",
          approximation=formalism.approximation,
@@ -214,7 +214,7 @@ def _rMatrix(parent: ET.Element, formalism: RMatrix,
 
     container = ET.SubElement(element, "resonanceReactions")
     for reaction in reactions:
-        _resonanceReaction(container, reaction, report, domain)
+        _resonanceReaction(container, reaction, report, domain, formalism.boundaryCondition)
 
     container = ET.SubElement(element, "spinGroups")
     for group in groups:
@@ -349,6 +349,16 @@ def _rmRadiusOnChannels(formalism, groups, topRadius, report):
     return groups
 
 
+def _massStatesAwri(target, awri) -> bool:
+    """Whether the formalism's target mass is *awri* neutron masses, as the ENDF
+    reader writes it: then GNDS carries the AWRI in that PoPs."""
+    from kika._constants import NEUTRON_MASS_AMU
+
+    mass = getattr(target, "mass", None)
+    return (mass is not None and mass.unit == "amu"
+            and float(mass.value) == awri * NEUTRON_MASS_AMU)
+
+
 def _rmGroupsForGNDS(formalism, report):
     """Project per-row RM J and signed channel spin into true GNDS groups.
 
@@ -365,7 +375,7 @@ def _rmGroupsForGNDS(formalism, report):
             result.append(source);continue
         if target is None or target.spin is None:
             raise ValueError('serializing legacy RM rows requires modeled target spin')
-        if source.atomicWeightRatio is not None:
+        if source.atomicWeightRatio is not None and not _massStatesAwri(target, source.atomicWeightRatio):
             report.lost(f'RM {source.label}: per-group atomicWeightRatio has no native GNDS slot; supply physical particle masses for a normalized GNDS evaluation')
         # `spinGroup/@parity` is required (gnds.xsd and FUDGE's reader alike) and
         # LRF=3 states no target parity. FUDGE's ENDF->GNDS assumes a positive
@@ -393,11 +403,24 @@ def _rmGroupsForGNDS(formalism, report):
     return result
 
 
+def _fudgePenetrabilityAndShift(reaction, boundaryCondition):
+    """PNT and SHF as FUDGE writes them back to ENDF (``writeRMatrixParticlePairs``)."""
+    penetrability = "automatic" if reaction.reactionMT in (18, 19, 102) else "calculate"
+    if boundaryCondition == "EliminateShiftFunction" or reaction.eliminated:
+        return penetrability, "zero"
+    return penetrability, "brune" if boundaryCondition == "Brune" else "calculate"
+
+
 def _resonanceReaction(parent: ET.Element, reaction, report: ConversionReport,
-                       domain) -> None:
+                       domain, boundaryCondition=None) -> None:
     element = ET.SubElement(parent, "resonanceReaction")
-    if reaction.kinematics is not None:
-        report.lost(f"resonanceReaction {reaction.label!r}: channel-local particle properties and PNT/SHF require PoPs/link normalization; this writer does not serialize them")
+    kinematics = reaction.kinematics
+    if kinematics is not None:
+        report.lost(f"resonanceReaction {reaction.label!r}: channel-local particle properties require PoPs/link normalization; this writer does not serialize them")
+        if (kinematics.penetrability, kinematics.shift) != _fudgePenetrabilityAndShift(reaction, boundaryCondition):
+            report.lost(f"resonanceReaction {reaction.label!r}: PNT/SHF ({kinematics.penetrability}, "
+                        f"{kinematics.shift}) are not what FUDGE derives from the reaction and the "
+                        f"boundary condition, and GNDS has no node for them")
     _set(element, label=reaction.label, ejectile=reaction.ejectile,
          eliminated=_true(reaction.eliminated))
     if reaction.href:

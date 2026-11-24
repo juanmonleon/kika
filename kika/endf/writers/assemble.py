@@ -211,9 +211,8 @@ def _mf2Sections(suite, mat, report):
     provenance = getattr(resonances, "provenance", None)
     if provenance is None:
         report.lost(
-            "the suite carries resonances but no ENDF provenance for them, so "
-            "MF2/151 cannot be written: QX, LRX, LAD and the particle-pair "
-            "columns have no model node and would have to be invented"
+            "the suite carries resonances but no ENDF provenance for them, and "
+            "none could be derived from the model, so MF2/151 is not written"
         )
         return [], report
 

@@ -33,6 +33,10 @@ class NCAssembler:
         self.ctx, self.mf = ctx, mf
         self.sections, self.usable = sections, usable
         self._central_cache = {}
+        # check_nc asks for the same blocks once per MT of a connected set
+        # (O-16 B-VIII.1: 4 901 primitives for a few hundred distinct ones).
+        self._primitives = {}
+        self._blocks = {}
         self.rules = {}
         for mt, sec in sections.items():
             self.rules[mt] = [n for s in sec.subsections
@@ -171,6 +175,12 @@ class NCAssembler:
         return y
 
     def primitive(self, a, b, grid, active_a, active_b):
+        key = (a, b, grid.tobytes(), active_a.tobytes(), active_b.tobytes())
+        if key not in self._primitives:
+            self._primitives[key] = self._primitive(a, b, grid, active_a, active_b)
+        return self._primitives[key]
+
+    def _primitive(self, a, b, grid, active_a, active_b):
         from .covariances import _mat1, _expected_nt
 
         # Prefer a declared orientation; an absent cross block is zero by
@@ -214,6 +224,12 @@ class NCAssembler:
         return total
 
     def block(self, a, b, grid):
+        key = (a, b, grid.tobytes())
+        if key not in self._blocks:
+            self._blocks[key] = self._block(a, b, grid)
+        return self._blocks[key].copy()
+
+    def _block(self, a, b, grid):
         wa,wb = self.weights(a,grid),self.weights(b,grid)
         total = np.zeros((len(grid)-1,len(grid)-1))
         for i,ci in wa.items():
