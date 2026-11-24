@@ -1,9 +1,5 @@
-"""A summed MT with MF33 and no MF3 gets a crossSectionSum for its covariance to name.
-
-ENDF/B-VIII.1 Fe-56 states MF33/MT103 and no MF3/MT103: the (n,p) sum is
-MT600-649's. FUDGE writes it as a ``crossSectionSum`` of those (NNDC's
-``sum(z,p)``) and, where the tape has no MF3 for it, flags it ``omit`` so that
-toENDF6 does not write one (``toENDF6/sums.py``). kika does both.
+"""B-VIII.1 Fe-56 MF33/MT103 has no MF3: kika names it with a crossSectionSum of MT600-649, as
+NNDC's ``sum(z,p)``, flagged with FUDGE's ``omit`` (which NNDC's Fe-56 lacks) so no MF3 is written.
 """
 from __future__ import annotations
 

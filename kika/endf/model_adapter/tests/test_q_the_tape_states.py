@@ -1,11 +1,5 @@
-"""MF3's QM and QI come back through GNDS where the derivation's rule would move them.
-
-Back to ENDF, kika applies FUDGE's rules: a fission reaction's QM = QI is MF1/458's
-ER at thermal, and a level reaction's QM is QI plus the level's PoPs energy. An
-evaluation that does not follow them (ENDF/B-VIII.1 U-238 MT18: QM 197.786 MeV,
-ER 196.535 MeV; Zr-90 MT651: QM - QI 908970 eV, MF8's level 909000 eV) keeps its
-numbers through a flag: FUDGE's ``QI=`` on a fission Q, which then states QM, and
-kika's ``decayQ`` on a level's decay Q. A tape that follows the rules gets none.
+"""MF3's QM/QI survive GNDS where FUDGE's rules would move them (B-VIII.1 U-238 MT18, Zr-90 MT651):
+a ``QI=`` flag on a fission Q, a ``decayQ`` flag on a level's decay Q, none on a tape that follows them.
 """
 from __future__ import annotations
 
