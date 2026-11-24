@@ -53,6 +53,7 @@ from kika.nuclear_data.model import (AngularEnergy, AngularTwoBody,
                                      Constant1d, CovarianceMatrix,
                                      CrossSectionSum, DiscreteGamma,
                                      EnergyAngular, Evaluated, Evaporation,
+                                     Heated, MonteCarlo_cdf,
                                      FissionEnergyRelease, GeneralEvaporation,
                                      Isotropic2d, MadlandNix,
                                      SimpleMaxwellianFission, Watt,
@@ -399,6 +400,50 @@ def _crossSectionDomain(reaction):
 #: FUDGE's ``fissionGenre`` by MT (``ENDF_ITYPE_0.py``).
 _FISSION_GENRE = {18: "total", 19: "firstChance", 20: "secondChance",
                   21: "thirdChance", 38: "fourthChance"}
+
+
+def _twoBodyLabel(product) -> Optional[str]:
+    """The label of *product*'s own ``angularTwoBody`` (not a recoil), or ``None``.
+
+    A bare ``Isotropic2d`` counts: the writer spells it as an isotropic
+    ``angularTwoBody`` (an MF4 with LTT=0, Fe-56's alphas in MT800-818).
+    """
+    forms = [] if product.distribution is None else list(product.distribution.items())
+    for label, form in forms:
+        if (isinstance(form, AngularTwoBody) and not form.isRecoil) or isinstance(form, Isotropic2d):
+            return label or "eval"
+    return None
+
+
+def _unspecifiedOnly(product) -> bool:
+    forms = [] if product.distribution is None else list(product.distribution.values())
+    return all(isinstance(form, Unspecified) for form in forms)
+
+
+def _recoilNode(distribution: ET.Element, label: str, href: str) -> None:
+    node = ET.SubElement(distribution, "angularTwoBody")
+    _set(node, label=label, productFrame="centerOfMass")
+    _set(ET.SubElement(node, "recoil"), href=href)
+
+
+def _residualPid(suite, mt: int, ejectile) -> Optional[str]:
+    """The residual of two-body MT *mt*: the target for MT2, else the series' level."""
+    from kika.nuclear_data.model.endf_conversion import levelSeries
+    from kika.nuclear_data.model.pops import pidFromZA, zaFromPid
+
+    target = getattr(suite, "target", None)
+    if mt == 2:
+        return target if ejectile.pid == (getattr(suite, "projectile", None) or "n") else None
+    series = levelSeries(mt)
+    try:
+        targetZA = zaFromPid(target)
+        projectileZA = zaFromPid(getattr(suite, "projectile", None) or "n")
+        ejectileZA = zaFromPid(ejectile.pid)
+    except (TypeError, ValueError):
+        return None
+    if series is None or ejectileZA != series[1] or not targetZA:
+        return None
+    return pidFromZA(targetZA + projectileZA - ejectileZA, series[2])
 
 
 def _endfGenre(mt: Optional[int]) -> Optional[str]:
@@ -792,40 +837,64 @@ class _SuiteWriter:
         _set(element, genre=genre, process=channel.process)
         self.Q(element, channel.Q, where)
         products = ET.SubElement(element, "products")
+        written = []
         for product in channel.products:
+            before = len(products)
             self.product(products, product, where, mt, domain)
-        if mt == 2:
-            self.elasticRecoil(products, channel, where, domain)
+            written.append((product, products[before] if len(products) > before else None))
+        if mt is not None:
+            self.twoBodyRecoil(products, channel, written, where, mt, domain)
         if channel.fissionFragmentData is not None:
             self.fissionFragmentData(element, channel.fissionFragmentData, where)
 
-    def elasticRecoil(self, products: ET.Element, channel, where: str,
-                      domain) -> None:
-        """The target's recoil in elastic scattering, which ENDF leaves implicit.
+    def twoBodyRecoil(self, products: ET.Element, channel, written, where: str,
+                      mt: int, domain) -> None:
+        """The residual's recoil in a two-body reaction, which ENDF leaves implicit.
 
-        An ENDF MT2 states the neutron's angular distribution (MF4) and nothing
-        about the target, so the decoded channel has one product. GNDS spells a
-        two-body channel with both bodies, the second a ``recoil`` of the first,
-        and FUDGE's resonance reconstruction needs them: it reads the elastic
-        channel's particle pair off this reaction's products
-        (``reconstructResonances.py``, ``pA, pB = ...['particles']``) and stops
-        on a pair of one. Written the way FUDGE's ENDF->GNDS writes it and the
-        way kika writes a level residual's recoil; the model is left as decoded.
+        ENDF states the ejectile's angular distribution and nothing about the
+        residual. FUDGE's ENDF->GNDS writes the residual as a product whose
+        ``angularTwoBody`` is a ``recoil`` of the ejectile's (NNDC's Fe-56 MT51 and
+        MT600), and its resonance reconstruction reads the elastic pair off MT2's
+        products. So the writer gives a residual the model has as ``unspecified``
+        that recoil, and adds the residual when the model has none (the target in
+        MT2, the ground state of a series). The model is left as decoded. A
+        processed suite gets MT2's only, which ``processed.py`` undoes on reading.
         """
-        target = getattr(self.suite, "target", None)
-        bodies = list(channel.products)
-        if target is None or len(bodies) != 1 or bodies[0].pid != "n":
+        if (channel.genre or _endfGenre(mt)) != "twoBody":
             return
-        neutron = bodies[0]
-        forms = [] if neutron.distribution is None else list(neutron.distribution.items())
-        twoBody = [label for label, form in forms if isinstance(form, AngularTwoBody)]
-        if not twoBody:
+        if any(isinstance(style, (Heated, MonteCarlo_cdf))
+               for style in getattr(self.suite, "styles", None) or ()) and (
+                mt != 2 or len(list(channel.products)) != 1):
+            # processed._oneTwoBodyNeutron is the one recoil it knows to undo.
+            return
+        ejectiles = [(p, e) for p, e in written
+                     if p.pid != "photon" and _twoBodyLabel(p) is not None]
+        if len(ejectiles) != 1 or ejectiles[0][1] is None:
+            return
+        ejectile, ejectileElement = ejectiles[0]
+        label = _twoBodyLabel(ejectile)
+        href = (f"../../../../product[@label='{ejectile.label or ejectile.pid}']"
+                f"/distribution/angularTwoBody[@label='{label}']")
+        others = [(p, e) for p, e in written if p is not ejectile and p.pid != "photon"]
+        if others:
+            residual, element = others[0]
+            if len(others) != 1 or element is None or not _unspecifiedOnly(residual):
+                return
+            distribution = element.find("distribution")
+            for child in list(distribution):
+                distribution.remove(child)
+            _recoilNode(distribution, label, href)
+            self.report.warn(f"{where}: the residual's unspecified distribution is "
+                             f"written as the ejectile's recoil, as FUDGE writes it")
+            return
+        pid = _residualPid(self.suite, mt, ejectile)
+        if pid is None:
             return
         if domain is None:
             domain = tuple(float(v) for v in self.domain)
-        label = twoBody[0] or "eval"
-        element = ET.SubElement(products, "product")
-        _set(element, pid=target, label=target)
+        element = ET.Element("product")
+        products.insert(list(products).index(ejectileElement) + 1, element)
+        _set(element, pid=pid, label=pid)
         multiplicity = ET.SubElement(element, "multiplicity")
         constant = ET.SubElement(multiplicity, "constant1d")
         _set(constant, label="eval", value="1",
@@ -833,14 +902,9 @@ class _SuiteWriter:
         axes = ET.SubElement(constant, "axes")
         _set(ET.SubElement(axes, "axis"), index="1", label="energy_in", unit="eV")
         _set(ET.SubElement(axes, "axis"), index="0", label="multiplicity", unit="")
-        distribution = ET.SubElement(element, "distribution")
-        node = ET.SubElement(distribution, "angularTwoBody")
-        _set(node, label=label, productFrame="centerOfMass")
-        _set(ET.SubElement(node, "recoil"),
-             href=(f"../../../../product[@label='{neutron.label or neutron.pid}']"
-                   f"/distribution/angularTwoBody[@label='{label}']"))
-        self.report.warn(f"{where}: the target's elastic recoil is written as a "
-                         f"second product, as FUDGE writes it; the model has one")
+        _recoilNode(ET.SubElement(element, "distribution"), label, href)
+        self.report.warn(f"{where}: the residual's recoil is written as a product, "
+                         f"as FUDGE writes it; the model has none")
 
     def fissionFragmentData(self, parent: ET.Element, data, where: str) -> None:
         """§18.4, ``gnds.xsd:1296-1335``: delayed neutrons and the energy release.
