@@ -467,7 +467,7 @@ def _levelQOfTheTape(suite) -> None:
     """
     from kika._records import format_endf_number
     from kika.nuclear_data.model.endf_conversion import (DECAY_Q_FLAG, EndfConversionFlags,
-                                                         residualDecayQHref)
+                                                         reactionQI, residualDecayQHref)
     from .derive.reactions import _decayingResidual, _levelEnergy
 
     flags = EndfConversionFlags.of(suite)
@@ -480,7 +480,7 @@ def _levelQOfTheTape(suite) -> None:
         if residual is None:
             continue
         level = _levelEnergy(suite, residual)
-        qi = getattr(reaction.outputChannel.Q, "value", None)
+        qi = reactionQI(reaction, suite)
         if (level is None or qi is None or getattr(provenance, "qm", None) is None
                 or format_endf_number(float(qi) + level) == format_endf_number(float(provenance.qm))):
             continue
