@@ -30,6 +30,8 @@ def _writeGnds(suite, tmp_path):
                                        "uncertainties and the LDRV of promptProductKE"),
     ("micro_fe56_photons.endf", "photons: the sections kika could not model (MF12/52, "
                                 "MF14/52"),
+    ("micro_am241_activation.endf", "MF8 (NO=0): the decay data stated with the product "
+                                    "states (MT102)"),
 ])
 def test_what_the_reader_kept_for_the_tape_is_declared_once(tape, expected, tmp_path):
     suite = kika.read(DATA / tape)

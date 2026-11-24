@@ -15,7 +15,8 @@ from kika.nuclear_data.model.provenance import EndfProvenance
 from .derive import provenanceNodes
 from .fission_energy import MF1MT460_KEY
 from .photons import PHOTONS_VERBATIM_KEY
-from .productions import ACTIVATION_MF8_OPAQUE_KEY, ACTIVATION_VERBATIM_KEY
+from .productions import (ACTIVATION_MF8_KEY, ACTIVATION_MF8_OPAQUE_KEY,
+                          ACTIVATION_VERBATIM_KEY, _readMf8)
 
 __all__ = ["tapeOnlyData"]
 
@@ -85,7 +86,11 @@ def tapeOnlyData(suite) -> List[str]:
         count = sum(len(states) for states in opaque.values())
         sentences.append(f"MF8: {count} product state(s) that no MF9 or MF10 describes "
                          f"({_mts(opaque)})")
-    activation = suiteFields.get(ACTIVATION_VERBATIM_KEY) or {}
+    decay = _mf8DecayData(suiteFields.get(ACTIVATION_MF8_KEY) or {})
+    if decay:
+        sentences.append(f"MF8 (NO=0): the decay data stated with the product states "
+                         f"({', '.join(f'MT{mt}' for mt in decay)})")
+    activation =suiteFields.get(ACTIVATION_VERBATIM_KEY) or {}
     if activation:
         sentences.append(f"MF9/MF10: the sections kika could not model "
                          f"(MF{', MF'.join(activation)})")
@@ -113,6 +118,19 @@ def _mf6Sentences(entries) -> List[str]:
         sentences.append(f"MF6: the yields of the subsections that defer their "
                          f"distribution to another file ({'; '.join(deferring)})")
     return sentences
+
+
+def _mf8DecayData(kept: dict) -> List[str]:
+    """The MTs whose kept MF8 states carry §8.2 decay records, which no model node reads."""
+    mts = []
+    for mt, lines in kept.items():
+        try:
+            section = _readMf8(lines)
+        except (ValueError, IndexError, TypeError):
+            continue
+        if section.no == 0 and any(len(state.lines) > 1 for state in section.states):
+            mts.append(mt)
+    return mts
 
 
 def _particle(zap) -> str:
