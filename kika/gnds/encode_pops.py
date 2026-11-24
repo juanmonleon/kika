@@ -18,6 +18,11 @@ def _set(element, **attributes):
     return element
 
 
+#: Said once per report: a file writes one PoPs per suite and one per resonance formalism.
+_POPS_NOTE = ("PoPs serialization covers all represented particle fields; "
+              "unsupported source particle data remain in the decoding report")
+
+
 def writePoPs(root: ET.Element, pops, report: ConversionReport) -> ET.Element:
     """Write represented particle data; source losses stay in the reader report."""
     container = ET.SubElement(root, "PoPs")
@@ -105,9 +110,8 @@ def writePoPs(root: ET.Element, pops, report: ConversionReport) -> ET.Element:
                      label="eval", value=str(particle.charge), unit="e")
             _decayData(node, particle.decayData)
 
-    if len(pops):
-        report.warn("PoPs serialization covers all represented particle fields; "
-                    "unsupported source particle data remain in the decoding report")
+    if len(pops) and _POPS_NOTE not in report.warnings:
+        report.warn(_POPS_NOTE)
     return container
 
 
