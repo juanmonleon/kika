@@ -138,6 +138,18 @@ def mergedInterpolationRegions(regions):
     return merged
 
 
+def mf3Table(reaction, label: str = EVAL_LABEL, report=None):
+    """The σ form MF3 states for *reaction*: a resonancesWithBackground as its background table."""
+    from kika.nuclear_data.model.cross_section_forms import ResonancesWithBackground
+
+    form = reaction.crossSection[label]
+    if isinstance(form, ResonancesWithBackground):
+        provenance = getattr(reaction, "provenance", None)
+        joins = (getattr(provenance, "headerFields", None) or {}).get("backgroundJoins")
+        form = backgroundTable(form, reaction.label, report, joins)
+    return form
+
+
 def encodeMF3MT(reaction: Reaction, mat: Optional[int] = None,
                 report: Optional[ConversionReport] = None, *,
                 label: str = EVAL_LABEL, precision: str = "legacy",
@@ -187,12 +199,7 @@ def encodeMF3MT(reaction: Reaction, mat: Optional[int] = None,
             f"{held}. §16.1.1 requires an {EVAL_LABEL!r} form for an evaluated "
             f"file, and there is nothing to write"
         )
-    form = reaction.crossSection[label]
-    from kika.nuclear_data.model.cross_section_forms import ResonancesWithBackground
-
-    if isinstance(form, ResonancesWithBackground):
-        joins = (getattr(provenance, "headerFields", None) or {}).get("backgroundJoins")
-        form = backgroundTable(form, reaction.label, report, joins)
+    form = mf3Table(reaction, label, report)
     if not hasattr(form, "toEndfRegions"):
         raise TypeError(
             f"the {label!r} form of {reaction.label} is a "
