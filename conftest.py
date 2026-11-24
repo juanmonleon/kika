@@ -228,6 +228,7 @@ _TAPES: Dict[str, Sequence[str]] = {
     # between them is a reader defect rather than a physics difference. Not the
     # same tape as ``fe56_host`` — that is JEFF-4.0 with a JEFF-3.3 MF4 graft.
     "fe56_b81": ("endfb81/n-026_Fe_056.endf", "n-026_Fe_056.endf", "endfb8.1/n/26056.endf"),
+    "h1_b81": ("endfb81/n-001_H_001.endf", "n-001_H_001.endf", "endfb8.1/n/1001.endf"),
     # MF33 MT1 sums LB=5 (relative) and LB=8 (absolute, barns²): the smallest
     # real carrier of the mixed block, for the conversion through NJOY.
     "si28_b81": ("endfb81/n-014_Si_028.endf", "n-014_Si_028.endf"),
@@ -674,6 +675,7 @@ u5_boxer_tape = _tape_fixture("u5_boxer")
 fe56_gnds_tape = _tape_fixture("fe56_gnds")
 fe56_gnds_cov_tape = _tape_fixture("fe56_gnds_cov")
 fe56_b81_tape = _tape_fixture("fe56_b81")
+h1_b81_tape = _tape_fixture("h1_b81")
 si28_b81_tape = _tape_fixture("si28_b81")
 f19_b81_tape = _tape_fixture("f19_b81")
 o16_b81_tape = _tape_fixture("o16_b81")

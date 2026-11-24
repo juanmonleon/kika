@@ -237,6 +237,12 @@ def _law(form, frameOf):
     if isinstance(form, Uncorrelated) and isinstance(form.energy, DiscreteGamma):
         # One outgoing point, discrete, at both ends of the line's domain.
         return 1, {"lang": 1, "lep": 2, "nd": [1, 1], "na": [0, 0]}
+    from kika.nuclear_data.model import PrimaryGamma
+
+    if (isinstance(form, Uncorrelated) and isinstance(form.energy, PrimaryGamma)
+            and form.angular is not None and not isinstance(form.angular, Isotropic2d)):
+        functions, _ = toEndfTab2(form.angular)
+        return 2, {"lang": [0 if isinstance(f, Legendre) else 10 + _code(f) for f in functions]}
     if isinstance(form, Uncorrelated) and form.energy is not None:
         functions, _ = toEndfTab2(form.energy)
         return 1, {"lang": 1, "lep": _code(functions[0]),

@@ -102,17 +102,15 @@ def _formalism(lrf: int) -> str:
     return "BreitWigner" if lrf in (1, 2) else "RMatrix"
 
 
-def resonanceParametersHref(rangeIndex: int, formalism: str = "BreitWigner") -> str:
+def resonanceParametersHref(rangeIndex: Optional[int], formalism: str = "BreitWigner") -> str:
     """xPath to the resolved resonance table an MF32 covariance is about.
 
-    Follows the shape of :func:`kika.endf.model_adapter.covariances.reactionHref`
-    and carries the same caveat: the path matches what kika's own decoder builds
-    (``Resonances.resolved`` is a list here), not a GNDS-mandated spelling.
+    With one resolved range (``rangeIndex=None``) the path is FUDGE's and resolves
+    in a written GNDS file. Several ranges keep a positional ``[i]`` that only
+    kika's in-memory model understands; GNDS files use attribute predicates only.
     """
-    return (
-        f"/reactionSuite/resonances/resolved[{rangeIndex}]"
-        f"/{formalism}/resonanceParameters/table"
-    )
+    step = "resolved" if rangeIndex is None else f"resolved[{rangeIndex}]"
+    return f"/reactionSuite/resonances/{step}/{formalism}/resonanceParameters/table"
 
 
 def unresolvedParametersHref() -> str:
@@ -507,6 +505,11 @@ def decodeMF32MT(mf32mt, report: Optional[ConversionReport] = None):
     provenance = _sectionProvenance(mf32mt)
     covariances: List[ParameterCovariance] = []
 
+    resolvedRanges = sum(
+        1 for isotope in getattr(mf32mt, "isotopes", [])
+        for energyRange in isotope.energy_ranges
+        if energyRange.body is not None and type(energyRange.body).__name__ != "UnresolvedBody")
+
     for isotopeIndex, isotope in enumerate(getattr(mf32mt, "isotopes", [])):
         for rangeIndex, energyRange in enumerate(isotope.energy_ranges):
             body = energyRange.body
@@ -523,8 +526,9 @@ def decodeMF32MT(mf32mt, report: Optional[ConversionReport] = None):
                 )
 
             href = (unresolvedParametersHref() if kind == "UnresolvedBody"
-                    else resonanceParametersHref(rangeIndex,
-                                                 _formalism(energyRange.lrf)))
+                    else resonanceParametersHref(
+                        None if resolvedRanges == 1 else rangeIndex,
+                        _formalism(energyRange.lrf)))
 
             if kind == "UnresolvedBody":
                 forms = [_decodeUnresolved(body, href, report)]

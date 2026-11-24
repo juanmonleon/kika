@@ -947,7 +947,7 @@ def _restoreLaw(record: dict, form, mt: int):
             rows = [[float(line.value), 1.0], [float(line.value), 1.0]]
         elif isinstance(form, Uncorrelated):
             nodes, pairs = toEndfTab2(form.energy)
-            rows = [_interleave(node.xs, node.ys) for node in nodes]
+            rows = [_interleave(*_points(node)) for node in nodes]
         elif isinstance(form, EnergyAngular):
             nodes, pairs = toEndfTab3(form.xys3d)
             rows = [_legendreRows(node, index, mt) for node in nodes]
@@ -1075,6 +1075,17 @@ def _restoreLabAngleEnergy(form: AngularEnergy, index: int, mt: int):
 
     return MF6LawLabAngleEnergy(law=7, tab2_interp=pairs, blocks=blocks)
 
+
+
+def _points(node):
+    """``(xs, ys)`` of an outgoing table, its regions joined end to end."""
+    # GNDS writes a table with a discontinuity as regions1d; ENDF's LAW=1 LIST
+    # states the same jump as a repeated E'.
+    if hasattr(node, "xs"):
+        return node.xs, node.ys
+    pieces = node.function1ds
+    return (np.concatenate([piece.xs for piece in pieces]),
+            np.concatenate([piece.ys for piece in pieces]))
 
 
 def _interleave(xs, ys) -> List[float]:

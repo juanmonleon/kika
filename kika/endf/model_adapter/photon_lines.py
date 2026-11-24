@@ -635,6 +635,9 @@ def isLinePiece(product) -> bool:
     form = _evaluated(product)
     if product.pid != "photon" or not isinstance(form, Uncorrelated):
         return False
+    # A LAW=1 line states no angle: an anisotropic primary (H-1 capture) is LAW=2.
+    if form.angular is not None and not isinstance(form.angular, Isotropic2d):
+        return False
     if isinstance(form.energy, (DiscreteGamma, PrimaryGamma)):
         return True
     return isinstance(form.angular, Isotropic2d) and hasattr(form.energy, "function1ds")

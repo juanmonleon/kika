@@ -218,6 +218,25 @@ def test_the_photons_survive_a_gnds_round_trip(tmp_path):
     assert len(back.sums.multiplicitySums.byENDF_MT(102).summands) == 59
 
 
+def test_an_anisotropic_capture_photon_comes_back_from_gnds_as_law_2(h1_b81_tape, tmp_path):
+    """H-1 MT102: a primary photon with a Legendre angle and the deuteron recoil.
+
+    Treated as an MF6 line it came back isotropic and without the recoil.
+    """
+    import kika
+
+    out = tmp_path / "h1.gnds.xml"
+    kika.write(kika.read(h1_b81_tape), out)
+    tape = tmp_path / "h1.endf"
+    kika.write(kika.read(out), tape, format="endf")
+
+    def mf6Mt102(path):
+        return [line[:66] for line in Path(path).read_text().splitlines()
+                if line[70:75] == " 6102"]
+
+    assert mf6Mt102(tape) == mf6Mt102(h1_b81_tape)
+
+
 # ---------------------------------------------------------------------------
 # The three libraries
 # ---------------------------------------------------------------------------
