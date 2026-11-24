@@ -43,9 +43,23 @@ def test_decimals_and_exact_repeats_fold():
         report.lost(f"URR L={l} J={j}: not serialized")
     report.warn("same")
     report.warn("same")
-    lines = str(report).splitlines()
-    assert lines[1] == "  - URR L=0-1 J={0.5, 1.5}: not serialized (×3)"
-    assert lines[3] == "  - same (×2)"
+    assert str(report).splitlines() == [
+        "Losses (3)",
+        "  - URR L=0-1 J=0.5: not serialized (×2)",
+        "  - URR L=1 J=1.5: not serialized",
+        "Warnings (2)",
+        "  - same (×2)"]
+
+
+def test_a_digit_inside_a_name_is_not_folded_with_the_number_beside_it():
+    report = ConversionReport()
+    for mt, pid in ((600, "H1"), (601, "H1"), (650, "H2"), (651, "H2"), (51, "U238_e1"),
+                    (52, "U238_e2")):
+        report.warn(f"'MT{mt}' product '{pid}': no multiplicity")
+    assert str(report).splitlines()[1:] == [
+        "  - 'MT600-601' product 'H1': no multiplicity (×2)",
+        "  - 'MT650-651' product 'H2': no multiplicity (×2)",
+        "  - 'MT51-52' product 'U238_e1-2': no multiplicity (×2)"]
 
 
 def test_a_long_scatter_is_elided_and_the_lists_are_untouched():

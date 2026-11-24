@@ -235,11 +235,35 @@ def _foldMessages(messages: List[str]) -> List[str]:
         groups.setdefault(template, []).append(_NUMBER.findall(message))
     lines = []
     for template, occurrences in groups.items():
-        slots = [_slotText([numbers[i] for numbers in occurrences])
-                 for i in range(len(template) - 1)]
-        text = template[0] + "".join(slot + rest for slot, rest in zip(slots, template[1:]))
-        lines.append(text if len(occurrences) == 1 else f"{text} (×{len(occurrences)})")
+        lines.extend(_foldGroup(template, occurrences))
     return lines
+
+
+def _foldGroup(template: tuple, occurrences: List[List[str]]) -> List[str]:
+    """Fold only numbers that vary one-to-one with the first varying one.
+
+    Any other varying number splits the group: 'H1' and 'H2' are two particles, and
+    URR (L, J) pairs folded slot by slot would claim combinations that never occurred.
+    """
+    varying = [i for i in range(len(template) - 1)
+               if len({numbers[i] for numbers in occurrences}) > 1]
+    if varying:
+        first = varying[0]
+        splitting = [i for i in varying[1:] if not _oneToOne(occurrences, first, i)]
+        if splitting:
+            parts: Dict[tuple, List[List[str]]] = {}
+            for numbers in occurrences:
+                parts.setdefault(tuple(numbers[i] for i in splitting), []).append(numbers)
+            return [line for part in parts.values() for line in _foldGroup(template, part)]
+    slots = [_slotText([numbers[i] for numbers in occurrences])
+             for i in range(len(template) - 1)]
+    text = template[0] + "".join(slot + rest for slot, rest in zip(slots, template[1:]))
+    return [text if len(occurrences) == 1 else f"{text} (×{len(occurrences)})"]
+
+
+def _oneToOne(occurrences: List[List[str]], a: int, b: int) -> bool:
+    pairs = {(numbers[a], numbers[b]) for numbers in occurrences}
+    return len(pairs) == len({x for x, _ in pairs}) == len({y for _, y in pairs})
 
 
 def _slotText(values: List[str]) -> str:
