@@ -132,12 +132,12 @@ def _fallbackAwri(formalism, groups, context, report, lrf, where) -> Optional[fl
     from ..resonances import formalismAtomicWeightRatio
     from ..mf1_header import _massAmu
 
+    if all(g.atomicWeightRatio is not None for g in groups):
+        return None
     neutron = context.suite.PoPs.particles.get("n") if context.suite.PoPs is not None else None
     stated = formalismAtomicWeightRatio(formalism, _massAmu(neutron))
     if stated is not None:
         return stated
-    if all(g.atomicWeightRatio is not None for g in groups):
-        return None
     if context.awr is None:
         raise ValueError(f"{where}: no target mass to write AWRI from")
     report.approximated(
