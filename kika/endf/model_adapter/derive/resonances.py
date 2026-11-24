@@ -128,8 +128,7 @@ def _rangeSpin(formalism, context, where) -> float:
 
 
 def _fallbackAwri(formalism, groups, context, report, lrf, where) -> Optional[float]:
-    """The range's AWRI: its target's mass over the suite's neutron, MF1's AWR
-    when it states no mass, or ``None`` when every block states its own."""
+    """AWRI: target mass over the suite's neutron, else MF1's AWR; ``None`` if every block has one."""
     from ..resonances import formalismAtomicWeightRatio
     from ..mf1_header import _massAmu
 

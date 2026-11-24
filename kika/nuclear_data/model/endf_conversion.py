@@ -23,13 +23,10 @@ __all__ = ["ENDF_CONVERSION_INSTITUTION", "EndfConversionFlags", "parseFlags",
 #: The ``institution`` label FUDGE files the node under.
 ENDF_CONVERSION_INSTITUTION = "LLNL"
 
-#: FUDGE's flag on a crossSectionSum that has no MF3 section, which toENDF6
-#: then does not write (``toENDF6/sums.py``): NNDC's P-31 ``nonelastic``.
+#: FUDGE's flag on a crossSectionSum with no MF3 section (``toENDF6/sums.py``).
 OMIT_FLAG = "omit"
 
-#: kika's flag, on a level residual's decay ``Q``: MF3's QM is QI plus that Q, not
-#: plus the level's PoPs energy (FUDGE's rule, which B-VIII.1 Zr-90 MT651 does not
-#: follow: 908970 eV against MF8's 909000). FUDGE reads no flag on that href.
+#: kika's, on a level's decay ``Q`` (FUDGE reads none there): QM is QI plus it, not the level.
 DECAY_Q_FLAG = "decayQ"
 
 #: The MTs whose GNDS ``Q`` is the ground-state Q (ENDF's QM) and whose QI is a

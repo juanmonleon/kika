@@ -129,11 +129,7 @@ def attachLumps(endf, suite, report):
 
 
 def attachCovarianceSums(endf, suite, report):
-    """A crossSectionSum for each summed MT that has MF33 and no MF3 (B-VIII.1 Fe-56 MT103).
-
-    As FUDGE builds it (NNDC's ``sum(z,p)``): its partials' σ added, Q the largest
-    of theirs. ENDF states no MF3 for it, so it carries FUDGE's ``omit`` flag.
-    """
+    """A crossSectionSum flagged ``omit`` for a summed MT with MF33 and no MF3 (Fe-56 MT103)."""
     from kika._constants import MF3_SUM_RULES, mf3SumComponents
     from kika.algebra import add
     from kika.algebra.laws import interval_laws

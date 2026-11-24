@@ -1208,11 +1208,7 @@ def reichMooreLBlocks(formalism, rangeRadius: float, targetSpin: float,
 
 
 def formalismAtomicWeightRatio(formalism, neutronMass: Optional[float] = None) -> Optional[float]:
-    """AWRI as a resolved range states it: its own target's mass over the neutron's.
-
-    *neutronMass* is the evaluation's own (its PoPs), in amu; FUDGE's files state
-    1.00866491574, and a ratio to any other neutron moves AWRI in its tenth digit.
-    """
+    """AWRI: the range's target mass over *neutronMass*, the file's own neutron in amu."""
     pops = getattr(formalism, "PoPs", None)
     particles = list(pops.particles.values()) if pops is not None else []
     mass = particles[0].mass if len(particles) == 1 else None

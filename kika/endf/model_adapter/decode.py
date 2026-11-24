@@ -427,13 +427,7 @@ def _groundStateQOfContinua(suite) -> None:
 
 
 def _fissionQOfTheTape(suite) -> None:
-    """A fission MF3's QM and QI kept where MF1/458 would not give them back.
-
-    Back to ENDF, a fission reaction's QM and QI are MF1/458's ER at thermal
-    (FUDGE's rule, ``toENDF6/reactionData/crossSection.py``), which ENDF/B-VIII.1
-    U-238 does not follow (QM 197.786 MeV, ER 196.535 MeV). There, as FUDGE
-    spells a continuum's, the channel's Q is QM and a ``QI=`` flag holds QI.
-    """
+    """Q := QM and a ``QI=`` flag where a fission MF3 is not MF1/458's ER (B-VIII.1 U-238)."""
     from kika.nuclear_data.model.endf_conversion import EndfConversionFlags, reactionHref
     from .derive.reactions import _nonNeutrinoEnergy
 
@@ -459,12 +453,7 @@ def _fissionQOfTheTape(suite) -> None:
 
 
 def _levelQOfTheTape(suite) -> None:
-    """Flag a level residual whose decay Q (the tape's QM - QI) is not its PoPs energy.
-
-    The derivation writes QM as QI plus the level's energy, FUDGE's rule, which
-    the tape does not follow there; :data:`DECAY_Q_FLAG` tells it to add the
-    decay's Q instead. Nowhere else, so every other GNDS is unchanged.
-    """
+    """Flag ``decayQ`` where QI plus the level's PoPs energy is not the tape's QM (Zr-90 MT651)."""
     from kika._records import format_endf_number
     from kika.nuclear_data.model.endf_conversion import (DECAY_Q_FLAG, EndfConversionFlags,
                                                          reactionQI, residualDecayQHref)
