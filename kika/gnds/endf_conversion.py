@@ -13,10 +13,12 @@ from typing import Optional
 from kika.nuclear_data.model.endf_conversion import (ENDF_CONVERSION_INSTITUTION,
                                                      EndfConversionFlags)
 
-__all__ = ["readConversionFlags", "writeConversionFlags"]
+__all__ = ["readConversionFlags", "writeConversionFlags", "applyResonanceFlags",
+           "rMatrixHref"]
 
 _TAG = "ENDFconversionFlags"
 _SUITE_HREF = "/reactionSuite"
+_NLSC = "LvaluesNeededForConvergence"
 
 
 def readConversionFlags(applicationData: ET.Element, suite, report):
@@ -113,6 +115,65 @@ def _tslFlags(suite) -> Optional[EndfConversionFlags]:
     return EndfConversionFlags([(_SUITE_HREF, text)])
 
 
+def rMatrixHref(suite, index: int) -> str:
+    """The xPath of the *index*-th resolved region's ``RMatrix``, as FUDGE names
+    a single one; kika writes several ranges as sibling ``resolved`` nodes."""
+    regions = suite.resonances.resolved
+    label = regions[index].formalism.label or "eval"
+    where = "resolved" if len(regions) == 1 else f"resolved[{index + 1}]"
+    return f"/reactionSuite/resonances/{where}/RMatrix[@label='{label}']"
+
+
+def _reichMoore(suite):
+    from kika.nuclear_data.model.resonances import RMatrix
+
+    resonances = getattr(suite, "resonances", None)
+    for index, region in enumerate(getattr(resonances, "resolved", None) or ()):
+        formalism = region.formalism
+        if isinstance(formalism, RMatrix) and formalism.approximation == "ReichMoore":
+            yield rMatrixHref(suite, index), formalism
+
+
+def _withResonanceFlags(suite, conversions):
+    """FUDGE's note on a Reich-Moore range: ``LRF3`` for one read from ENDF LRF=3
+    and NLSC as ``LvaluesNeededForConvergence=`` (the model's ``angularLCount``)."""
+    from kika.nuclear_data.model.endf_conversion import parseFlags
+
+    conversions = list(conversions)
+    for href, formalism in _reichMoore(suite):
+        nlsc = formalism.angularLCount or None
+        positions = [k for k, (target, _) in enumerate(conversions) if target == href]
+        if not positions:
+            items = ["LRF3"] if any(group.spins for group in formalism.spinGroups) else []
+            if nlsc:
+                items.append(f"{_NLSC}={nlsc}")
+            if items:
+                conversions.append((href, ",".join(items)))
+            continue
+        for k in positions:
+            flags = parseFlags(conversions[k][1])
+            if _NLSC in flags or (nlsc and k == positions[0]):
+                flags[_NLSC] = str(nlsc) if nlsc else None
+                items = [key if value is None else f"{key}={value}"
+                         for key, value in flags.items()
+                         if not (key == _NLSC and value is None)]
+                conversions[k] = (href, ",".join(items))
+    return [(href, text) for href, text in conversions if text]
+
+
+def applyResonanceFlags(suite) -> None:
+    """NLSC back onto each Reich-Moore range whose ``RMatrix`` states none."""
+    from kika.nuclear_data.model.endf_conversion import EndfConversionFlags
+
+    flags = EndfConversionFlags.of(suite)
+    if not flags:
+        return
+    for href, formalism in _reichMoore(suite):
+        value = flags.flagsFor(href).get(_NLSC)
+        if value is not None and formalism.angularLCount is None:
+            formalism.angularLCount = int(value)
+
+
 def writeConversionFlags(root: ET.Element, suite) -> None:
     """Append the suite's flags to *root*'s ``applicationData``, creating it if needed.
 
@@ -125,6 +186,7 @@ def writeConversionFlags(root: ET.Element, suite) -> None:
         if synthesised is not None:
             flags = EndfConversionFlags(synthesised.conversions
                                         + (list(flags.conversions) if flags else []))
+    flags = EndfConversionFlags(_withResonanceFlags(suite, flags.conversions if flags else []))
     if not flags:
         return
     application = root.find("applicationData")

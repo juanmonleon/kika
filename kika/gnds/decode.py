@@ -203,10 +203,11 @@ class _SuiteReader:
 
         applicationData = root.find("applicationData")
         if applicationData is not None:
-            from .endf_conversion import readConversionFlags
+            from .endf_conversion import applyResonanceFlags, readConversionFlags
             from .resonance_extensions import read
             from . import processed
             applicationData = readConversionFlags(applicationData, suite, self.report)
+            applyResonanceFlags(suite)
             applicationData = processed.read(applicationData, suite, self.report,
                                              lambda node: readForm(node, readAxes(node)))
             unknown=read(applicationData,suite,self.report,self.form)

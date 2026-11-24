@@ -380,6 +380,9 @@ class _ResonanceReader:
             # width in the table.
             reducedWidthAmplitudes=_isTrue(element, "reducedWidthAmplitudes"),
             relativisticKinematics=_isTrue(element, "relativisticKinematics"),
+            # GNDS 2.2's NLSC; FUDGE states it only above NLS, else as a conversion flag.
+            angularLCount=(int(element.attrib["LValuesNeededForAngularConvergence"])
+                           if "LValuesNeededForAngularConvergence" in element.attrib else None),
             scatteringRadius=rMatrixRadius,
             radiusUnit=rMatrixRadiusUnit,
             PoPs=None if pops is None else self.readPoPs(pops),
