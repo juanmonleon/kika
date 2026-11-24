@@ -57,7 +57,7 @@ def test_a_pendf_request_writes_reconrs_sections_and_reports_nothing_lost():
     the resolved MF2) is neither written nor reported lost."""
     suite = kika.read(str(TA182_GNDS), format="gnds", covariances=False)
     full, report_full, _ = encodeTapeSections(suite)
-    assert any("Product" in m for m in report_full.losses)       # the whole tape would lose them
+    assert any("MF2/151" in m for m in report_full.losses)       # the whole tape would lose it
     suite.resonances = pendfResonances(suite)
     sections, report, _ = encodeTapeSections(suite, files=PENDF_SECTIONS)
     assert {(mf, mt) for mf, mt, _ in sections} ==         {(1, 451), (2, 151)} | {(mf, mt) for mf, mt, _ in full if mf == 3}
