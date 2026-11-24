@@ -18,10 +18,10 @@ from .photons import PHOTONS_VERBATIM_KEY
 from .productions import (ACTIVATION_MF8_KEY, ACTIVATION_MF8_OPAQUE_KEY,
                           ACTIVATION_VERBATIM_KEY, _readMf8)
 
-__all__ = ["tapeOnlyData"]
+__all__ = ["decayTapeOnlyData", "tapeOnlyData"]
 
 
-def tapeOnlyData(suite) -> List[str]:
+def tapeOnlyData(suite, written: str = "the GNDS file") -> List[str]:
     """One sentence per kind of ENDF data that only the suite's provenance holds.
 
     Each sentence names the sections it covers. None of these data changes a cross
@@ -32,6 +32,8 @@ def tapeOnlyData(suite) -> List[str]:
     suite
         A ``ReactionSuite``, normally one decoded from an ENDF tape. A suite with no
         ENDF provenance gives an empty list.
+    written
+        What is being written instead of the tape, as the sentences name it.
 
     Returns
     -------
@@ -99,8 +101,36 @@ def tapeOnlyData(suite) -> List[str]:
     if photons:
         sentences.append(f"photons: the sections kika could not model "
                          f"(MF{', MF'.join(photons)})")
-    return [f"not in the GNDS file, kept only in the suite's ENDF provenance to write "
+    return [f"not in {written}, kept only in the suite's ENDF provenance to write "
             f"the tape back: {sentence}" for sentence in sentences]
+
+
+def decayTapeOnlyData(pops, written: str = "the GNDS file") -> List[str]:
+    """:func:`tapeOnlyData` for a decay or fission-yield ``PoPs`` read from ENDF."""
+    from .decay_sublibrary import DECAY_KEY, VERBATIM_KEY
+
+    provenance = getattr(pops, "provenance", None)
+    if not isinstance(provenance, EndfProvenance):
+        return []
+    fields = provenance.headerFields or {}
+    sentences = []
+    book = fields.get(DECAY_KEY)
+    if isinstance(book, dict):
+        if book.get("layout"):
+            sentences.append("MF8/MT457: each spectrum's normalisation (FD, FC), its ERAV "
+                             "and the order of its lines")
+        overrides = book.get("overrides") or {}
+        if "verbatim" in overrides:
+            sentences.append("MF8/MT457: the section as read, which the model does not rebuild")
+        elif overrides.get("fields"):
+            sentences.append(f"MF8/MT457: the text of {len(overrides['fields'])} field(s) the "
+                             f"model holds as another number or not at all")
+    kept = fields.get(VERBATIM_KEY) or []
+    if kept:
+        sentences.append(f"the sections a decay PoPs has no node for "
+                         f"({', '.join(f'MF{mf}/MT{mt}' for mf, mt, _ in kept)})")
+    return [f"not in {written}, kept only in the PoPs' ENDF provenance to write the tape "
+            f"back: {sentence}" for sentence in sentences]
 
 
 def _mf6Sentences(entries) -> List[str]:

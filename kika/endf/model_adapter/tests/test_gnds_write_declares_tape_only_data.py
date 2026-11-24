@@ -74,3 +74,27 @@ def test_the_suite_level_stores_and_ldg1_are_each_named(tmp_path):
         "MF1/455", "MF1/460", "MF6", "MF8", "MF9/MF10"]
     assert found[3] == "MF8: 2 product state(s) that no MF9 or MF10 describes (MT102)"
     assert found[4] == "MF9/MF10: the sections kika could not model (MF10/102)"
+
+
+def test_another_format_names_itself():
+    from kika._write import _declareTapeOnly
+    from kika.nuclear_data.model import ConversionReport
+
+    suite = kika.read(DATA / "micro_u235_mf6.endf")
+    report = _declareTapeOnly(suite, ConversionReport(), "the ACE table")
+    assert [m.split(",")[0] for m in report.losses] == ["not in the ACE table"]
+
+
+@pytest.mark.parametrize("tape, expected", [
+    ("dec-026_Fe_056.endf", []),
+    ("dec-055_Cs_137.endf", ["MF8/MT457: each spectrum's normalisation (FD, FC), its ERAV "
+                             "and the order of its lines"]),
+    ("dec-094_Pu_244.endf", ["MF8/MT457: each spectrum's normalisation (FD, FC), its ERAV "
+                             "and the order of its lines",
+                             "the sections a decay PoPs has no node for (MF1/MT452)"]),
+])
+def test_a_decay_pops_declares_what_it_keeps_for_the_tape(tape, expected, tmp_path):
+    report = kika.write(kika.read(DATA / tape), tmp_path / "out.xml", format="gnds")
+    declared = [m.split("back: ", 1)[1] for m in report.losses
+                if m.startswith("not in the GNDS file, kept only in the PoPs' ENDF provenance")]
+    assert declared == expected
