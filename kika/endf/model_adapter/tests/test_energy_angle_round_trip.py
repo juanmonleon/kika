@@ -913,3 +913,20 @@ def test_law2_primary_photon_energy_is_physical_data_and_edits_round_trip():
     photon.energy.value=2223400.
     edited,_=encodeMF6MT({label:form for label,_,_,form in entries},provenance,102,report)
     assert edited.products[0].awp==2223400.
+
+def test_an_outgoing_table_gnds_split_into_regions_is_written_back(mn55_b81_tape, tmp_path):
+    """Mn-55 MT102: a photon table with jumps comes back from GNDS as regions1d."""
+    import kika
+
+    gnds = tmp_path / "mn55.gnds.xml"
+    kika.write(kika.read(mn55_b81_tape, covariances=False), gnds)
+    tape = tmp_path / "mn55.endf"
+    kika.write(kika.read(gnds, covariances=False), tape, format="endf")
+
+    def mf6(path):
+        from pathlib import Path
+
+        return {line[72:75] for line in Path(path).read_text().splitlines()
+                if line[70:72] == " 6"}
+
+    assert mf6(tape) == mf6(mn55_b81_tape)
