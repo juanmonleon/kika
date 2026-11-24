@@ -1602,7 +1602,24 @@ def writeCovarianceSuite(covarianceSuite, format: str,
     if covarianceSuite.parameterCovariances:
         _parameterCovariances(root, covarianceSuite.parameterCovariances,
                               report)
+    _qualifyReactionSuiteLinks(root, covarianceSuite.externalFiles)
     return ET.ElementTree(root), report
+
+
+#: The ``externalFile`` label a covarianceSuite gives its reactionSuite.
+REACTIONS_LABEL = "reactions"
+
+
+def _qualifyReactionSuiteLinks(root: ET.Element, externalFiles) -> None:
+    """Point every ``/reactionSuite`` href at the reactionSuite's file (§25.1.1)."""
+    # The model's hrefs resolve in the in-memory reactionSuite; once written, that
+    # suite is another document and only `$reactions#` reaches it.
+    if REACTIONS_LABEL not in {entry.label for entry in externalFiles or ()}:
+        return
+    for element in root.iter():
+        href = element.attrib.get("href")
+        if href and href.startswith("/reactionSuite"):
+            element.attrib["href"] = f"${REACTIONS_LABEL}#{href}"
 
 
 def _covarianceSection(parent: ET.Element, section, report) -> None:

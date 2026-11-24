@@ -804,6 +804,20 @@ def test_the_endf_decoded_covariance_sibling_is_pinned(fixture, expected,
     assert len(errors) == expected
 
 
+@pytest.mark.parametrize("name", ["micro_fe56_mf33.endf", "micro_f19_mixed_mf33.endf"])
+def test_kika_follows_every_covariance_link_of_the_pair_it_wrote(name, tmp_path):
+    """The schema does not resolve an href; reading the pair back does."""
+    suite = kika.read(Path(kika.__file__).parent / "endf" / "tests" / "data" / name)
+    path = tmp_path / "out.gnds.xml"
+    kika.write(suite, path)
+
+    back = kika.read(path)
+    assert back.covarianceSuite is not None and len(back.covarianceSuite)
+    assert not [m for m in back.report.losses if "The covariance itself is read" in m]
+    sibling = (path.parent / "Covariances" / "out.gnds-covar.xml").read_text(encoding="utf-8")
+    assert 'href="/reactionSuite' not in sibling
+
+
 def test_the_covariance_sibling_says_the_same_target_as_the_evaluation(
         micro_cov_tape, tmp_path):
     """Half one. The pair must not disagree about what it is about.
