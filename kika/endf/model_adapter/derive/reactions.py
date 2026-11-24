@@ -22,6 +22,8 @@ from __future__ import annotations
 from collections import Counter
 from typing import Optional
 
+from kika.endf.utils import PAD_ZERO
+
 from . import DERIVED, DerivationContext, register
 
 __all__ = ["LR_PRODUCTS", "reactionHref", "deriveReaction", "reactionQValues"]
@@ -363,6 +365,7 @@ def deriveReaction(reaction, path, context: DerivationContext, report):
         path = (f"/reactionSuite/orphanProducts/orphanProduct[@label='{reaction.label}']"
                 if orphan else reactionHref(reaction))
         header.update(photonFields(reaction, context, report, path, inMF6=inMF6))
+    header["interpPad"] = PAD_ZERO
     return EndfProvenance(sourceFormat=DERIVED, mat=context.mat, za=context.za,
                           awr=context.awr, qm=qm, lr=lr,
                           interpolationRegions=[tuple(pair) for pair in regions],

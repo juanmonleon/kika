@@ -8,7 +8,8 @@ from typing import List
 
 from ..classes.mf import MF
 from ..classes.mf3.mf3mt import MF3MT
-from ..utils import parse_line, parse_endf_id, group_lines_by_mt_with_positions, parse_tab1
+from ..utils import (PaddingProbe, group_lines_by_mt_with_positions, parse_endf_id, parse_line,
+                     parse_tab1)
 from ...utils import get_endf_logger
 
 logger = get_endf_logger(__name__)
@@ -82,6 +83,8 @@ def parse_mf3_mt(lines: List[str], mt: int) -> MF3MT:
     lr = int(tab1_hdr.get("C4", 0) or 0)
     nr = int(tab1_hdr.get("C5", 0) or 0)
     np_count = int(tab1_hdr.get("C6", 0) or 0)
+    probe = PaddingProbe()
+    probe.observe_interp(lines, 2 + -(-nr // 3), nr)
 
     return MF3MT(
         number=mt,
@@ -96,4 +99,5 @@ def parse_mf3_mt(lines: List[str], mt: int) -> MF3MT:
         _interpolation=interp_pairs,
         _energies=energies,
         _cross_sections=cross_sections,
+        _interp_pad=probe.resolve().interp,
     )

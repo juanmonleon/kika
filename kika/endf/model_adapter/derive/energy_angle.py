@@ -50,6 +50,8 @@ from typing import List, Optional
 
 import numpy as np
 
+from kika.endf.utils import PAD_ZERO
+
 __all__ = ["goesToMF6", "mf6Fields"]
 
 _LIGHT = {"n", "H1", "H2", "H3", "He3", "He4"}
@@ -393,4 +395,4 @@ def mf6Fields(reaction, context, report) -> Optional[dict]:
                     f"states; MF6/MT{mt} is not written")
         return None
     return {"mat": context.mat, "za": context.za, "awr": context.awr, "jp": 0,
-            "lct": lct, "nk": len(records), "pad": {}, "products": records}
+            "lct": lct, "nk": len(records), "pad": {"interp": PAD_ZERO}, "products": records}
