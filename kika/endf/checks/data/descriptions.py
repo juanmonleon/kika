@@ -39,7 +39,7 @@ def _build() -> Dict[str, CheckDescription]:
 
     D = CheckDescription
     ANY = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 23, 26, 27, 28)
-    TABS = (1, 3, 4, 5, 6, 12, 13, 14, 15, 23, 26, 27)
+    TABS = (1, 3, 4, 5, 6, 7, 8, 12, 13, 14, 15, 23, 27)
     general = {
         # ---- reading ----------------------------------------------------------
         "file_unreadable": D(
@@ -249,7 +249,7 @@ def _build() -> Dict[str, CheckDescription]:
             "below, MF3 holds backgrounds, and the sums of the reconstructed cross sections are "
             "the reconstruction's check."),
     }
-    # The reading and table checks run in every family; the deep checks only when MF3 is checked.
+    # Reading is checked for every file and tables by every family; deep only when MF3 is checked.
     families = {
         "general": general,
         "resonances": res.descriptions(D, _g, _pct),
