@@ -426,6 +426,38 @@ def _groundStateQOfContinua(suite) -> None:
         q.value = float(provenance.qm)
 
 
+def _fissionQOfTheTape(suite) -> None:
+    """A fission MF3's QM and QI kept where MF1/458 would not give them back.
+
+    Back to ENDF, a fission reaction's QM and QI are MF1/458's ER at thermal
+    (FUDGE's rule, ``toENDF6/reactionData/crossSection.py``), which ENDF/B-VIII.1
+    U-238 does not follow (QM 197.786 MeV, ER 196.535 MeV). There, as FUDGE
+    spells a continuum's, the channel's Q is QM and a ``QI=`` flag holds QI.
+    """
+    from kika.nuclear_data.model.endf_conversion import EndfConversionFlags, reactionHref
+    from .derive.reactions import _nonNeutrinoEnergy
+
+    flags = EndfConversionFlags.of(suite)
+    for container in (suite.reactions, suite.sums, suite.fissionComponents):
+        for reaction in container:
+            provenance = reaction.provenance
+            q = getattr(getattr(reaction, "outputChannel", None), "Q", None)
+            released = _nonNeutrinoEnergy(reaction)
+            if (released is None or getattr(provenance, "sourceFormat", None) != "endf"
+                    or getattr(provenance, "qm", None) is None or getattr(q, "value", None) is None):
+                continue
+            qi, qm = float(q.value), float(provenance.qm)
+            if qi == qm == released:
+                continue
+            if flags is None:
+                flags = EndfConversionFlags()
+                suite.applicationData.entries.append(flags)
+            if qi != qm:
+                provenance.headerFields = dict(provenance.headerFields or {}, qi=qi)
+            flags.conversions.append((reactionHref(reaction) + "/outputChannel/Q", f"QI={qi!r}"))
+            q.value = qm
+
+
 def _pairParticlesFromMF2(suite) -> None:
     """What an RML pair (LRF=7) states of its two particles, where a GNDS
     file keeps it: the ejectile on the ``resonanceReaction``, each particle's
@@ -721,6 +753,7 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
 
     # Last of the reaction passes, which all read the outputChannel Q as QI.
     _groundStateQOfContinua(suite)
+    _fissionQOfTheTape(suite)
 
     if style is not None:
         report = _attachEvaluatedDomain(suite, style, headerProvenance, report)
