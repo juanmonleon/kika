@@ -904,8 +904,8 @@ def test_every_endf_built_covariance_form_gets_the_label_the_schema_requires(
     for form in forms:
         assert form.attrib.get("label") == SYNTHESISED_STYLE_LABEL, form.attrib
 
-    assert sum("carried no label" in entry
-               for entry in report.approximations) == len(forms), (
+    declared = [entry for entry in report.approximations if "carried no label" in entry]
+    assert len(declared) == 1 and declared[0].startswith(f"{len(forms)} covariance form"), (
         report.approximations)
 
 

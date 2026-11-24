@@ -1618,6 +1618,14 @@ def writeCovarianceSuite(covarianceSuite, format: str,
         _parameterCovariances(root, covarianceSuite.parameterCovariances,
                               report)
     _qualifyReactionSuiteLinks(root, covarianceSuite.externalFiles)
+    unlabelled = _UNLABELLED_FORMS.pop(id(report), 0)
+    if unlabelled:
+        report.approximated(
+            f"{unlabelled} covariance form(s) carried no label and §25 requires one "
+            f"on all four covariance forms, so they are written as "
+            f"{SYNTHESISED_STYLE_LABEL!r}, the style label synthesised for a suite "
+            f"that has no styles. The source said nothing about which style they "
+            f"belong to")
     return ET.ElementTree(root), report
 
 
@@ -1695,6 +1703,10 @@ def _dataLink(parent: ET.Element, tag: str, link) -> None:
 SYNTHESISED_STYLE_LABEL = "eval"
 
 
+#: Covariance forms :func:`_formLabel` labelled, per report, declared once per file.
+_UNLABELLED_FORMS = {}
+
+
 def _formLabel(form, report, where: str) -> str:
     """``label`` for a §25 form, and **all four of them require one.**
 
@@ -1716,13 +1728,7 @@ def _formLabel(form, report, where: str) -> str:
     label = getattr(form, "label", None)
     if label is not None:
         return label
-    report.approximated(
-        f"{where}: the form carried no label and §25 requires one on all four "
-        f"covariance forms, so it is written as "
-        f"{SYNTHESISED_STYLE_LABEL!r} -- the style label the suite writer "
-        f"synthesises for a suite that has no styles, which is the same case. "
-        f"The source said nothing about which style this form belongs to"
-    )
+    _UNLABELLED_FORMS[id(report)] = _UNLABELLED_FORMS.get(id(report), 0) + 1
     return SYNTHESISED_STYLE_LABEL
 
 
