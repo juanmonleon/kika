@@ -426,6 +426,32 @@ def _groundStateQOfContinua(suite) -> None:
         q.value = float(provenance.qm)
 
 
+def _captureResidual(suite, formalism, reaction, neutronMass: float) -> None:
+    """A capture pair's particles where GNDS keeps them: the photon as ejectile and
+    the compound nucleus, with the pair's MB, in the formalism's PoPs.
+
+    ENDF lists no residual among a capture's products when MF6 states only the
+    photons, so the pair matching by products finds none. The compound nucleus is
+    the target plus one neutron by definition. Its spin and parity stay unstated:
+    ENDF writes them 0 for a capture residual.
+    """
+    from kika.nuclear_data.model.pops import Nuclide, PoPs, pidFromZA
+
+    target = suite.PoPs.particles.get(suite.target)
+    if not isinstance(target, Nuclide) or target.ZA is None or target.nuclearLevel:
+        return
+    pid = pidFromZA(target.ZA + 1)
+    if reaction.ejectile is None:
+        reaction.ejectile = "photon"
+    if formalism.PoPs is None:
+        formalism.PoPs = PoPs(name="resolved resonances")
+    if formalism.PoPs.particles.get(pid) is None:
+        formalism.PoPs.add(Nuclide(
+            id=pid, Z=target.Z, A=target.A + 1,
+            mass=PhysicalQuantity(value=float(reaction.kinematics.particleB.massRatio) * neutronMass,
+                                  unit="amu")))
+
+
 def _pairParticlesFromMF2(suite) -> None:
     """What an RML pair (LRF=7) states of its two particles, where a GNDS
     file keeps it: the ejectile on the ``resonanceReaction``, each particle's
@@ -467,6 +493,9 @@ def _pairParticlesFromMF2(suite) -> None:
         stated = {}
         for channelReaction in formalism.resonanceReactions:
             kinematics = channelReaction.kinematics
+            if kinematics is not None and channelReaction.reactionMT == 102:
+                _captureResidual(suite, formalism, channelReaction, neutronMass)
+                continue
             if kinematics is None or kinematics.effective or channelReaction.reactionMT is None:
                 continue
             reactions = [r for r in suite.reactions if r.ENDF_MT == channelReaction.reactionMT]
@@ -480,6 +509,10 @@ def _pairParticlesFromMF2(suite) -> None:
             for particle in (kinematics.particleA, kinematics.particleB):
                 match = [pid for pid in products if nuclearCharge(pid) == particle.charge]
                 pair.append(match[0] if len(match) == 1 else None)
+            if channelReaction.reactionMT == 2:
+                # Elastic is the projectile and the target by definition; some tapes
+                # write ZB=0 for a neutral pair (Cu-63), which no charge matches.
+                pair = [suite.projectile, suite.target]
             if None in pair or pair[0] == pair[1]:
                 continue
             if channelReaction.ejectile is None:

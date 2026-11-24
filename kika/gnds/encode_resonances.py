@@ -203,9 +203,10 @@ def _rMatrix(parent: ET.Element, formalism: RMatrix,
         report.unsupportedNode('independent RM radiusPolicy requires channel-radius normalization before GNDS serialization')
     if formalism.angularLCount not in (None, 0) and formalism.approximation != "ReichMoore":
         report.lost('RMatrix angularLCount (ENDF NLSC) has no native attribute in this GNDS writer')
+    boundaryCondition = _rmlBoundaryCondition(formalism, groups)
     _set(element, label=formalism.label or "eval",
          approximation=formalism.approximation,
-         boundaryCondition=formalism.boundaryCondition,
+         boundaryCondition=boundaryCondition,
          boundaryConditionValue=None if formalism.boundaryConditionValue is None else _number(formalism.boundaryConditionValue),
          calculateChannelRadius=_true(formalism.calculateChannelRadius if formalism.radiusPolicy is None else formalism.radiusPolicy.channelMode == "mass"),
          relativisticKinematics=_true(formalism.relativisticKinematics),
@@ -214,7 +215,7 @@ def _rMatrix(parent: ET.Element, formalism: RMatrix,
 
     container = ET.SubElement(element, "resonanceReactions")
     for reaction in reactions:
-        _resonanceReaction(container, reaction, report, domain, formalism.boundaryCondition)
+        _resonanceReaction(container, reaction, report, domain, boundaryCondition)
 
     container = ET.SubElement(element, "spinGroups")
     for group in groups:
@@ -401,6 +402,24 @@ def _rmGroupsForGNDS(formalism, report):
                 if channel.resonanceReaction=='elastic':channel.channelSpin=cs
             result.append(group)
     return result
+
+
+def _rmlBoundaryCondition(formalism, groups) -> Optional[str]:
+    """The model's boundary condition, else, for a range read from ENDF LRF=7 (every
+    pair with its kinematics), the one FUDGE's ENDF->GNDS reads off the channels'
+    BND: all 0 is EliminateShiftFunction, all -L NegativeOrbitalMomentum."""
+    if formalism.boundaryCondition is not None or not formalism.resonanceReactions or any(
+            r.kinematics is None for r in formalism.resonanceReactions):
+        return formalism.boundaryCondition
+    values = [(channel.L, channel.boundaryConditionValue)
+              for group in groups for channel in group.channels]
+    if any(value is None for _, value in values):
+        return None
+    if all(value == 0 for _, value in values):
+        return "EliminateShiftFunction"
+    if all(value == -l for l, value in values):
+        return "NegativeOrbitalMomentum"
+    return None
 
 
 def _fudgePenetrabilityAndShift(reaction, boundaryCondition):

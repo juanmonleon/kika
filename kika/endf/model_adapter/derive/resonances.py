@@ -45,7 +45,8 @@ interpolation; AWRI the region's target mass, as for the resolved ranges.
 **R-Matrix Limited ranges** (LRF=7) follow FUDGE's ``writeRMatrixParticlePairs``
 and ``writeRMatrixSpinGroupHeader``: SPI=AP=0, NAPS=1, KRM from the
 approximation. Each pair is the ejectile and the residual of its linked reaction
-(the projectile and target for fission), their masses over the file's own
+(the projectile and target for elastic and fission; for a capture that lists only
+its photons, the compound nucleus), their masses over the file's own
 neutron, Z, and spin and parity in ENDF's sign convention (0, 0 for a capture
 residual with none); Q and PNT are 0 for capture and fission; SHF is 0 when the
 shift is eliminated, 2 for Brune, else 1. A channel's APT is its radius, else
@@ -299,11 +300,17 @@ def _particlePair(reaction, formalism, context, neutron, where) -> dict:
     linked = _linkedReaction(suite, reaction)
     mt = reaction.reactionMT if reaction.reactionMT is not None else linked.ENDF_MT
     here = f"{where}, pair {reaction.label!r}"
-    if mt in _FISSION_MTS:
+    if mt in _FISSION_MTS or mt == 2:
         ids = (suite.projectile, suite.target)
     else:
         products = [p.pid for p in linked.outputChannel.products.products]
         residual = [pid for pid in products if pid not in (reaction.ejectile, "photon")]
+        target = suite.PoPs.get(suite.target)
+        if not residual and mt == 102 and getattr(target, "ZA", None) is not None:
+            from kika.nuclear_data.model.pops import pidFromZA
+
+            # A capture that lists only its photons: the residual is the compound nucleus.
+            residual = [pidFromZA(target.ZA + 1)]
         if reaction.ejectile is None or len(residual) != 1:
             raise ValueError(f"{here}: no single ejectile and residual to write the pair from")
         ids = (reaction.ejectile, residual[0])

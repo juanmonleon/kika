@@ -4,7 +4,8 @@ The pairs and channels come from the model as FUDGE's ``toENDF6`` writes them.
 On NNDC's ENDF/B-VIII.1 GNDS (FUDGE's translation) Si-28, Fe-54 and Rh-103 come
 back record for record. Cl-35 differs in two fields no GNDS node holds, NAPS and
 the capture residual's Z, both unused by the reconstruction; its 0 K resonance
-cross sections are the tape's bit for bit.
+cross sections are the tape's bit for bit. kika's own GNDS of Si-28 carries the
+capture residual and the boundary condition, and comes back the same way.
 """
 from __future__ import annotations
 
@@ -66,6 +67,15 @@ def test_cl35_differs_only_where_gnds_has_no_node(tmp_path):
     (tape, kika_), (tapePair, kikaPair) = differ
     assert (tape[-1], kika_[-1]) == (0, 1)
     assert (dict(tapePair[1])["zb"], dict(kikaPair[1])["zb"]) == (0, 17)
+
+
+def test_kikas_own_gnds_of_si28_comes_back_record_for_record(tmp_path):
+    endf, _ = _nndc("n-014_Si_028")
+    gnds = tmp_path / "si28.gnds.xml"
+    kika.write(kika.read(str(endf), covariances=False), str(gnds), format="gnds")
+    out, report = _written(gnds, tmp_path)
+    assert _records(out) == _records(endf)
+    assert not any("MF2" in message for message in report.losses)
 
 
 @pytest.mark.parametrize("name", ["n-017_Cl_035", "n-014_Si_028"])
