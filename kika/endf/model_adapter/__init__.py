@@ -45,6 +45,8 @@ from .multiplicity import (
     nubarHref,
 )
 from .resonances import decodeMF2MT151, encodeMF2MT151
+# kika.write imports it inside a function, where PyInstaller's modulegraph cannot see it.
+from . import tape_only  # noqa: F401
 
 __all__ = [
     "decodeMF3MT", "decodeMF1MT451", "decodeReactionSuite", "encodeMF3MT",

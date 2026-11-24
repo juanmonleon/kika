@@ -52,7 +52,7 @@ def tapeOnlyData(suite) -> List[str]:
         mf5 = fields.get("mf5")
         # A product whose MF5 law is not modelled has no distribution, and the GNDS
         # writer already declares the empty <distribution/> it writes for it.
-        if isinstance(mf5, dict) and not mf5.get("parametrised") and type(node).__name__ != "Product":
+        if isinstance(mf5, dict) and not mf5.get("parametrised") and not _distributionless(node):
             raw = [p["lf"] for p in mf5.get("partials", ()) if "raw_lines" in p]
             if raw:
                 found["mf5"].append((_mt(path), raw))
@@ -63,7 +63,8 @@ def tapeOnlyData(suite) -> List[str]:
             kept = [p for p in mf6.get("products", ())
                     if not p.get("modelled", True) and p["law"] < 0]
             if kept:
-                found["mf6"].append((_mt(path), int(mf6.get("jp", 0) or 0), kept))
+                lawZero = sum(1 for p in mf6.get("products", ()) if p["law"] == 0)
+                found["mf6"].append((_mt(path), int(mf6.get("jp", 0) or 0), kept, lawZero))
 
     suiteFields = getattr(getattr(suite, "provenance", None), "headerFields", None) or {}
     sentences = []
@@ -104,12 +105,18 @@ def tapeOnlyData(suite) -> List[str]:
 
 def _mf6Sentences(entries) -> List[str]:
     multiplicity, deferring = [], []
-    for mt, jp, products in entries:
+    for mt, jp, products, lawZero in entries:
         byParticle: Dict[str, int] = defaultdict(int)
         for product in products:
             byParticle[_particle(product["zap"])] += 1
         counts = " and ".join(f"{n} {particle}" for particle, n in byParticle.items())
-        (multiplicity if jp > 0 else deferring).append(f"MT{mt}: {counts} subsections")
+        if jp > 0:
+            # A JP>0 fission section's LAW=0 yields are not the model's multiplicities
+            # either (those come from MF1 and MF12), so the whole section stays behind.
+            extra = f", and the y(E) of its {lawZero} LAW=0 subsections" if lawZero else ""
+            multiplicity.append(f"MT{mt}: {counts} subsections{extra}")
+        else:
+            deferring.append(f"MT{mt}: {counts} subsections")
     sentences = []
     if multiplicity:
         sentences.append(f"MF6: P(nu), the probability that one fission emits nu "
@@ -131,6 +138,13 @@ def _mf8DecayData(kept: dict) -> List[str]:
         if section.no == 0 and any(len(state.lines) > 1 for state in section.states):
             mts.append(mt)
     return mts
+
+
+def _distributionless(node) -> bool:
+    if type(node).__name__ != "Product":
+        return False
+    distribution = getattr(node, "distribution", None)
+    return distribution is None or len(distribution) == 0
 
 
 def _particle(zap) -> str:

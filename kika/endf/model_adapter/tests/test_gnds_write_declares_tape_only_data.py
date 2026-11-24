@@ -25,7 +25,8 @@ def _writeGnds(suite, tmp_path):
 
 @pytest.mark.parametrize("tape, expected", [
     ("micro_u235_mf6.endf", "MF6: P(nu), the probability that one fission emits nu "
-                            "particles (MT18: 14 neutron and 40 photon subsections)"),
+                            "particles (MT18: 14 neutron and 40 photon subsections, and the "
+                            "y(E) of its 2 LAW=0 subsections)"),
     ("micro_u235_fission_energy.endf", "MF1/458 (LFC=1): the thermal values, their "
                                        "uncertainties and the LDRV of promptProductKE"),
     ("micro_fe56_photons.endf", "photons: the sections kika could not model (MF12/52, "
