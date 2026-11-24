@@ -1,5 +1,5 @@
-"""MF3's QM/QI survive GNDS where FUDGE's rules would move them (B-VIII.1 U-238 MT18, Zr-90 MT651):
-a ``QI=`` flag on a fission Q, a ``decayQ`` flag on a level's decay Q, none on a tape that follows them.
+"""A fission MF3's QM/QI survive GNDS where MF1/458's ER would move them (B-VIII.1 U-238 MT18):
+a ``QI=`` flag on the fission Q, none on a tape that follows the rule.
 """
 from __future__ import annotations
 
@@ -55,11 +55,3 @@ def test_a_fission_q_off_mf1_458s_er_comes_back_and_fudges_rule_without_the_flag
     fudge = tmp_path / "fudge.endf"
     kika.write(kika.read(str(bare)), str(fudge), format="endf")
     assert _header(fudge, " 3 18") == " 1.884700+8 1.884700+8"
-
-
-def test_zr90_mt651_comes_back_with_the_tapes_qm(zr90_b81_tape, tmp_path):
-    """MF3 states QM - QI = 908970 eV, MF8 the level at 909000 eV."""
-    text, endf = _roundTrip(zr90_b81_tape, tmp_path)
-    assert text.count('flags="decayQ"') == 1
-    assert "product[@label='Y89_e1']/outputChannel/Q" in text
-    assert _header(endf, " 3651") == _header(zr90_b81_tape, " 3651") == "-6.128816+6-7.037786+6"

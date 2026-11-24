@@ -215,8 +215,7 @@ def _q(value) -> Optional[float]:
 def _qValues(reaction, mt: int, context: DerivationContext, report):
     """``(Q, QI, QM, LR)`` of MF3's header, from the model alone."""
     from kika.nuclear_data.model import CrossSectionSum
-    from kika.nuclear_data.model.endf_conversion import (DECAY_Q_FLAG, EndfConversionFlags,
-                                                         residualDecayQHref)
+    from kika.nuclear_data.model.endf_conversion import EndfConversionFlags
 
     q = _q(getattr(reaction.outputChannel.Q, "value", None))
 
@@ -237,9 +236,6 @@ def _qValues(reaction, mt: int, context: DerivationContext, report):
             # PoPs. They differ where the evaluation's MF12 ES and its MF3
             # QM - QI do (NNDC's Fe-56 MT802: decay Q 1006270.0, level 1006270.1).
             level = _levelEnergy(context.suite, residual) if lr == 0 else None
-            if level is not None and flags and DECAY_Q_FLAG in flags.flagsFor(
-                    residualDecayQHref(reaction, residual)):
-                level = None
             shift = level if level is not None else decayQ
             qm = None if qi is None or shift is None else qi + shift
         elif mt == 4 and context.suite.projectile == "n" and "_e" not in context.suite.target:

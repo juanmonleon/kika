@@ -452,33 +452,6 @@ def _fissionQOfTheTape(suite) -> None:
             q.value = qm
 
 
-def _levelQOfTheTape(suite) -> None:
-    """Flag ``decayQ`` where QI plus the level's PoPs energy is not the tape's QM (Zr-90 MT651)."""
-    from kika._records import format_endf_number
-    from kika.nuclear_data.model.endf_conversion import (DECAY_Q_FLAG, EndfConversionFlags,
-                                                         reactionQI, residualDecayQHref)
-    from .derive.reactions import _decayingResidual, _levelEnergy
-
-    flags = EndfConversionFlags.of(suite)
-    for reaction in suite.reactions:
-        provenance = reaction.provenance
-        if (getattr(provenance, "sourceFormat", None) != "endf"
-                or int(getattr(provenance, "lr", 0) or 0) != 0 or reaction.outputChannel is None):
-            continue
-        residual = _decayingResidual(reaction)
-        if residual is None:
-            continue
-        level = _levelEnergy(suite, residual)
-        qi = reactionQI(reaction, suite)
-        if (level is None or qi is None or getattr(provenance, "qm", None) is None
-                or format_endf_number(float(qi) + level) == format_endf_number(float(provenance.qm))):
-            continue
-        if flags is None:
-            flags = EndfConversionFlags()
-            suite.applicationData.entries.append(flags)
-        flags.conversions.append((residualDecayQHref(reaction, residual), DECAY_Q_FLAG))
-
-
 def _pairParticlesFromMF2(suite) -> None:
     """What an RML pair (LRF=7) states of its two particles, where a GNDS
     file keeps it: the ejectile on the ``resonanceReaction``, each particle's
@@ -775,7 +748,6 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
     # Last of the reaction passes, which all read the outputChannel Q as QI.
     _groundStateQOfContinua(suite)
     _fissionQOfTheTape(suite)
-    _levelQOfTheTape(suite)
 
     if style is not None:
         report = _attachEvaluatedDomain(suite, style, headerProvenance, report)

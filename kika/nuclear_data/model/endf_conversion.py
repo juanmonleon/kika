@@ -17,17 +17,13 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 __all__ = ["ENDF_CONVERSION_INSTITUTION", "EndfConversionFlags", "parseFlags",
-           "DECAY_Q_FLAG", "OMIT_FLAG", "QI_FLAGGED_MTS", "isOmitted", "levelSeries",
-           "reactionHref", "reactionQI", "residualDecayQHref"]
+           "OMIT_FLAG", "QI_FLAGGED_MTS", "isOmitted", "levelSeries", "reactionHref", "reactionQI"]
 
 #: The ``institution`` label FUDGE files the node under.
 ENDF_CONVERSION_INSTITUTION = "LLNL"
 
 #: FUDGE's flag on a crossSectionSum with no MF3 section (``toENDF6/sums.py``).
 OMIT_FLAG = "omit"
-
-#: kika's, on a level's decay ``Q`` (FUDGE reads none there): QM is QI plus it, not the level.
-DECAY_Q_FLAG = "decayQ"
 
 #: The MTs whose GNDS ``Q`` is the ground-state Q (ENDF's QM) and whose QI is a
 #: ``QI=`` flag: every continuum and MT103-107. Measured on the 558 neutron files
@@ -82,12 +78,6 @@ def reactionQI(reaction, suite) -> Optional[float]:
     q = getattr(getattr(reaction, "outputChannel", None), "Q", None)
     value = getattr(q, "value", None)
     return None if value is None else float(value)
-
-
-def residualDecayQHref(reaction, residual) -> str:
-    """The xPath of the Q of *residual*'s decay, a product of *reaction*."""
-    return (f"{reactionHref(reaction)}/outputChannel/products/product[@label='{residual.label}']"
-            f"/outputChannel/Q")
 
 
 def isOmitted(reaction, suite) -> bool:
