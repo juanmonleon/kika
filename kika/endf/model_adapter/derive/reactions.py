@@ -293,6 +293,28 @@ def reactionQValues(suite, report=None) -> dict:
     return table
 
 
+def _backgroundJoins(reaction, context: DerivationContext) -> dict:
+    """FUDGE's ``mergeWithNextRegion``/``deletePoint`` on each background region of a resonancesWithBackground."""
+    from kika.nuclear_data.model import EVAL_LABEL, ResonancesWithBackground
+
+    if EVAL_LABEL not in reaction.crossSection:
+        return {}
+    form = reaction.crossSection[EVAL_LABEL]
+    if not isinstance(form, ResonancesWithBackground) or not context.conversionFlags:
+        return {}
+    owners = [reactionHref(reaction)]
+    if any(reaction is r for r in context.suite.fissionComponents):
+        owners.append(f"/reactionSuite/fissionComponents/fissionComponent[@label='{reaction.label}']")
+    joins = {}
+    for owner in owners:
+        base = f"{owner}/crossSection/resonancesWithBackground[@label='{EVAL_LABEL}']/background"
+        for region in ("resolvedRegion", "unresolvedRegion", "fastRegion"):
+            text = context.conversionFlags.get(f"{base}/{region}")
+            if text:
+                joins[region] = text
+    return joins
+
+
 def deriveReaction(reaction, path, context: DerivationContext, report):
     """MF3's provenance for one reaction or cross-section sum."""
     from kika.nuclear_data.model import CrossSectionSum, EVAL_LABEL, EndfProvenance
@@ -313,6 +335,9 @@ def deriveReaction(reaction, path, context: DerivationContext, report):
         _, _, regions = reaction.crossSection[EVAL_LABEL].toEndfRegions()
 
     header = {"qi": qi} if qi != q else {}
+    joins = _backgroundJoins(reaction, context)
+    if joins:
+        header["backgroundJoins"] = joins
     # A reaction whose distributions only MF6 states carries the MF6
     # block on its own provenance, as one read from ENDF does.
     from . import sectionSelected

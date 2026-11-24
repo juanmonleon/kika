@@ -636,6 +636,11 @@ class _SuiteWriter:
     def __init__(self, suite, report: ConversionReport) -> None:
         self.suite = suite
         self.report = report
+        from .resonance_background import plan
+
+        self.backgroundPlan = plan(suite)
+        self.conversionFlags: List[Tuple[str, str]] = []
+        self._backgroundDeclared = False
 
     def write(self, format: str) -> ET.Element:
         root = ET.Element("reactionSuite")
@@ -735,16 +740,20 @@ class _SuiteWriter:
             element, getattr(reaction, "doubleDifferentialCrossSection", None),
             self.report, f"{reaction.label!r}")
         self.crossSection(element, reaction.crossSection,
-                          f"{reaction.label!r}")
+                          f"{reaction.label!r}", reaction.ENDF_MT,
+                          f"/reactionSuite/{parent.tag}/{tag}[@label='{reaction.label}']")
         self.outputChannel(element, reaction.outputChannel,
                            f"{reaction.label!r}", reaction.ENDF_MT,
                            _crossSectionDomain(reaction))
 
     @writes("crossSectionForm", "resonancesWithBackground", "reference",
             "thermalNeutronScatteringLaw1d")
-    def crossSection(self, parent: ET.Element, crossSection, where: str) -> None:
+    def crossSection(self, parent: ET.Element, crossSection, where: str,
+                     mt: Optional[int] = None, owner: Optional[str] = None) -> None:
         element = ET.SubElement(parent, "crossSection")
         for label, form in crossSection.items():
+            if label == "eval" and owner is not None and self.backgroundPlan is not None:
+                form = self.withResonances(form, label, mt, owner)
             if isinstance(form, ResonancesWithBackground):
                 self.resonancesWithBackground(element, form, label, where)
             elif isinstance(form, Reference):
@@ -756,6 +765,23 @@ class _SuiteWriter:
             else:
                 _function(element, form, self.report,
                           f"{where} crossSection[{label!r}]")
+
+    def withResonances(self, form, label: str, mt: Optional[int], owner: str):
+        """An ENDF-decoded MF3 table as FUDGE writes it, when the resonances add to it."""
+        from .resonance_background import wrap
+
+        wrapped = wrap(self.backgroundPlan, mt, form, label)
+        if wrapped is None:
+            return form
+        form, flags = wrapped
+        base = f"{owner}/crossSection/resonancesWithBackground[@label='{label}']/background"
+        self.conversionFlags.extend((f"{base}/{name}", text) for name, text in flags.items())
+        if not self._backgroundDeclared:
+            self._backgroundDeclared = True
+            self.report.warn("cross sections the resonances add to are written as "
+                             "resonancesWithBackground over the MF3 background, as FUDGE writes "
+                             "them; the model keeps MF3 as a table")
+        return form
 
     def resonancesWithBackground(self, parent: ET.Element, form, label: str,
                                  where: str) -> None:
@@ -1457,7 +1483,8 @@ class _SuiteWriter:
                 f"total of, and kika does not infer the list"
             )
         self.Q(element, entry.outputChannel.Q, f"sum {entry.label!r}")
-        self.crossSection(element, entry.crossSection, f"sum {entry.label!r}")
+        self.crossSection(element, entry.crossSection, f"sum {entry.label!r}", entry.ENDF_MT,
+                          f"/reactionSuite/sums/crossSectionSums/crossSectionSum[@label='{entry.label}']")
 
     def multiplicitySum(self, parent: ET.Element, entry) -> None:
         element = ET.SubElement(parent, "multiplicitySum")
@@ -1535,7 +1562,7 @@ def writeReactionSuite(suite, format: Optional[str] = None,
         from .resonance_extensions import write
         write(root,saved,report)
     from .endf_conversion import writeConversionFlags
-    writeConversionFlags(root, suite)
+    writeConversionFlags(root, suite, writer.conversionFlags)
     dropped = _EDGE_POINTS_DROPPED.pop(id(report), 0)
     if dropped:
         report.approximated(

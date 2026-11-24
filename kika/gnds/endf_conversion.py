@@ -113,8 +113,8 @@ def _tslFlags(suite) -> Optional[EndfConversionFlags]:
     return EndfConversionFlags([(_SUITE_HREF, text)])
 
 
-def writeConversionFlags(root: ET.Element, suite) -> None:
-    """Append the suite's flags to *root*'s ``applicationData``, creating it if needed.
+def writeConversionFlags(root: ET.Element, suite, written=()) -> None:
+    """Append the suite's flags, then *written* (the writer's own), to *root*'s ``applicationData``.
 
     A TSL suite read from ENDF has no flags of its own; it gets FUDGE's
     ``MAT=…,ZA=…`` note (:func:`_tslFlags`), unless its flags already state a MAT.
@@ -125,6 +125,8 @@ def writeConversionFlags(root: ET.Element, suite) -> None:
         if synthesised is not None:
             flags = EndfConversionFlags(synthesised.conversions
                                         + (list(flags.conversions) if flags else []))
+    if written:
+        flags = EndfConversionFlags((list(flags.conversions) if flags else []) + list(written))
     if not flags:
         return
     application = root.find("applicationData")

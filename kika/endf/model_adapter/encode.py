@@ -75,7 +75,7 @@ _MF1_EVALUATION_INFO = (
 )
 
 
-def backgroundTable(form, name: str, report=None):
+def backgroundTable(form, name: str, report=None, joins=None):
     """§16.1.1's background, as the one MF3 table ENDF states (NNDC GNDS).
 
     MF3 *is* the background: ENDF adds the resonances to it at processing time
@@ -90,12 +90,20 @@ def backgroundTable(form, name: str, report=None):
 
     background = getattr(form, "background", None)
     pieces = []
-    for term in (getattr(background, "resolvedRegion", None),
-                 getattr(background, "unresolvedRegion", None),
-                 getattr(background, "fastRegion", None)):
+    join = None
+    for region in ("resolvedRegion", "unresolvedRegion", "fastRegion"):
+        term = getattr(background, region, None)
         if term is None:
             continue
-        pieces.extend(term.function1ds if isinstance(term, Regions1d) else [term])
+        terms = list(term.function1ds if isinstance(term, Regions1d) else [term])
+        if join is not None and pieces:
+            # FUDGE's toENDF6: a mergeWithNextRegion edge was cut by the GNDS writer, and
+            # deletePoint says the cut's point is not the tape's.
+            pieces[-1] = _joined(pieces[-1], terms.pop(0), "deletePoint" in join)
+        pieces.extend(terms)
+        join = (joins or {}).get(region)
+        if join is not None and "mergeWithNextRegion" not in join:
+            join = None
     if not pieces:
         raise TypeError(f"the resonancesWithBackground of {name} has no background to write")
     joined = Regions1d(function1ds=pieces, axes=pieces[0].axes)
@@ -107,6 +115,16 @@ def backgroundTable(form, name: str, report=None):
         else:
             merged.append((int(nbt), int(code)))
     return Regions1d.fromEndfRegions(energies, values, merged, axes=pieces[0].axes)
+
+
+def _joined(left, right, deletePoint: bool):
+    """Two background pieces as one table, the shared point once or (deletePoint) not at all."""
+    from kika.nuclear_data.model import XYs1d
+
+    skip = 1 if deletePoint else 0
+    xs = np.concatenate([np.asarray(left.xs)[:-1], np.asarray(right.xs)[skip:]])
+    ys = np.concatenate([np.asarray(left.ys)[:-1], np.asarray(right.ys)[skip:]])
+    return XYs1d(xs=xs, ys=ys, interpolation=left.interpolation, axes=left.axes)
 
 
 def mergedInterpolationRegions(regions):
@@ -173,7 +191,8 @@ def encodeMF3MT(reaction: Reaction, mat: Optional[int] = None,
     from kika.nuclear_data.model.cross_section_forms import ResonancesWithBackground
 
     if isinstance(form, ResonancesWithBackground):
-        form = backgroundTable(form, reaction.label, report)
+        joins = (getattr(provenance, "headerFields", None) or {}).get("backgroundJoins")
+        form = backgroundTable(form, reaction.label, report, joins)
     if not hasattr(form, "toEndfRegions"):
         raise TypeError(
             f"the {label!r} form of {reaction.label} is a "
