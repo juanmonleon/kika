@@ -222,6 +222,8 @@ _TAPES: Dict[str, Sequence[str]] = {
     "fe56_gnds": (
         "ENDF-B-VIII.1-GNDS/ENDF-B-VIII.1-GNDS/neutrons/n-026_Fe_056.endf.gnds.xml",
         "ENDF-B-VIII.1-GNDS/neutrons/n-026_Fe_056.endf.gnds.xml",
+        # NuclearData's layout (gnds/endfb81 beside endf/), from KIKA_LIB_TAPES.
+        "../gnds/endfb81/n-026_Fe_056.endf.gnds.xml",
     ),
     # The same evaluation as ``fe56_gnds`` below, in ENDF-6. This pair is the
     # phase 5 oracle: one evaluation, two encodings, and any disagreement
@@ -346,6 +348,7 @@ _TAPES: Dict[str, Sequence[str]] = {
         "ENDF-B-VIII.1-GNDS/ENDF-B-VIII.1-GNDS/neutrons/Covariances/"
         "n-026_Fe_056.endf.gnds-covar.xml",
         "ENDF-B-VIII.1-GNDS/neutrons/Covariances/n-026_Fe_056.endf.gnds-covar.xml",
+        "../gnds/endfb81/Covariances/n-026_Fe_056.endf.gnds-covar.xml",
     ),
     # MF7, the thermal scattering law. A sublibrary of its own (NSUB=12): no
     # neutron evaluation in ENDF/B-VIII.1 carries an MF7, so every one of these

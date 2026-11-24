@@ -720,9 +720,9 @@ def test_the_form_census_matches_the_distributed_gnds_translation(tape, mts):
     from pathlib import Path
     import xml.etree.ElementTree as ET
 
-    root = Path(os.environ.get("KIKA_TAPES", "/share_snc/snc/JuanMonleon"))
-    source = root / "ENDF-B-VIII.1-GNDS" / "ENDF-B-VIII.1-GNDS" / "neutrons"
-    endfPath = Path("/share_snc/lib/endf/endfb81") / f"{tape}.endf"
+    tapes = Path(os.environ.get("KIKA_LIB_TAPES", "/share_snc/lib/endf"))
+    source = Path(os.environ.get("KIKA_GNDS_LIB", tapes.parent / "gnds" / "endfb81"))
+    endfPath = tapes / "endfb81" / f"{tape}.endf"
     gndsPath = source / f"{tape}.endf.gnds.xml"
     if not (endfPath.is_file() and gndsPath.is_file()):
         pytest.skip(f"needs {endfPath} and {gndsPath}")
