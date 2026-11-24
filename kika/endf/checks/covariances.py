@@ -1718,6 +1718,22 @@ def _negative_excess(sym: np.ndarray, self_min: float):
     return ev, vecs, sub, min(float(ev[0]), 0.0) - min(self_min, 0.0)
 
 
+def _joint_excess(ev, floor: float, sym, weights, rounding: list):
+    """(excess, lambda_max, ratio) of a joint spectrum below *floor*, or ``None`` if not reported."""
+    excess = floor - min(float(ev[0]), 0.0)
+    lam_max = float(ev[-1])
+    if lam_max <= 0 or excess <= 0:
+        return None
+    if not rounding:
+        rounding.append(_half_ulp_norm(sym, weights))
+    if excess <= rounding[0]:
+        return None
+    ratio = excess / lam_max
+    if ratio < PSD_NOTE:
+        return None
+    return excess, lam_max, ratio
+
+
 def _joint_psd(nodes, grids, selfs, cross, describe, loc, out) -> None:
     """Indefiniteness the cross blocks create, beyond what the self blocks hold.
 
@@ -1740,18 +1756,17 @@ def _joint_psd(nodes, grids, selfs, cross, describe, loc, out) -> None:
         sym = 0.5 * (joint + joint.T)
         if not sym.size:
             continue
-        ev, vecs = np.linalg.eigh(sym)
         sub = sym
-        excess = min(float(ev[0]), 0.0) - min(min(self_min.values()), 0.0)
-        lam_max = float(ev[-1])
-        if lam_max <= 0 or excess >= 0:
+        floor = min(min(self_min.values()), 0.0)
+        rounding = []
+        # Eigenvectors cost ~50x the eigenvalues: only for a joint that is reported.
+        if _joint_excess(np.linalg.eigvalsh(sym), floor, sub, w, rounding) is None:
             continue
-        excess = -excess
-        if excess <= _half_ulp_norm(sub, w):
+        ev, vecs = np.linalg.eigh(sym)
+        found = _joint_excess(ev, floor, sub, w, rounding)
+        if found is None:
             continue
-        ratio = excess / lam_max
-        if ratio < PSD_NOTE:
-            continue
+        excess, lam_max, ratio = found
         level = WARN if ratio <= PSD_DEFECT else DEFECT
         reason = ""
         evidence = {"nodes": [describe([m]) for m in members], "lambda_min": float(ev[0]),
