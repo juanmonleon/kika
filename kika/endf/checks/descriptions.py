@@ -42,7 +42,8 @@ class CheckDescription:
         For a covariance check, the group it belongs to (a key of
         ``kika.endf.checks.descriptions.GROUPS``):
         ``"structure"``, ``"values"``, ``"completeness"``, ``"mf32_vs_mf2"`` or
-        ``"mf35_vs_mf5"``. Empty for a data check.
+        ``"mf35_vs_mf5"``. For a data check, its family (a key of
+        ``kika.endf.checks.data.descriptions.DATA_FAMILIES``).
     """
 
     title: str

@@ -7,12 +7,13 @@ checks use. Written in ASCII; the pages give Greek letters.
 """
 from __future__ import annotations
 
-from typing import Dict
+from dataclasses import replace
+from typing import Dict, Tuple
 
 from ..descriptions import CheckDescription
 from ..findings import DEFECT, NOTE, WARN
 
-__all__ = ["DATA_CHECKS"]
+__all__ = ["DATA_CHECKS", "DATA_FAMILIES"]
 
 
 def _g(x: float) -> str:
@@ -39,7 +40,7 @@ def _build() -> Dict[str, CheckDescription]:
     D = CheckDescription
     ANY = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 23, 26, 27, 28)
     TABS = (1, 3, 4, 5, 6, 12, 13, 14, 15, 23, 26, 27)
-    out = {
+    general = {
         # ---- reading ----------------------------------------------------------
         "file_unreadable": D(
             "File that could not be read", ANY, {DEFECT: "always"},
@@ -187,7 +188,8 @@ def _build() -> Dict[str, CheckDescription]:
             "Logarithmic law towards zero", TABS, {NOTE: "always"},
             "A log-y law with a value of exactly zero at one end: undefined, and read as zero over "
             "the interval by kika, as a jump by others."),
-        # ---- MF3 ----------------------------------------------------------------
+    }
+    cross_sections = {
         "xs_negative": D(
             "Negative cross section", (3,),
             {DEFECT: "outside the resolved range, or in a reaction that is not a background",
@@ -247,12 +249,25 @@ def _build() -> Dict[str, CheckDescription]:
             "below, MF3 holds backgrounds, and the sums of the reconstructed cross sections are "
             "the reconstruction's check."),
     }
-    out.update(dist.descriptions(D, _g, _pct))
-    out.update(ph.descriptions(D, _g, _pct))
-    out.update(res.descriptions(D, _g, _pct))
-    for module in (th, dec, pa, dp):
-        out.update(module.descriptions(D, _g, _pct))
-    return out
+    # The reading and table checks run in every family; the deep checks only when MF3 is checked.
+    families = {
+        "general": general,
+        "resonances": res.descriptions(D, _g, _pct),
+        "xs": {**cross_sections, **dp.descriptions(D, _g, _pct)},
+        "distributions": dist.descriptions(D, _g, _pct),
+        "thermal": th.descriptions(D, _g, _pct),
+        "decay": dec.descriptions(D, _g, _pct),
+        "photons": ph.descriptions(D, _g, _pct),
+        "photoatomic": pa.descriptions(D, _g, _pct),
+    }
+    return {name: replace(d, group=family)
+            for family, entries in families.items() for name, d in entries.items()}
 
 
 DATA_CHECKS: Dict[str, CheckDescription] = _build()
+
+#: The data checks by family, in the order of the desktop app's Checks columns.
+DATA_FAMILIES: Dict[str, Tuple[str, ...]] = {
+    family: tuple(name for name, d in DATA_CHECKS.items() if d.group == family)
+    for family in dict.fromkeys(d.group for d in DATA_CHECKS.values())
+}

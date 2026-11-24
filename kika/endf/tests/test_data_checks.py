@@ -161,6 +161,17 @@ def test_every_data_check_is_described_and_ids_are_unique():
         assert d.title and d.description and d.mf and set(d.levels) <= set(LEVELS)
 
 
+def test_every_data_check_is_in_one_family():
+    from kika.endf.checks.data.descriptions import DATA_FAMILIES
+
+    assert list(DATA_FAMILIES) == ["general", "resonances", "xs", "distributions", "thermal",
+                                   "decay", "photons", "photoatomic"]
+    assert sum(len(names) for names in DATA_FAMILIES.values()) == len(DATA_CHECKS)
+    assert all(DATA_CHECKS[n].mf == (2,) for n in DATA_FAMILIES["resonances"])
+    assert all(DATA_CHECKS[n].mf == (7,) for n in DATA_FAMILIES["thermal"])
+    assert all(set(DATA_CHECKS[n].mf) <= {23, 26, 27, 28} for n in DATA_FAMILIES["photoatomic"])
+
+
 def test_evaluation_report_joins_both_families_and_each_alone():
     tape = DATA.parent / "micro_fe56_jendl_covcheck.endf"
     both = check_evaluation(tape)
