@@ -152,7 +152,10 @@ def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
         an empty ``<distribution/>``, which looks like nothing at all. The report
         names each one, and says that such a file does not validate — which is
         deliberate, because the alternative is asserting on the evaluator's
-        behalf that no distribution was given.
+        behalf that no distribution was given. A GNDS write of a suite read from
+        ENDF also lists, as losses, the records the reader kept only to write the
+        tape back (P(nu), LFC=1's thermal values...). ``print(report)`` shows it
+        all, grouped by kind.
 
     Raises
     ------
@@ -255,13 +258,18 @@ def _writeGnds(suite, path: Path, gnds: Optional[str],resonance_extensions=False
     originalBackLinks = (list(suite.covarianceSuite.externalFiles)
                          if suite.covarianceSuite is not None else None)
     try:
-        return _writeLinkedPair(suite, path, format, report,
-                                writeReactionSuite, writeCovarianceSuite,
-                                serialise, sha1, ExternalFile)
+        report = _writeLinkedPair(suite, path, format, report,
+                                  writeReactionSuite, writeCovarianceSuite,
+                                  serialise, sha1, ExternalFile)
     finally:
         suite.externalFiles.files = originalExternalFiles
         if originalBackLinks is not None:
             suite.covarianceSuite.externalFiles = originalBackLinks
+    if getattr(getattr(suite, "provenance", None), "sourceFormat", None) == "endf":
+        from kika.endf.model_adapter.tape_only import tapeOnlyData
+        for sentence in tapeOnlyData(suite):
+            report.lost(sentence, unaffectedScopes=("cross-sections",))
+    return report
 
 
 def _writeLinkedPair(suite, path, format, report, writeReactionSuite,
