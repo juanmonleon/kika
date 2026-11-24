@@ -157,9 +157,9 @@ def _pointsByNode(meta) -> Dict[str, List[int]]:
 def _valueAt(function, energy: float, k: int, nodes: List[int]) -> float:
     """The piece's multiplicity at node *k*: its own point when the table still has
     one per node (a repeated incident energy is two points), else evaluated."""
-    xs = getattr(function, "xs", None)
-    if xs is not None and len(xs) == len(nodes) and k in nodes:
-        return float(np.asarray(function.ys, dtype=float)[nodes.index(k)])
+    xs, ys = _points(function)
+    if len(xs) == len(nodes) and k in nodes:
+        return float(ys[nodes.index(k)])
     return float(function.evaluate(energy))
 
 
@@ -490,7 +490,7 @@ def restoreLineSpectrum(record: dict, forms: Dict[str, object],
             if scale is None:
                 row.extend(float(v) for v in table[nd[k]:].reshape(-1))
             else:
-                for x, f in zip(node.xs, node.ys):
+                for x, f in zip(*_points(node)):
                     row.extend([float(x), float(f) * scale])
         values.append(row)
     nd = [len(names) for names in meta["nodes"]]
@@ -663,14 +663,14 @@ def isLinePiece(product) -> bool:
     return isinstance(form.angular, Isotropic2d) and hasattr(form.energy, "function1ds")
 
 
-def _spectrumPoints(node):
-    """A continuum node's (E', f): a Regions1d (a step in E', as GNDS writes one) is
-    flattened with the step's two values at the shared E', as LAW=1 states it."""
-    from kika.nuclear_data.model import Regions1d
-    if isinstance(node, Regions1d):
-        xs, ys, _ = node.toEndfRegions()
-        return xs, ys
-    return node.xs, node.ys
+def _points(function) -> Tuple[np.ndarray, np.ndarray]:
+    """A multiplicity's or spectrum node's (x, y) as its TAB1 states them, whatever
+    its form: a Constant1d gives its two ends, a Regions1d (a step, as GNDS writes
+    one) the step's two values at the shared x."""
+    from .photons import _tab1Of
+
+    _, x, y = _tab1Of(function)
+    return np.asarray(x, dtype=float), np.asarray(y, dtype=float)
 
 
 def deriveLineSpectrum(pieces, total, awr: Optional[float], index: int, mt: int, report):
@@ -703,7 +703,7 @@ def deriveLineSpectrum(pieces, total, awr: Optional[float], index: int, mt: int,
 
     nodes: Dict[float, List] = {}
     for p in lines:
-        for e in np.asarray(multiplicities[p.label].xs, dtype=float):
+        for e in _points(multiplicities[p.label])[0]:
             nodes.setdefault(float(e), [])
     contNodes = {}
     if cont is not None:
@@ -727,12 +727,12 @@ def deriveLineSpectrum(pieces, total, awr: Optional[float], index: int, mt: int,
             # FUDGE's fix for the lowest node of a spectrum with no continuum
             # whose total is zero: the lines share the node equally.
             here = [p for p in lines
-                    if np.any(np.asarray(multiplicities[p.label].xs, dtype=float) == e)]
+                    if np.any(_points(multiplicities[p.label])[0] == e)]
             share = 1.0 / len(here) if here else 0.0
         else:
             share = None
         for p in lines:
-            xs = np.asarray(multiplicities[p.label].xs, dtype=float)
+            xs = _points(multiplicities[p.label])[0]
             if not np.any(xs == e):
                 continue
             m = float(multiplicities[p.label].evaluate(e))
@@ -755,7 +755,7 @@ def deriveLineSpectrum(pieces, total, awr: Optional[float], index: int, mt: int,
         if e in contNodes:
             node = contNodes[e]
             scale = float(multiplicities[cont.label].evaluate(e)) / tAt[e] if tAt[e] else 1.0
-            for x, f in zip(*_spectrumPoints(node)):
+            for x, f in zip(*_points(node)):
                 row.extend([float(x), float(f) * scale])
         values.append(row)
 
