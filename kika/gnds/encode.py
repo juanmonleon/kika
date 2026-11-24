@@ -216,7 +216,7 @@ def _function(parent: ET.Element, form, report: ConversionReport,
     the two positions cannot both write the same attributes.
     """
     if isinstance(form, XYs1d):
-        pieces = _stepPieces(form)
+        pieces = _stepPieces(form, report)
         if len(pieces) > 1 and index is None:
             # A step inside one table, written as the regions1d FUDGE writes for
             # it: one region per side. Under a regions container the caller
@@ -267,7 +267,7 @@ def _function(parent: ET.Element, form, report: ConversionReport,
         container = ET.SubElement(element, "function1ds")
         position = 0
         for child in form.function1ds:
-            pieces = _stepPieces(child) if isinstance(child, XYs1d) else []
+            pieces = _stepPieces(child, report) if isinstance(child, XYs1d) else []
             if len(pieces) > 1:
                 position = _stepRegions(container, child, pieces, position)
                 continue
@@ -416,7 +416,11 @@ def _endfGenre(mt: Optional[int]) -> Optional[str]:
     return "NBody"
 
 
-def _stepPieces(form) -> list:
+#: Edge points :func:`_stepPieces` dropped, per report, declared once per file.
+_EDGE_POINTS_DROPPED = {}
+
+
+def _stepPieces(form, report: Optional[ConversionReport] = None) -> list:
     """An ``XYs1d``'s points as the strictly increasing runs GNDS can hold.
 
     ENDF writes a step as the same x twice inside one interpolation range (the
@@ -446,12 +450,17 @@ def _stepPieces(form) -> list:
     if np.any(xs[1:] < xs[:-1]):
         return [form.interleaved()]
     bounds = np.r_[0, np.flatnonzero(xs[1:] == xs[:-1]) + 1, xs.size]
+    dropped = 0
     if bounds.size > 2 and bounds[1] - bounds[0] == 1:
         bounds = bounds[1:]
+        dropped += 1
     if bounds.size > 2 and bounds[-1] - bounds[-2] == 1:
         bounds = bounds[:-1]
+        dropped += 1
     if np.any(np.diff(bounds) < 2):
         return [form.interleaved()]
+    if dropped and report is not None:
+        _EDGE_POINTS_DROPPED[id(report)] = _EDGE_POINTS_DROPPED.get(id(report), 0) + dropped
     pieces = []
     for low, high in zip(bounds[:-1], bounds[1:]):
         piece = np.empty(2 * (high - low), dtype=float)
@@ -1527,6 +1536,12 @@ def writeReactionSuite(suite, format: Optional[str] = None,
         write(root,saved,report)
     from .endf_conversion import writeConversionFlags
     writeConversionFlags(root, suite)
+    dropped = _EDGE_POINTS_DROPPED.pop(id(report), 0)
+    if dropped:
+        report.approximated(
+            f"{dropped} table point(s) at a step on the edge of their domain were "
+            f"dropped, as FUDGE does: GNDS holds no point beyond the domain, and "
+            f"the function on the domain is unchanged")
     return ET.ElementTree(root), report
 
 
