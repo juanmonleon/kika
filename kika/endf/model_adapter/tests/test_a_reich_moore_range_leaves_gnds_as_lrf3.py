@@ -4,8 +4,7 @@ GNDS holds it as (L, J, channel spin) spin groups with no ENDF bookkeeping. The
 tape kika writes from that GNDS carries the source's resonance rows in the
 source's order, with AJ's sign, AP, APL, AWRI and NAPS, and its 0 K resonance
 cross sections equal the source's bit for bit. LAD and NLSC have no node in the
-model and are written 0 and reported; Mn-55's unresolved range is not derived
-and is reported lost.
+model and are written 0 and reported.
 """
 from __future__ import annotations
 
@@ -64,9 +63,8 @@ def test_mn55_keeps_the_sign_of_aj_for_both_channel_spins(tmp_path):
     isotope, written = _resolved(out)
     spins = {r.spin for block in written.parameters.l_values for r in block.resonances}
     assert {-3.0, -2.0, 2.0, 3.0} <= spins
-    assert len(isotope.energy_ranges) == 1
-    assert any("unresolved range 125000-1e+06 eV is not written" in message
-               for message in report.losses)
+    assert [r.lru for r in isotope.energy_ranges] == [1, 2]
+    assert not any("unresolved" in message for message in report.losses)
 
 
 @pytest.mark.parametrize("name", TAPES)

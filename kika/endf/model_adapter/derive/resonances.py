@@ -25,8 +25,7 @@ them by L when the tape is written. Per range:
 ``LAD``         0, reported: the model has no node for whether MF4 may be
                 computed from the parameters
 ``NLSC``        ``angularLCount``, else 0, reported
-``ZAI``/``ABN`` the target's ZA and 1; ``LFW`` 0, as no unresolved range is
-                written
+``ZAI``/``ABN`` the target's ZA and 1
 ==============  ===========================================================
 
 **Breit-Wigner resolved ranges** are LRF=1/2, already one spin group per L. The
@@ -34,13 +33,23 @@ fields are the same, less APL, AJ's sign, LAD and NLSC, which LRF=1/2 does not
 have; QX and LRX come from the group's competitive channel, else 0, reported
 where GT is not GN+GG+GF.
 
+**The unresolved range** is LRU=2. LRF is 2 unless FUDGE's ``LRF1`` flag says
+otherwise, and the isotope's LFW is 1 when the suite has fission, unless an
+``LFW<n>`` flag says otherwise (FUDGE's rule: the GNDS of a non-fissile tape
+with LFW=1 carries ``LFW1``). LRF and LFW pick case A, B or C. Widths are
+matched to ENDF's columns by their reaction's MT; a column the region does not
+state is written 0 with 0 degrees of freedom. INT is the level spacing's
+interpolation; AWRI the region's target mass, as for the resolved ranges.
+
 Not derived, and reported lost: R-Matrix Limited ranges (MF2 is then not
-written at all, since a resolved range cannot be skipped) and the unresolved
-range (the resolved ones are written without it).
+written at all, since a resolved range cannot be skipped) and an unresolved
+range that its case cannot state (the resolved ones are written without it).
 """
 from __future__ import annotations
 
 from typing import Optional
+
+import numpy as np
 
 from . import DERIVED, DerivationContext, register
 
@@ -74,11 +83,11 @@ def _domain(radius, suite, report):
     return float(domain.min), float(domain.max)
 
 
-def _provenance(context, regions):
+def _provenance(context, regions, lfw: int = 0):
     from kika.nuclear_data.model import EndfProvenance
 
     header = {"nis": 1,
-              "isotopes": [{"za": context.za, "abn": 1.0, "lfw": 0, "ner": len(regions)}],
+              "isotopes": [{"za": context.za, "abn": 1.0, "lfw": lfw, "ner": len(regions)}],
               "regions": regions}
     return EndfProvenance(sourceFormat=DERIVED, mat=context.mat, za=context.za,
                           awr=context.awr, headerFields=header)
@@ -239,6 +248,106 @@ def _reichMooreRange(resonances, region, context, report, where) -> dict:
                          for b in blocks]}
 
 
+def _hasFission(suite) -> bool:
+    from ..mf1_header import _FISSION_MTS
+
+    return (any(getattr(r, "ENDF_MT", None) in _FISSION_MTS for r in suite.reactions)
+            or bool(len(getattr(suite, "fissionComponents", ()) or ())))
+
+
+def _unresolvedFlags(widths, context) -> dict:
+    """FUDGE's ``LRF<n>``/``LFW<n>`` notes on the region, as ``{"LRF": n, "LFW": n}``."""
+    href = (f"/reactionSuite/resonances/unresolved/tabulatedWidths"
+            f"[@label='{widths.label or 'eval'}']")
+    flags = {}
+    for item in context.conversionFlags.get(href, "").split(","):
+        item = item.strip()
+        for key in ("LRF", "LFW"):
+            if item.startswith(key) and item[len(key):].isdigit():
+                flags[key] = int(item[len(key):])
+    return flags
+
+
+def _unresolvedAwri(widths, context, report, where) -> Optional[float]:
+    """AWRI as FUDGE writes it: the target's mass over the neutron's, both from PoPs."""
+    from kika._constants import NEUTRON_MASS_AMU
+
+    from ..mf1_header import _massAmu
+
+    if all(g.atomicWeightRatio is not None for g in widths.spinGroups):
+        return None
+    suite = context.suite
+    pops = getattr(suite, "PoPs", None)
+    own = list(widths.PoPs.particles.values()) if widths.PoPs is not None else []
+    target = _massAmu(own[0]) if len(own) == 1 else None
+    if target is None and pops is not None:
+        target = _massAmu(pops.get(suite.target))
+    if target is None:
+        if context.awr is None:
+            raise ValueError(f"{where}: no target mass to write AWRI from")
+        report.approximated(f"MF2/151 LRU=2, {where}: PoPs states no target mass, so "
+                            f"AWRI is MF1's AWR {float(context.awr):g}")
+        return float(context.awr)
+    neutron = _massAmu(pops.get("n")) if pops is not None else None
+    return target / (neutron if neutron is not None else NEUTRON_MASS_AMU)
+
+
+def _isConstant(values) -> bool:
+    return values is not None and np.asarray(values).size == 1
+
+
+def _unresolvedRange(resonances, context, report):
+    """The fields of the LRU=2 range and the isotope's LFW; raises ``ValueError`` saying why not."""
+    from kika.nuclear_data.model.enums import INTERPOLATION_TO_ENDF_INT, Interpolation
+    from ..resonances import unresolvedChannelRoles
+
+    urr = resonances.unresolved
+    widths = urr.tabulatedWidths
+    where = f"the unresolved range {urr.domainMin:g}-{urr.domainMax:g} eV"
+    if widths is None:
+        raise ValueError(f"{where} has no tabulatedWidths")
+    if widths.scatteringRadius is None:
+        raise ValueError(f"{where} states no constant scattering radius for AP")
+    flags = _unresolvedFlags(widths, context)
+    lrf = flags.get("LRF", 2)
+    lfw = flags.get("LFW", int(_hasFission(context.suite)))
+    if lrf not in (1, 2):
+        raise ValueError(f"{where} is flagged LRF={lrf}, which LRU=2 does not have")
+    case = "C" if lrf == 2 else ("B" if lfw else "A")
+    spin = _rangeSpin(widths, context, where)
+    awri = _unresolvedAwri(widths, context, report, where)
+    roles = unresolvedChannelRoles(widths)
+    states = []
+    for group in widths.spinGroups:
+        here = f"{where}, L={group.L} J={group.J:g}"
+        present = {roles[c.label] for c in group.channels}
+        if case == "C":
+            interpolation = getattr(group.levelSpacingFunction, "interpolation", None)
+            if group.crossSectionInterpolation is None and interpolation is None:
+                raise ValueError(f"{here}: the level spacing is not one table, so it "
+                                 f"states no INT for case C")
+            states.append({"l": group.L, "j": group.J, "int_code": (
+                None if interpolation is None
+                else INTERPOLATION_TO_ENDF_INT[Interpolation(interpolation)])})
+            continue
+        constant = {roles[c.label]: c for c in group.channels if c.constantWidth is not None}
+        if not _isConstant(group.levelSpacing) or not {"neutron", "capture"} <= set(constant):
+            raise ValueError(f"{here}: case {case} (LRF=1) states one D, GN0 and GG per J, "
+                             f"and the model tabulates them")
+        if present - {"neutron", "capture", "fission"} or (case == "A" and "fission" in present):
+            raise ValueError(f"{here}: case {case} has no column for "
+                             f"{sorted(present - {'neutron', 'capture'})}")
+        if case == "B" and "fission" not in present:
+            raise ValueError(f"{here}: case B (LFW=1) needs a fission width")
+        states.append({"l": group.L, "j": group.J})
+    region = {"kind": "unresolved", "lru": 2, "lrf": lrf, "nro": 0, "naps": 0,
+              "el": float(urr.domainMin), "eh": float(urr.domainMax), "spi": spin,
+              "nls": len({g.L for g in widths.spinGroups}), "isotope_index": 0,
+              "urr_case": case, "j_states": states,
+              **({} if awri is None else {"awri": awri})}
+    return region, lfw
+
+
 def deriveResonances(resonances, path, context: DerivationContext, report):
     """The provenance :func:`encodeMF2MT151` writes MF2/151 from, or ``None``."""
     if not resonances.resolved and resonances.unresolved is None:
@@ -250,17 +359,20 @@ def deriveResonances(resonances, path, context: DerivationContext, report):
         except ValueError as why:
             report.lost(f"MF2/151: {why}, so MF2 is not written")
             return None
+    lfw = 0
     if resonances.unresolved is not None:
-        urr = resonances.unresolved
-        selfShielding = getattr(urr.tabulatedWidths, "selfShieldingOnly", False)
-        report.lost(
-            f"MF2/151: the unresolved range {urr.domainMin:g}-{urr.domainMax:g} eV "
-            f"is not written, as kika does not derive its ENDF bookkeeping yet"
-            + ("" if selfShielding else
-               "; MF3 there is a background without its resonance part"))
+        try:
+            region, lfw = _unresolvedRange(resonances, context, report)
+            regions.append(region)
+        except ValueError as why:
+            selfShielding = getattr(resonances.unresolved.tabulatedWidths,
+                                    "selfShieldingOnly", False)
+            report.lost(f"MF2/151: {why}, so the range is not written"
+                        + ("" if selfShielding else
+                           "; MF3 there is a background without its resonance part"))
     if not regions:
         return None
-    return _provenance(context, regions)
+    return _provenance(context, regions, lfw)
 
 
 def _isResonances(node) -> bool:

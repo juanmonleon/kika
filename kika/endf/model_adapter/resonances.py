@@ -1207,6 +1207,39 @@ def reichMooreLBlocks(formalism, rangeRadius: float, targetSpin: float,
     return [byL[l] for l in sorted(byL)]
 
 
+_URR_ROLE_BY_MT = {2: "neutron", 102: "capture", 18: "fission"}
+_URR_ROLES = {"neutron": "neutron", "elastic": "neutron", "capture": "capture",
+              "fission": "fission", "competitive": "competitive"}
+
+
+def unresolvedChannelRoles(widths) -> dict:
+    """Each URR width label → its ENDF column (neutron, capture, fission, competitive).
+
+    A label a ``resonanceReaction`` carries goes by that reaction's MT, as FUDGE
+    matches them; the competitive width, which no reaction carries, by its label.
+    """
+    roles = {}
+    for reaction in widths.resonanceReactions:
+        mt = getattr(reaction, "reactionMT", None)
+        role = _URR_ROLE_BY_MT.get(mt) if mt is not None else _URR_ROLES.get(reaction.label)
+        if role is None:
+            raise ValueError(f"the unresolved resonanceReaction {reaction.label!r} is not "
+                             f"elastic, capture or fission, which LRU=2 has columns for")
+        roles[reaction.label] = role
+    for group in widths.spinGroups:
+        for channel in group.channels:
+            if channel.label not in roles:
+                if channel.label not in _URR_ROLES:
+                    raise ValueError(f"the unresolved width {channel.label!r} names no "
+                                     f"reaction LRU=2 has a column for")
+                roles[channel.label] = _URR_ROLES[channel.label]
+    for group in widths.spinGroups:
+        columns = [roles[c.label] for c in group.channels]
+        if len(set(columns)) != len(columns):
+            raise ValueError(f"L={group.L} J={group.J:g} has two widths for one ENDF column")
+    return roles
+
+
 def formalismAtomicWeightRatio(formalism) -> Optional[float]:
     """AWRI as a resolved range states it: its own target's mass over the neutron's."""
     pops = getattr(formalism, "PoPs", None)
@@ -1437,12 +1470,24 @@ def _encodeUnresolved(unresolved: UnresolvedRegion, fields: dict):
             f"and {len(states)} J-state records in provenance"
         )
 
+    roles = unresolvedChannelRoles(widths)
+    awri = fields.get("awri")
+    awri = awri if awri is not None else formalismAtomicWeightRatio(widths)
     #: (L, awri) → the J-state records of that l-block, in file order.
     blocks: dict = {}
     for group, state in zip(widths.spinGroups, states):
-        entry = blocks.setdefault(group.L, {"awri": group.atomicWeightRatio,
-                                            "states": []})
-        channels = {channel.label: channel for channel in group.channels}
+        entry = blocks.setdefault(group.L, {
+            "awri": group.atomicWeightRatio if group.atomicWeightRatio is not None else awri,
+            "states": []})
+        channels = {roles[channel.label]: channel for channel in group.channels}
+        if case == "C":
+            grid = np.asarray(group.levelSpacingEnergies if group.levelSpacingEnergies is not None
+                              else widths.energyGrid, dtype=float)
+            for role in ("competitive", "neutron", "capture", "fission"):
+                if role not in channels:
+                    channels[role] = UnresolvedChannel(label=role, degreesOfFreedom=0.0,
+                                                       widths=np.zeros(grid.size),
+                                                       energies=grid)
         entry["states"].append((group, state, channels))
 
     common = dict(spi=fields["spi"], ap=radiusToEndf(widths.scatteringRadius), lssf=int(widths.selfShieldingOnly),
