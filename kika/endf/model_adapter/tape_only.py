@@ -101,6 +101,7 @@ def tapeOnlyData(suite, written: str = "the GNDS file") -> List[str]:
     if photons:
         sentences.append(f"photons: the sections kika could not model "
                          f"(MF{', MF'.join(photons)})")
+    sentences.extend(_levelQmSentences(suite))
     return [f"not in {written}, kept only in the suite's ENDF provenance to write "
             f"the tape back: {sentence}" for sentence in sentences]
 
@@ -131,6 +132,30 @@ def decayTapeOnlyData(pops, written: str = "the GNDS file") -> List[str]:
                          f"({', '.join(f'MF{mf}/MT{mt}' for mf, mt, _ in kept)})")
     return [f"not in {written}, kept only in the PoPs' ENDF provenance to write the tape "
             f"back: {sentence}" for sentence in sentences]
+
+
+def _levelQmSentences(suite) -> List[str]:
+    """MF3's QM of a level reaction where QI plus the level's PoPs energy, FUDGE's rule, is not it."""
+    from kika._records import format_endf_number
+    from kika.nuclear_data.model.endf_conversion import reactionQI
+    from .derive.reactions import _decayingResidual, _levelEnergy
+
+    sentences = []
+    for reaction in suite.reactions:
+        provenance = reaction.provenance
+        if (not isinstance(provenance, EndfProvenance) or provenance.qm is None
+                or int(getattr(provenance, "lr", 0) or 0) != 0 or reaction.outputChannel is None):
+            continue
+        residual = _decayingResidual(reaction)
+        level = _levelEnergy(suite, residual) if residual is not None else None
+        qi = reactionQI(reaction, suite)
+        if level is None or qi is None:
+            continue
+        derived = float(qi) + level
+        if format_endf_number(derived) != format_endf_number(float(provenance.qm)):
+            sentences.append(f"MF3/MT{reaction.ENDF_MT}: QM {float(provenance.qm):.7g} eV; QI plus "
+                             f"{residual.pid}'s energy gives {derived:.7g} eV")
+    return sentences
 
 
 def _mf6Sentences(entries) -> List[str]:

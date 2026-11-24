@@ -98,3 +98,10 @@ def test_a_decay_pops_declares_what_it_keeps_for_the_tape(tape, expected, tmp_pa
     declared = [m.split("back: ", 1)[1] for m in report.losses
                 if m.startswith("not in the GNDS file, kept only in the PoPs' ENDF provenance")]
     assert declared == expected
+
+
+def test_a_level_qm_off_its_pops_energy_is_declared(zr90_b81_tape):
+    """B-VIII.1 Zr-90 MT651: MF3's QM - QI is 908970 eV, MF8 puts Y89_e1 at 909000 eV."""
+    found = [s.split("back: ", 1)[1] for s in tapeOnlyData(kika.read(zr90_b81_tape, covariances=False))]
+    assert [s for s in found if s.startswith("MF3/")] == [
+        "MF3/MT651: QM -6128816 eV; QI plus Y89_e1's energy gives -6128786 eV"]
