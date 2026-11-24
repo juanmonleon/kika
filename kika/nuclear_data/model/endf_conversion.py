@@ -17,10 +17,14 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 __all__ = ["ENDF_CONVERSION_INSTITUTION", "EndfConversionFlags", "parseFlags",
-           "QI_FLAGGED_MTS", "levelSeries", "reactionHref", "reactionQI"]
+           "OMIT_FLAG", "QI_FLAGGED_MTS", "isOmitted", "levelSeries", "reactionHref", "reactionQI"]
 
 #: The ``institution`` label FUDGE files the node under.
 ENDF_CONVERSION_INSTITUTION = "LLNL"
+
+#: FUDGE's flag on a crossSectionSum that has no MF3 section, which toENDF6
+#: then does not write (``toENDF6/sums.py``): NNDC's P-31 ``nonelastic``.
+OMIT_FLAG = "omit"
 
 #: The MTs whose GNDS ``Q`` is the ground-state Q (ENDF's QM) and whose QI is a
 #: ``QI=`` flag: every continuum and MT103-107. Measured on the 558 neutron files
@@ -75,6 +79,12 @@ def reactionQI(reaction, suite) -> Optional[float]:
     q = getattr(getattr(reaction, "outputChannel", None), "Q", None)
     value = getattr(q, "value", None)
     return None if value is None else float(value)
+
+
+def isOmitted(reaction, suite) -> bool:
+    """Whether the suite's flags say *reaction* has no MF3 section (:data:`OMIT_FLAG`)."""
+    flags = EndfConversionFlags.of(suite) if suite is not None else None
+    return bool(flags) and OMIT_FLAG in flags.flagsFor(reactionHref(reaction))
 
 
 def parseFlags(text: str) -> Dict[str, Optional[str]]:
