@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 __all__ = ["ENDF_CONVERSION_INSTITUTION", "EndfConversionFlags", "parseFlags",
-           "QI_FLAGGED_MTS", "reactionHref", "reactionQI"]
+           "QI_FLAGGED_MTS", "levelSeries", "reactionHref", "reactionQI"]
 
 #: The ``institution`` label FUDGE files the node under.
 ENDF_CONVERSION_INSTITUTION = "LLNL"
@@ -28,6 +28,23 @@ ENDF_CONVERSION_INSTITUTION = "LLNL"
 #: MTs carries the flag, whether or not QI equals QM (2 041 of 2 041), and no
 #: other MT does.
 QI_FLAGGED_MTS = frozenset({91, 103, 104, 105, 106, 107, 649, 699, 749, 799, 849, 891})
+
+
+#: First MT of each discrete-level series → the ejectile's ZA. The last MT of a
+#: series (91, 649, 699, 749, 799, 849, 891) is its continuum and has no level.
+_SERIES = {50: 1, 600: 1001, 650: 1002, 700: 1003, 750: 2003, 800: 2004, 875: 2}
+_CONTINUUM = {91, 649, 699, 749, 799, 849, 891}
+
+
+def levelSeries(mt: int) -> Optional[Tuple[int, int, int]]:
+    """``(series start, ejectile ZA, level index)`` for a discrete-level MT, else ``None``."""
+    if mt in _CONTINUUM:
+        return None
+    for start, ejectile in _SERIES.items():
+        end = 91 if start == 50 else 891 if start == 875 else start + 49
+        if start <= mt < end:
+            return start, ejectile, mt - start
+    return None
 
 
 def reactionHref(reaction) -> str:

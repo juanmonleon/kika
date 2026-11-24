@@ -315,11 +315,15 @@ def mf6Fields(reaction, context, report) -> Optional[dict]:
     # A residual's de-excitation line goes in MF6 after the products, as FUDGE
     # writes it (``checkDecayProducts``; ENDF/B-VIII.1 Be-9 MT701, the 477 keV
     # line of Li7_e1): LAW=1 with one discrete outgoing point.
-    for product in list(channel.products):
-        for decayed in getattr(getattr(product, "outputChannel", None), "products", None) or ():
-            if _isDiscreteLine(decayed):
-                kept.append(decayed)
+    decayLines = [decayed for product in list(channel.products)
+                  for decayed in getattr(getattr(product, "outputChannel", None), "products", None) or ()
+                  if _isDiscreteLine(decayed)]
+    kept.extend(decayLines)
     group = _lineGroup(kept, list(channel.products))
+    if not group and len(decayLines) > 1:
+        # Several lines in the decay are one MF6 line spectrum split by the
+        # decoder and moved there by residuals.py (Cl-35 MT51-90): one LAW=1 again.
+        group = decayLines
     index = -1
     for product in kept:
         if product in group[1:]:

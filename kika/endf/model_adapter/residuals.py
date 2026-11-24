@@ -21,22 +21,7 @@ from typing import Optional, Tuple
 
 __all__ = ["levelSeries", "attachResiduals", "residualOf"]
 
-#: First MT of each discrete-level series → the ejectile's ZA. The last MT of a
-#: series (91, 649, 699, 749, 799, 849, 891) is its continuum and has no level.
-_SERIES = {50: 1, 600: 1001, 650: 1002, 700: 1003, 750: 2003, 800: 2004, 875: 2}
-_CONTINUUM = {91, 649, 699, 749, 799, 849, 891}
-
-
-def levelSeries(mt: int) -> Optional[Tuple[int, int, int]]:
-    """``(series start, ejectile ZA, level index)`` for a discrete-level MT, else ``None``."""
-    if mt in _CONTINUUM:
-        return None
-    for start, ejectile in _SERIES.items():
-        end = 91 if start == 50 else 891 if start == 875 else start + 49
-        if start <= mt < end:
-            return start, ejectile, mt - start
-    return None
-
+from kika.nuclear_data.model.endf_conversion import levelSeries
 
 def _suffix(n: int) -> str:
     """0 → ``a``, 25 → ``z``, 26 → ``aa``: FUDGE's ``incrementSuffix`` sequence."""
@@ -129,8 +114,9 @@ def _decayChannel(residualZA: int, lr: int, q: float, report, mt: int, domain):
     # and stops on one without (found by the FUDGE oracle).
     one = _constantMultiplicity(1, domain) if domain is not None else None
     if lr == 0:
+        # The photons are the file's to state (MF6 here, MF12 in `photons.py`); a
+        # level with none has only its ground state, as in NNDC's Li-6 MT52.
         add(pidFromZA(residualZA), one)
-        add("photon")
         return channel
 
     light = LR_PRODUCTS.get(lr)
@@ -212,6 +198,7 @@ def residualOf(suite, reaction, report, *, force: bool = False):
         return None
     if existing is not None:
         existing.outputChannel = decay
+        _nameAsLevel(suite, existing, pid, reaction)
         residual = existing
     else:
         domain = _domain(reaction)
@@ -220,12 +207,71 @@ def residualOf(suite, reaction, report, *, force: bool = False):
                            multiplicity=(_constantMultiplicity(1, domain)
                                          if domain is not None else None))
         reaction.outputChannel.products.products.append(residual)
+    if lr == 0:
+        _photonsIntoDecay(suite, reaction, residual)
     if reaction.outputChannel.genre is None:
         reaction.outputChannel.genre = "twoBody"
     if pid not in suite.PoPs.particles:
         suite.PoPs.add(Nuclide(id=pid, Z=residualZA // 1000, A=residualZA % 1000,
                                nuclearLevel=level))
     return residual
+
+
+def _nameAsLevel(suite, product, pid: str, reaction) -> None:
+    """Give an MF6 residual the level's pid, as FUDGE does, and tell MF6's record.
+
+    MF6 states the residual with LIP=0 (Li-6 MT52 gives ZAP=3006), so it was read
+    as the ground state. The record keeps the label the ENDF writer looks the
+    product up by, and the ``MF6`` conversion flag the href the way back reads.
+    """
+    if product.pid == pid:
+        return
+    old = product.label or product.pid
+    taken = {p.label for p in reaction.outputChannel.products if p is not product}
+    product.pid, product.label = pid, _uniqueLabel(pid, taken)
+    fields = (getattr(reaction.provenance, "headerFields", None) or {}).get("mf6") or {}
+    for record in fields.get("products", ()):
+        if record.get("label") == old:
+            record["label"], record["pid"] = product.label, pid
+    _repointFlag(suite, reaction, old, _productHref(reaction, product.label))
+
+
+def _photonsIntoDecay(suite, reaction, residual) -> None:
+    """MF6's photons of a level reaction are its residual's de-excitation, so they go
+    into the residual's decay, after its ground state, as FUDGE writes them."""
+    photons = [p for p in reaction.outputChannel.products if p.pid == "photon"]
+    if not photons:
+        return
+    reaction.outputChannel.products.products[:] = [
+        p for p in reaction.outputChannel.products if p.pid != "photon"]
+    residual.outputChannel.products.products.extend(photons)
+    for photon in photons:
+        _repointFlag(suite, reaction, photon.label,
+                     _productHref(reaction, residual.label)
+                     + f"/outputChannel/products/product[@label='{photon.label}']")
+    # `decode._channelGenre`'s rule, now that the photons' LAW=1 is not the reaction's.
+    fields = (getattr(reaction.provenance, "headerFields", None) or {}).get("mf6") or {}
+    laws = {record["law"] for record in fields.get("products", ()) if record["zap"] != 0}
+    if reaction.outputChannel.genre == "NBody" and laws and laws <= {2, 3, 4}:
+        reaction.outputChannel.genre = "twoBody"
+
+
+def _productHref(reaction, label: str) -> str:
+    from .derive.reactions import reactionHref
+
+    return f"{reactionHref(reaction)}/outputChannel/products/product[@label='{label}']"
+
+
+def _repointFlag(suite, reaction, oldLabel: str, href: str) -> None:
+    """Move the conversion flag ``decode._flagMF6`` put on a product that moved."""
+    from kika.nuclear_data.model.endf_conversion import EndfConversionFlags
+
+    flags = EndfConversionFlags.of(suite)
+    if flags is None:
+        return
+    old = _productHref(reaction, oldLabel)
+    flags.conversions[:] = [(href if target == old else target, text)
+                            for target, text in flags.conversions]
 
 
 def attachResiduals(suite, report):

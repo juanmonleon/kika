@@ -837,19 +837,27 @@ def test_the_forms_survive_endf_to_gnds_and_back(micro_mf6_tape, tmp_path):
     import kika
 
     def formsOf(suite):
-        counted = Counter()
+        counted, recoils = Counter(), set()
         for reaction in suite.reactions:
             for product in reaction.outputChannel.products:
                 for label in (product.distribution or ()):
-                    counted[type(product.distribution[label]).__name__] += 1
-        return counted
+                    form = product.distribution[label]
+                    if getattr(form, "isRecoil", False):
+                        recoils.add((reaction.ENDF_MT, product.pid))
+                    else:
+                        counted[type(form).__name__] += 1
+        return counted, recoils
 
     fromTape = kika.read(str(micro_mf6_tape))
     out = tmp_path / "written.gnds.xml"
     kika.write(fromTape, out, format="gnds")
     fromXml = kika.read(out)
 
-    assert formsOf(fromXml) == formsOf(fromTape)
+    (xmlForms, xmlRecoils), (tapeForms, tapeRecoils) = formsOf(fromXml), formsOf(fromTape)
+    assert xmlForms == tapeForms
+    # The writer adds a two-body residual's recoil, as FUDGE does (U-235's MT800
+    # has no Th232 in the tape); every recoil the tape states is still there.
+    assert tapeRecoils <= xmlRecoils
 
 
 @pytest.mark.tape

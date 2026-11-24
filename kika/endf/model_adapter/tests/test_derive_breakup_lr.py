@@ -61,8 +61,9 @@ def test_a_breakup_with_nothing_left_over_is_counted_whole(za, lr):
 
 
 def test_a_gamma_cascade_is_lr0():
+    # The photons are the file's to state; with none, the ground state alone (NNDC's Li-6 MT52).
     residual = _residual(26056, 0)
-    assert [p.pid for p in residual.outputChannel.products] == ["Fe56", "photon"]
+    assert [p.pid for p in residual.outputChannel.products] == ["Fe56"]
     assert _lr(residual, "MT51", ConversionReport()) == 0
 
 
