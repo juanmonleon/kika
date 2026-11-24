@@ -415,7 +415,9 @@ def _modelledSections(channel, composite, reaction, entries, suite, targetMass, 
             q if composite else None,
             (int(e3["LR"]) if e3.get("LR") is not None else 0) if composite else None,
             Pairs(np.array(x, dtype=np.float64), np.array(y, dtype=np.float64)))
-    products = list(reaction.outputChannel.products) if reaction.outputChannel else []
+    from kika.endf.model_adapter.photon_lines import mf6Products
+
+    products = mf6Products(reaction) if reaction.outputChannel else []
     if products:
         # An MF6 photon whose lines the ENDF decoder split into products
         # is one MF6 product again, its lines first in each table.

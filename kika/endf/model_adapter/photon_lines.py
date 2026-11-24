@@ -57,7 +57,7 @@ import numpy as np
 
 __all__ = ["isLineSpectrum", "decodeLineSpectrum", "restoreLineSpectrum",
            "lineSpectrumLabels", "mergedLineSpectra", "isLinePiece",
-           "deriveLineSpectrum", "LINES_KEY"]
+           "deriveLineSpectrum", "LINES_KEY", "mf6Products"]
 
 #: The key of a split record's bookkeeping in its ``law_fields``.
 LINES_KEY = "lines"
@@ -85,6 +85,26 @@ def lineSpectrumLabels(record: dict) -> List[str]:
     if not meta:
         return [record["label"]] if record.get("label") is not None else []
     return [piece["label"] for piece in meta["pieces"]]
+
+
+def mf6Products(reaction) -> list:
+    """The reaction's products and the MF6 photons in a level residual's decay, in MF6's order.
+
+    ``residuals.py`` puts a level reaction's MF6 photons in its residual's decay,
+    where GNDS has them; a writer that rebuilds MF6's subsections needs them back
+    beside the reaction's own products.
+    """
+    channel = getattr(reaction, "outputChannel", None)
+    products = list(getattr(channel, "products", None) or ())
+    fields = getattr(getattr(reaction, "provenance", None), "headerFields", None) or {}
+    records = (fields.get("mf6") or {}).get("products") or []
+    order = {label: i for i, record in enumerate(records) for label in lineSpectrumLabels(record)}
+    decays = [d for p in products
+              for d in (getattr(getattr(p, "outputChannel", None), "products", None) or ())
+              if d.pid == "photon" and d.label in order]
+    if not decays:
+        return products
+    return sorted(products + decays, key=lambda p: order.get(p.label, len(order)))
 
 
 # ---------------------------------------------------------------------------

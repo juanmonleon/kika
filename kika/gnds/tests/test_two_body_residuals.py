@@ -98,3 +98,10 @@ def test_elastic_still_gets_the_targets_recoil(tmp_path):
     assert [p.get("pid") for p in products] == ["n", suite.target]
     assert _recoilOf(products[1]) is not None
     assert len(list(suite.reactions[2].outputChannel.products)) == 1
+
+
+def test_writers_that_rebuild_mf6_still_find_the_photon_in_the_decay():
+    from kika.endf.model_adapter.photon_lines import mf6Products
+
+    suite = kika.read(DATA / "micro_be9_mf6.endf")
+    assert [p.label for p in mf6Products(suite.reactions[701])] == ["H3", "Li7_e1", "photon"]

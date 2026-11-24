@@ -506,7 +506,7 @@ def lower(suite) -> Lowered:
     out.ace = list(_aceProvenances(suite))
     out.folds = out.foldKeys(suite)
     # The GNDS writer adds the target's recoil to an MT2 of one two-body
-    # neutron, as FUDGE writes it (encode.py elasticRecoil). The suite had
+    # neutron, as FUDGE writes it (encode.py twoBodyRecoil). The suite had
     # none; H-1's would come back as a proton the ACE writer must produce.
     out.recoils = [key for key, reaction in _reactions(suite)
                    if processed and getattr(reaction, "ENDF_MT", None) == 2

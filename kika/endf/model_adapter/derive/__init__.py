@@ -264,16 +264,18 @@ def _writtenByItsReaction(product, reaction) -> bool:
     if product.pid == "photon" and ("mf12" in fields or "mf13" in fields):
         # A level's cascade photons hang under the residual; MF12 LO=2 states them.
         return direct or _descends(product, reaction.outputChannel)
+    records = (fields.get("mf6") or {}).get("products") or []
+    labels = {label for record in records for label in lineSpectrumLabels(record)}
     if not direct:
-        return False
+        # A level's MF6 photons hang under the residual too (residuals.py).
+        return (product.pid == "photon" and product.label in labels
+                and _descends(product, reaction.outputChannel))
     if _implicitResidual(product, reaction.outputChannel):
         return True
     form = next(iter(product.distribution.values()), None) if product.distribution is not None else None
     if reaction.outputChannel.genre == "twoBody" and getattr(form, "recoilHref", None):
         # A two-body recoil ENDF never states (FUDGE adds the target's to MT2).
         return True
-    records =(fields.get("mf6") or {}).get("products") or []
-    labels = {label for record in records for label in lineSpectrumLabels(record)}
     return product.label in labels
 
 

@@ -1529,7 +1529,9 @@ def _products(reaction, channel, mt, awr, zaTarget, options, report, pops=None, 
     # from GNDS, under the file's total photon multiplicity (``totals``).
     merged, hidden = mergedLineSpectra(reaction, totals, _fromMF6(reaction, flags), awr)
     explicitPhotons = False
-    for product in reaction.outputChannel.products:
+    from kika.endf.model_adapter.photon_lines import mf6Products
+
+    for product in mf6Products(reaction):
         if product.pid not in particles or product.label in hidden:
             continue
         product = merged.get(product.label, product)

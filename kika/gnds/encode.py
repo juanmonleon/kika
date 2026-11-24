@@ -416,8 +416,9 @@ def _twoBodyLabel(product) -> Optional[str]:
 
 
 def _unspecifiedOnly(product) -> bool:
+    # A product with no form is the empty <distribution/> the writer declares, not this.
     forms = [] if product.distribution is None else list(product.distribution.values())
-    return all(isinstance(form, Unspecified) for form in forms)
+    return bool(forms) and all(isinstance(form, Unspecified) for form in forms)
 
 
 def _recoilNode(distribution: ET.Element, label: str, href: str) -> None:
