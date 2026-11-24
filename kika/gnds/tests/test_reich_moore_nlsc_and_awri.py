@@ -9,6 +9,7 @@ it is not lost where that mass states it.
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 from pathlib import Path
 
 import kika
@@ -58,3 +59,19 @@ def test_the_gnds_2_2_attribute_is_read(tmp_path):
     edited = tmp_path / "attribute.gnds.xml"
     edited.write_text(text, encoding="utf-8")
     assert kika.read(str(edited)).resonances.resolved[0].formalism.angularLCount == 7
+
+
+def test_awri_is_the_ratio_to_the_files_own_neutron(tmp_path):
+    """FUDGE's PoPs give the neutron 1.00866491574 amu and the range's target AWRI
+    times that; the ratio to kika's neutron would write AWRI as 54.46609999."""
+    path, _ = _gnds(tmp_path)
+    suite = kika.read(str(path))
+    fudgeNeutron = 1.00866491574
+    neutron = suite.PoPs.particles.get("n")
+    neutron.mass = replace(neutron.mass, value=fudgeNeutron)
+    (target,) = suite.resonances.resolved[0].formalism.PoPs.particles.values()
+    target.mass = replace(target.mass, value=float(f"{54.4661 * fudgeNeutron:.12g}"))
+    out = tmp_path / "mn55.endf"
+    kika.write(suite, str(out), format="endf")
+    (isotope,) = read_endf(str(out), mf_numbers=[2]).mf[2].mt[151].isotopes
+    assert [b.awri for b in isotope.energy_ranges[0].parameters.l_values] == [54.4661, 54.4661]

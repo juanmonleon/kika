@@ -1071,9 +1071,9 @@ def _encodeResolved(formalism, fields: dict, report: ConversionReport):
 
         awri = group.atomicWeightRatio
         if awri is None:
-            awri = formalismAtomicWeightRatio(formalism)
+            awri = fields.get("awri")
         lValues.append(LValueBlock(
-            awri=awri if awri is not None else fields.get("awri"), l=l,
+            awri=awri if awri is not None else formalismAtomicWeightRatio(formalism), l=l,
             num_resonances=block["num_resonances"],
             apl_or_qx=c2, lrx=(1 if isinstance(formalism, BreitWigner) and group.competitiveChannel is not None
                               else block["lrx"]), resonances=records,
@@ -1207,14 +1207,18 @@ def reichMooreLBlocks(formalism, rangeRadius: float, targetSpin: float,
     return [byL[l] for l in sorted(byL)]
 
 
-def formalismAtomicWeightRatio(formalism) -> Optional[float]:
-    """AWRI as a resolved range states it: its own target's mass over the neutron's."""
+def formalismAtomicWeightRatio(formalism, neutronMass: Optional[float] = None) -> Optional[float]:
+    """AWRI as a resolved range states it: its own target's mass over the neutron's.
+
+    *neutronMass* is the evaluation's own (its PoPs), in amu; FUDGE's files state
+    1.00866491574, and a ratio to any other neutron moves AWRI in its tenth digit.
+    """
     pops = getattr(formalism, "PoPs", None)
     particles = list(pops.particles.values()) if pops is not None else []
     mass = particles[0].mass if len(particles) == 1 else None
     if mass is None or mass.unit != "amu":
         return None
-    return float(mass.value) / NEUTRON_MASS_AMU
+    return float(mass.value) / (NEUTRON_MASS_AMU if neutronMass is None else neutronMass)
 
 
 def resolvedRangeRadius(resonances, region):
@@ -1241,9 +1245,9 @@ def _encodeReichMooreSpinGroups(resonances, region, fields: dict):
     radius = resolvedRangeRadius(resonances, region)
     if radius is None:
         raise ValueError("MF2/151 LRF=3: the range states no constant radius for AP")
-    awri = formalismAtomicWeightRatio(formalism)
+    awri = fields.get("awri")
     blocks = reichMooreLBlocks(formalism, radius, float(fields["spi"]),
-                               awri if awri is not None else fields.get("awri"))
+                               awri if awri is not None else formalismAtomicWeightRatio(formalism))
     lValues = [
         LValueBlock(awri=block["awri"], l=block["l"], num_resonances=len(block["rows"]),
                     apl_or_qx=0.0 if block["apl"] is None else radiusToEndf(block["apl"]),
