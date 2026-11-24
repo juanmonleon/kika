@@ -815,13 +815,12 @@ def _encodeMF15(node, fields, mt, mat, host):
 
 
 def _hasPhotons(channel) -> bool:
-    from kika.nuclear_data.model import Unspecified
+    from kika.nuclear_data.model import UnspecifiedMultiplicity
 
     for product in getattr(channel, "products", None) or ():
         if product.pid == "photon" and product.multiplicity is not None:
-            # A residual's placeholder photon (unspecified, as FUDGE writes it) states nothing.
-            forms = list(product.distribution.values()) if product.distribution is not None else []
-            if not forms or any(not isinstance(form, Unspecified) for form in forms):
+            # GNDS gives a residual's placeholder photon an unspecified multiplicity.
+            if not isinstance(product.multiplicity.form, UnspecifiedMultiplicity):
                 return True
         if product.outputChannel is not None and _hasPhotons(product.outputChannel):
             return True
