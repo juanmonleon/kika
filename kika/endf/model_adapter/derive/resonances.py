@@ -7,7 +7,8 @@ Three cases are derived, as FUDGE writes them
 ENDF's LRU=0 range: LRP=0, one isotope, one range whose only parameters are the
 target spin and AP (ENDF-102 §2.1).
 
-**Reich-Moore resolved ranges** are LRF=3. GNDS groups them by (L, J, channel
+**Reich-Moore resolved ranges flagged** ``LRF3`` are LRF=3; any other
+``RMatrix`` range is LRF=7, as FUDGE decides. GNDS groups LRF=3 by (L, J, channel
 spin); :func:`~kika.endf.model_adapter.resonances.reichMooreLBlocks` regroups
 them by L when the tape is written. Per range:
 
@@ -41,9 +42,22 @@ matched to ENDF's columns by their reaction's MT; a column the region does not
 state is written 0 with 0 degrees of freedom. INT is the level spacing's
 interpolation; AWRI the region's target mass, as for the resolved ranges.
 
-Not derived, and reported lost: R-Matrix Limited ranges (MF2 is then not
-written at all, since a resolved range cannot be skipped) and an unresolved
-range that its case cannot state (the resolved ones are written without it).
+**R-Matrix Limited ranges** (LRF=7) follow FUDGE's ``writeRMatrixParticlePairs``
+and ``writeRMatrixSpinGroupHeader``: SPI=AP=0, NAPS=1, KRM from the
+approximation. Each pair is the ejectile and the residual of its linked reaction
+(the projectile and target for fission), their masses over the file's own
+neutron, Z, and spin and parity in ENDF's sign convention (0, 0 for a capture
+residual with none); Q and PNT are 0 for capture and fission; SHF is 0 when the
+shift is eliminated, 2 for Brune, else 1. A channel's APT is its radius, else
+its reaction's, the range's or the evaluation's; APE its hard-sphere radius,
+else its reaction's, else APT; both 0 for capture. BND is the channel's, else 0
+or -L by the boundary condition. Unlike FUDGE, Q is the linked channel's as
+stated: it already leaves the residual in its level.
+
+Not derived, and reported lost: a resolved range none of these can state (MF2 is
+then not written at all, since a resolved range cannot be skipped) and an
+unresolved range that its case cannot state (the resolved ones are written
+without it).
 """
 from __future__ import annotations
 
@@ -204,7 +218,12 @@ def _resolvedRange(resonances, region, context, report) -> dict:
     if isinstance(region.formalism, BreitWigner):
         return _breitWignerRange(resonances, region, context, report, where)
     if isinstance(region.formalism, RMatrix):
-        return _reichMooreRange(resonances, region, context, report, where)
+        from kika.gnds.endf_conversion import rMatrixHref
+
+        href = rMatrixHref(context.suite, resonances.resolved.index(region))
+        if "LRF3" in context.conversionFlags.get(href, "").split(","):
+            return _reichMooreRange(resonances, region, context, report, where)
+        return _rMatrixLimitedRange(resonances, region, context, report, where)
     raise ValueError(f"{where} is {type(region.formalism).__name__}, whose ENDF "
                      f"bookkeeping kika does not derive")
 
@@ -217,8 +236,7 @@ def _reichMooreRange(resonances, region, context, report, where) -> dict:
 
     formalism = region.formalism
     if formalism.approximation != "ReichMoore":
-        raise ValueError(f"{where} is an R-Matrix Limited range (LRF=7), whose ENDF "
-                         f"bookkeeping kika does not derive yet")
+        raise ValueError(f"{where} is flagged LRF3 and is not Reich-Moore")
     spin = _rangeSpin(formalism, context, where)
     radius = resolvedRangeRadius(resonances, region)
     if radius is None:
@@ -248,6 +266,157 @@ def _reichMooreRange(resonances, region, context, report, where) -> dict:
                          for b in blocks]}
 
 
+def _endfSpin(spin, parity, where):
+    """ENDF's (spin, parity) pair: the parity rides on a nonzero spin's sign."""
+    if parity is None:
+        raise ValueError(f"{where} states no parity")
+    return (spin * parity, 0) if spin else (spin, parity)
+
+
+def _linkedReaction(suite, reaction):
+    import re
+
+    match = re.search(r"reaction\[@label='(.*)'\]$", reaction.href or "")
+    found = [r for r in suite.reactions
+             if match is not None and getattr(r, "label", None) == match.group(1)]
+    if len(found) != 1:
+        raise ValueError(f"the resonance reaction {reaction.label!r} links to no reaction "
+                         f"of the suite")
+    return found[0]
+
+
+def _pairParticle(formalism, suite, pid):
+    """FUDGE's ``RMatrix.PoPs[pid]``: the range's own PoPs, else the suite's."""
+    own = formalism.PoPs.get(pid) if formalism.PoPs is not None else None
+    return own if own is not None else suite.PoPs.get(pid)
+
+
+def _particlePair(reaction, formalism, context, neutron, where) -> dict:
+    """One LRF=7 particle pair, as FUDGE's ``writeRMatrixParticlePairs`` writes it."""
+    from ..mf1_header import _FISSION_MTS, _massAmu
+
+    suite = context.suite
+    linked = _linkedReaction(suite, reaction)
+    mt = reaction.reactionMT if reaction.reactionMT is not None else linked.ENDF_MT
+    here = f"{where}, pair {reaction.label!r}"
+    if mt in _FISSION_MTS:
+        ids = (suite.projectile, suite.target)
+    else:
+        products = [p.pid for p in linked.outputChannel.products.products]
+        residual = [pid for pid in products if pid not in (reaction.ejectile, "photon")]
+        if reaction.ejectile is None or len(residual) != 1:
+            raise ValueError(f"{here}: no single ejectile and residual to write the pair from")
+        ids = (reaction.ejectile, residual[0])
+    columns = {}
+    for suffix, pid in zip("ab", ids):
+        particle = _pairParticle(formalism, suite, pid)
+        mass = _massAmu(particle)
+        level = getattr(particle, "energy", None)
+        if mass is None and level is not None and "_e" in pid:
+            from kika.gnds.decode import _AMU_EV
+
+            # FUDGE's mass of a level that states none: the ground state's plus E*/c².
+            ground = _massAmu(_pairParticle(formalism, suite, pid.split("_e")[0]))
+            if ground is not None:
+                mass = ground + float(level.convertedTo("eV").value) / _AMU_EV
+        if mass is None:
+            raise ValueError(f"{here}: PoPs states no mass for {pid!r}")
+        spin = getattr(particle.spin, "value", particle.spin)
+        if spin is None or particle.parity is None:
+            if not (suffix == "b" and mt == 102):
+                raise ValueError(f"{here}: PoPs states no spin and parity for {pid!r}")
+            i, p = 0, 0
+        else:
+            i, p = _endfSpin(float(spin), int(particle.parity), f"{here}, {pid!r}")
+        columns.update({f"m{suffix}": mass / neutron, f"z{suffix}": getattr(particle, "Z", None) or 0,
+                        f"i{suffix}": i, f"p{suffix}": p})
+    if mt in (18, 19, 102):
+        q = 0.0
+    elif reaction.Q is not None:
+        q = float(reaction.Q)
+    else:
+        # FUDGE subtracts the level again: Fe-57 MT51 would be -28826 eV, the tape -14413.
+        stated = linked.outputChannel.Q
+        if stated is None or stated.value is None or stated.unit != "eV":
+            raise ValueError(f"{here}: no Q value in eV")
+        q = float(stated.value)
+    condition = formalism.boundaryCondition
+    shf = (0 if condition == "EliminateShiftFunction" or reaction.eliminated
+           else 2 if condition == "Brune" else 1)
+    return {**columns, "q": q, "pnt": 0 if mt in (18, 19, 102) else 1, "shf": shf, "mt": mt}
+
+
+def _radius(value, where) -> float:
+    from kika.nuclear_data.model.resonances import ScatteringRadius
+
+    if isinstance(value, ScatteringRadius):
+        if value.isEnergyDependent or value.constant is None:
+            raise ValueError(f"{where}: an energy-dependent radius has no LRF=7 field")
+        return float(value.constant)
+    return float(value)
+
+
+def _rMatrixLimitedRange(resonances, region, context, report, where) -> dict:
+    """The fields of one LRF=7 range, as FUDGE's ``toENDF6`` writes them;
+    raises ``ValueError`` saying why it cannot be one."""
+    from ..resonances import KRM_TO_APPROXIMATION
+
+    formalism = region.formalism
+    krm = {v: k for k, v in KRM_TO_APPROXIMATION.items()}.get(formalism.approximation)
+    if krm not in (3, 4):
+        raise ValueError(f"{where} has approximation {formalism.approximation!r}, "
+                         f"which LRF=7 has no KRM for")
+    if any("LBK=0" in text and "/channels/channel" in href
+           for href, text in context.conversionFlags.items()):
+        raise ValueError(f"{where}: a channel is flagged LBK=0, which kika does not write")
+    if formalism.radiusPolicy is not None and formalism.radiusPolicy.phaseRadius is not None:
+        raise ValueError(f"{where}: an energy-dependent radius has no LRF=7 field")
+    neutron = _fileNeutronMass(context)
+    reactions = {r.label: r for r in formalism.resonanceReactions}
+    pairs = [_particlePair(r, formalism, context, neutron, where)
+             for r in formalism.resonanceReactions]
+    fallback = next((r for r in (formalism.scatteringRadius, region.scatteringRadius,
+                                 resonances.scatteringRadius) if r is not None), None)
+    groups = []
+    for group in formalism.spinGroups:
+        here = f"{where}, spin group {group.label!r}"
+        if group.spin is None:
+            raise ValueError(f"{here} states no spin")
+        aj, pj = _endfSpin(float(group.spin), group.parity, here)
+        radii, bnd = [], []
+        for channel in group.channels:
+            reaction = reactions.get(channel.resonanceReaction)
+            if reaction is None:
+                raise ValueError(f"{here}: channel {channel.label!r} names no resonance reaction")
+            if reaction.reactionMT == 102:
+                radii.append((0.0, 0.0))
+            else:
+                apt = next((r for r in (channel.scatteringRadius, reaction.scatteringRadius,
+                                        fallback) if r is not None), None)
+                if apt is None:
+                    raise ValueError(f"{here}: channel {channel.label!r} has no radius")
+                apt = _radius(apt, here)
+                ape = next((r for r in (channel.hardSphereRadius, reaction.hardSphereRadius)
+                            if r is not None), apt)
+                radii.append((_radius(ape, here), apt))
+            if channel.boundaryConditionValue is not None:
+                bnd.append(channel.boundaryConditionValue)
+            elif formalism.boundaryCondition == "EliminateShiftFunction":
+                bnd.append(0.0)
+            elif formalism.boundaryCondition == "NegativeOrbitalMomentum":
+                bnd.append(-float(channel.L))
+            else:
+                raise ValueError(f"{here}: boundary condition {formalism.boundaryCondition!r} "
+                                 f"has no BND")
+        groups.append({"aj": aj, "pj": pj, "kps": 0, "radii": radii, "bnd": bnd})
+    return {"kind": "resolved", "lru": 1, "lrf": 7, "nro": 0,
+            # FUDGE's rule: LRF=7 never computes radii.
+            "naps": 1,
+            "el": float(region.domainMin), "eh": float(region.domainMax),
+            "spi": 0.0, "ap": 0.0, "nls": 0, "nlsc": 0, "lad": 0, "abn": 1.0,
+            "isotope_index": 0, "krm": krm, "particle_pairs": pairs, "spin_groups": groups}
+
+
 def _hasFission(suite) -> bool:
     from ..mf1_header import _FISSION_MTS
 
@@ -268,28 +437,37 @@ def _unresolvedFlags(widths, context) -> dict:
     return flags
 
 
-def _unresolvedAwri(widths, context, report, where) -> Optional[float]:
-    """AWRI as FUDGE writes it: the target's mass over the neutron's, both from PoPs."""
+def _fileNeutronMass(context) -> float:
+    """The evaluation's own neutron mass (its PoPs), in amu, else kika's constant."""
     from kika._constants import NEUTRON_MASS_AMU
 
     from ..mf1_header import _massAmu
 
+    pops = context.suite.PoPs
+    neutron = _massAmu(pops.particles.get("n")) if pops is not None else None
+    return NEUTRON_MASS_AMU if neutron is None else neutron
+
+
+def _unresolvedAwri(widths, context, report, where) -> Optional[float]:
+    """AWRI as FUDGE writes it: the target's mass over the file's own neutron."""
+    from ..mf1_header import _massAmu
+    from ..resonances import formalismAtomicWeightRatio
+
     if all(g.atomicWeightRatio is not None for g in widths.spinGroups):
         return None
+    neutron = _fileNeutronMass(context)
+    stated = formalismAtomicWeightRatio(widths, neutron)
+    if stated is not None:
+        return stated
     suite = context.suite
-    pops = getattr(suite, "PoPs", None)
-    own = list(widths.PoPs.particles.values()) if widths.PoPs is not None else []
-    target = _massAmu(own[0]) if len(own) == 1 else None
-    if target is None and pops is not None:
-        target = _massAmu(pops.get(suite.target))
-    if target is None:
-        if context.awr is None:
-            raise ValueError(f"{where}: no target mass to write AWRI from")
-        report.approximated(f"MF2/151 LRU=2, {where}: PoPs states no target mass, so "
-                            f"AWRI is MF1's AWR {float(context.awr):g}")
-        return float(context.awr)
-    neutron = _massAmu(pops.get("n")) if pops is not None else None
-    return target / (neutron if neutron is not None else NEUTRON_MASS_AMU)
+    target = _massAmu(suite.PoPs.get(suite.target)) if suite.PoPs is not None else None
+    if target is not None:
+        return target / neutron
+    if context.awr is None:
+        raise ValueError(f"{where}: no target mass to write AWRI from")
+    report.approximated(f"MF2/151 LRU=2, {where}: PoPs states no target mass, so "
+                        f"AWRI is MF1's AWR {float(context.awr):g}")
+    return float(context.awr)
 
 
 def _isConstant(values) -> bool:

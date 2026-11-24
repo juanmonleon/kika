@@ -1240,14 +1240,18 @@ def unresolvedChannelRoles(widths) -> dict:
     return roles
 
 
-def formalismAtomicWeightRatio(formalism) -> Optional[float]:
-    """AWRI as a resolved range states it: its own target's mass over the neutron's."""
+def formalismAtomicWeightRatio(formalism, neutronMass: Optional[float] = None) -> Optional[float]:
+    """AWRI as a resolved range states it: its own target's mass over the neutron's.
+
+    *neutronMass* is the evaluation's own (its PoPs), in amu; FUDGE's files state
+    1.00866491574, and a ratio to any other neutron moves AWRI in its tenth digit.
+    """
     pops = getattr(formalism, "PoPs", None)
     particles = list(pops.particles.values()) if pops is not None else []
     mass = particles[0].mass if len(particles) == 1 else None
     if mass is None or mass.unit != "amu":
         return None
-    return float(mass.value) / NEUTRON_MASS_AMU
+    return float(mass.value) / (NEUTRON_MASS_AMU if neutronMass is None else neutronMass)
 
 
 def resolvedRangeRadius(resonances, region):
@@ -1398,7 +1402,9 @@ def _encodeRMatrixLimited(formalism: RMatrix, fields: dict):
         encoded_spin=original_spin if spin_unchanged else group.spin*group.parity
         encoded_parity=perGroup['pj'] if spin_unchanged else group.parity if group.spin == 0 else 0
         channels = []
-        for channel in group.channels:
+        derivedRadii = perGroup.get("radii")
+        derivedBnd = perGroup.get("bnd")
+        for index, channel in enumerate(group.channels):
             ipp = order.get(channel.resonanceReaction)
             if ipp is None:
                 raise ValueError(
@@ -1406,11 +1412,15 @@ def _encodeRMatrixLimited(formalism: RMatrix, fields: dict):
                     f"{channel.resonanceReaction!r}, which is not one of "
                     f"{sorted(order)}; IPP cannot be resolved"
                 )
+            ape, apt = (derivedRadii[index] if derivedRadii is not None
+                        else (channel.hardSphereRadius, channel.scatteringRadius))
             channels.append(RML_Channel(
                 ipp=ipp, l=channel.L, sch=channel.channelSpin,
-                bnd=channel.boundaryConditionValue if channel.boundaryConditionValue is not None else formalism.boundaryConditionValue,
-                ape=radiusToEndf(channel.hardSphereRadius),
-                apt=radiusToEndf(channel.scatteringRadius),
+                bnd=(derivedBnd[index] if derivedBnd is not None
+                     else channel.boundaryConditionValue if channel.boundaryConditionValue is not None
+                     else formalism.boundaryConditionValue),
+                ape=radiusToEndf(ape),
+                apt=radiusToEndf(apt),
             ))
 
         for ch in group.channels:
