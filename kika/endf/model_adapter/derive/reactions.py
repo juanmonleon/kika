@@ -315,6 +315,25 @@ def _backgroundJoins(reaction, context: DerivationContext) -> dict:
     return joins
 
 
+def _regionsAsFudgeWrites(form) -> list:
+    """A regions1d's (NBT, INT) over ``toEndfRegions``' points, as FUDGE's Regions1d.toENDF6Data
+    writes them: a jump between two regions of one law is one region."""
+    pairs, count, lastY, lastLaw = [], 0, None, None
+    for region in form.function1ds:
+        law, n = region.endfInterpolationCode, len(region)
+        if lastY is not None:
+            if region.ys[0] == lastY:
+                n -= 1
+            elif lastY == 0 and law in (4, 5):
+                pairs[-1] = (pairs[-1][0] + 1, pairs[-1][1])
+            elif law == lastLaw:
+                pairs.pop()
+        count += n
+        pairs.append((count, law))
+        lastY, lastLaw = region.ys[-1], law
+    return pairs
+
+
 def deriveReaction(reaction, path, context: DerivationContext, report):
     """MF3's provenance for one reaction or cross-section sum."""
     from kika.nuclear_data.model import CrossSectionSum, EVAL_LABEL, EndfProvenance
@@ -332,7 +351,9 @@ def deriveReaction(reaction, path, context: DerivationContext, report):
     if orphan:
         lr = None
     elif EVAL_LABEL in reaction.crossSection and hasattr(reaction.crossSection[EVAL_LABEL], "toEndfRegions"):
-        _, _, regions = reaction.crossSection[EVAL_LABEL].toEndfRegions()
+        form = reaction.crossSection[EVAL_LABEL]
+        regions = (_regionsAsFudgeWrites(form) if hasattr(form, "function1ds")
+                   else form.toEndfRegions()[2])
 
     header = {"qi": qi} if qi != q else {}
     joins = _backgroundJoins(reaction, context)
