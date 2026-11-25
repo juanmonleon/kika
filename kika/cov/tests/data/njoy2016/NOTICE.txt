@@ -1,8 +1,27 @@
-Two reference outputs of the NJOY2016 test suite (https://github.com/njoy/NJOY2016,
-tag 2016.78, commit 71a76bc), copied unchanged:
+Files from the NJOY2016 code (https://github.com/njoy/NJOY2016, tag 2016.78,
+commit 71a76bc).
+
+Reference outputs of its test suite, copied unchanged:
 
   test04_errorr_mf33.gendf  tests/04/referenceTape23  ERRORR, MF33 (U-235 of ENDF/B-V, MAT 1395)
   test15_errorr_mf34.gendf  tests/15/referenceTape27  ERRORR, MF34 (U-238, MT251, L=1)
+
+BOXER files written by COVR (NJOY2016 built with flang on Windows) from
+tests/15/referenceTape26 (ERRORR, MF33 of U-238, 30 groups), with this input and
+matype 3 (covariances) or 4 (correlations):
+
+  covr
+  21 22 0/
+  <matype> 3/
+  'kikat'/
+  'u238 mt2 mt64'/
+  9237 2 9237 2/
+  9237 2 9237 64/
+  9237 64 9237 64/
+  stop
+
+  covr_u238_mt2_mt64_cov.boxer   matype 3
+  covr_u238_mt2_mt64_corr.boxer  matype 4
 
 NJOY2016 is Copyright (c) 2016, Los Alamos National Security, LLC. All rights reserved.
 It is distributed under the BSD-3-Clause license; the full text is the LICENSE file of

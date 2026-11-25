@@ -1398,8 +1398,8 @@ def read_boxer(file_path: str, energy_unit: str = 'eV',
     The energy grid is kept in the order of the file (no reordering). A
     covariance matrix (ITYPE 3) is stored as read; a correlation matrix
     (ITYPE 4) is multiplied by the outer product of the standard-deviation
-    vectors (ITYPE 2) of its row and column reactions, so it comes back as a
-    covariance in the units of those vectors. The reader leaves ``is_relative``
+    vectors (ITYPE 2) of its row and column reactions, wherever they are in the
+    file, so it comes back as a covariance in the units of those vectors. The reader leaves ``is_relative``
     empty (no per-matrix flag). A block that is exactly zero is skipped.
 
     Parameters
@@ -1447,6 +1447,7 @@ def read_boxer(file_path: str, energy_unit: str = 'eV',
     cur_cells = 0
     cur_where: Dict[str, Any] = {}
     itypes: Dict[int, int] = {}
+    finished: List[Tuple[int, int, int, int, int, np.ndarray, Dict[str, Any]]] = []
 
     while cursor < len(lines):
         line = lines[cursor]
@@ -1552,35 +1553,7 @@ def read_boxer(file_path: str, energy_unit: str = 'eV',
                     _note(diagnostics, "count_mismatch",
                           f"the controls fill {cur_cells} cells of a matrix that has {expected}",
                           cur_where, declared=expected, found=cur_cells, itype=cur_itype)
-                zaid_row = int(_map_mat(str(cur_mat)))
-                zaid_col = int(_map_mat(str(cur_mat1)))
-
-                if cur_itype == 4:
-                    # Correlation → covariance
-                    sd_row = stddevs.get((zaid_row, cur_mt))
-                    sd_col = stddevs.get((zaid_col, cur_mt1))
-                    if sd_row is None or sd_col is None:
-                        missing = [f"MAT{m} MT{r}" for m, r, s in
-                                   ((cur_mat, cur_mt, sd_row), (cur_mat1, cur_mt1, sd_col))
-                                   if s is None]
-                        raise InvalidDataFormatError(
-                            f"BOXER correlation matrix (ITYPE 4) MAT{cur_mat} MT{cur_mt} x "
-                            f"MAT{cur_mat1} MT{cur_mt1} has no standard deviations "
-                            f"(ITYPE 2) for {', '.join(missing)}, so it cannot be turned "
-                            f"into a covariance: {file_path}"
-                        )
-                    _note(diagnostics, "raw_correlation",
-                          f"MAT{cur_mat}/MT{cur_mt} x MAT{cur_mat1}/MT{cur_mt1}: the correlations "
-                          "(ITYPE 4) as written, before the standard deviations multiply them",
-                          cur_where, correlation=np.array(cur_matrix, copy=True), order="file")
-                    cur_matrix = cur_matrix * np.outer(sd_row, sd_col)
-
-                if np.any(cur_matrix):  # only an exactly-zero block is skipped
-                    covmat.add_matrix(zaid_row, cur_mt, zaid_col, cur_mt1, cur_matrix)
-                else:
-                    _note(diagnostics, "dropped_block", "the matrix is all zero and is skipped",
-                          cur_where, reason="zero")
-
+                finished.append((cur_mat, cur_mt, cur_mat1, cur_mt1, cur_itype, cur_matrix, cur_where))
                 cur_matrix = None
                 cur_row = 0
 
@@ -1589,6 +1562,30 @@ def read_boxer(file_path: str, energy_unit: str = 'eV',
               f"the matrix MAT{cur_mat}/MT{cur_mt} x MAT{cur_mat1}/MT{cur_mt1} ends with the "
               "file before its last block (NROWM never reached 0) and is lost",
               cur_where, reason="unfinished")
+
+    # COVR writes a correlation before the standard deviations of its second reaction.
+    for m, r, m1, r1, itype_, matrix, where in finished:
+        zaid_row, zaid_col = int(_map_mat(str(m))), int(_map_mat(str(m1)))
+        if itype_ == 4:
+            sd_row, sd_col = stddevs.get((zaid_row, r)), stddevs.get((zaid_col, r1))
+            if sd_row is None or sd_col is None:
+                missing = [f"MAT{a} MT{b}" for a, b, s in ((m, r, sd_row), (m1, r1, sd_col))
+                           if s is None]
+                raise InvalidDataFormatError(
+                    f"BOXER correlation matrix (ITYPE 4) MAT{m} MT{r} x MAT{m1} MT{r1} has no "
+                    f"standard deviations (ITYPE 2) for {', '.join(missing)} in the file, so it "
+                    f"cannot be turned into a covariance: {file_path}"
+                )
+            _note(diagnostics, "raw_correlation",
+                  f"MAT{m}/MT{r} x MAT{m1}/MT{r1}: the correlations (ITYPE 4) as written, "
+                  "before the standard deviations multiply them",
+                  where, correlation=np.array(matrix, copy=True), order="file")
+            matrix = matrix * np.outer(sd_row, sd_col)
+        if np.any(matrix):  # only an exactly-zero block is skipped
+            covmat.add_matrix(zaid_row, r, zaid_col, r1, matrix)
+        else:
+            _note(diagnostics, "dropped_block", "the matrix is all zero and is skipped",
+                  where, reason="zero")
     if diagnostics is not None:
         _note(diagnostics, "declared",
               "headers by ITYPE: " + ", ".join(f"{k}: {v}" for k, v in sorted(itypes.items())),
