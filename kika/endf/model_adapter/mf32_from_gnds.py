@@ -402,7 +402,7 @@ def _unresolved(records, suite, averages, conversions, awr, neutron, spi):
     byL = {}
     for (L, J), (lpos, jpos, group) in layout.items():
         byL.setdefault((lpos, L), []).append((jpos, J, group))
-    records.head(region.domainMin, region.domainMax, 2, 1, 0, 0)
+    records.head(region.domainMin, region.domainMax, 2, 1, 0, _unresolvedNaps(suite))
     records.head(spi, _urrRadius(suite.resonances, region.tabulatedWidths), 0, 0, len(byL), 0)
     rows, values, mpars = [], [], set()
     for (lpos, L), groups in byL.items():
@@ -435,6 +435,16 @@ def _unresolved(records, suite, averages, conversions, awr, neutron, spi):
             matrix[i, j] = matrix[j, i] = float(np.asarray(section.form.matrix, dtype=float)[0, 0])
     records.head(0, 0, mpars.pop(), 0, npar * (npar + 1) // 2, npar)
     records.dataList(v for i, row in enumerate(matrix) for v in row[i:])
+
+
+def _unresolvedNaps(suite):
+    """NAPS as kika writes MF2's unresolved range (FUDGE writes 0 whatever MF2 says)."""
+    policy = getattr(suite.resonances.unresolved.tabulatedWidths, "radiusPolicy", None)
+    if policy is not None:
+        return {"mass": 0, "phase": 1, "constant": 2}[policy.channelMode]
+    provenance = getattr(suite.resonances, "provenance", None)
+    regions = (getattr(provenance, "headerFields", None) or {}).get("regions") or []
+    return next((int(r.get("naps") or 0) for r in regions if r.get("lru") == 2), 0)
 
 
 def _urrFission(widths):
