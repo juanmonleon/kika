@@ -169,29 +169,23 @@ def test_the_tape_the_ace_needs_is_written_on_demand(fakeNjoy, tmp_path):
     assert calls[0]["endf_path"] == files["endf-delta"]
 
 
-def test_a_gnds_source_with_resonance_parameters_cannot_make_an_ace(fakeNjoy, tmp_path):
-    """ACE needs an ENDF tape, and the resonance parameters of a GNDS suite do
-    not reach MF2: QX, LRX, LAD and the particle-pair columns have no model node.
-    Without MF2 the tape's MF3 in the resolved range is only the background, so
-    the run refuses before NJOY is called; the MAT it would use comes from the
-    library's table, not from the user.
+def test_a_gnds_source_with_resonance_parameters_makes_an_ace(fakeNjoy, tmp_path):
+    """ACE needs an ENDF tape, and a GNDS suite's Reich-Moore range now reaches
+    MF2 (derived from the model), so NJOY is handed a tape that has it; the MAT
+    comes from the library's table, not from the user. A range the deriver
+    cannot write still refuses (test_a_gnds_source_with_resonances_reaches_a_tape).
     """
     import kika
+    from kika.endf import read_endf
 
     exe, calls = fakeNjoy
     gnds = tmp_path / "src" / "fe56.gnds.xml"
     gnds.parent.mkdir()
     kika.write(kika.read(TAPE), str(gnds), format="gnds")
     options = AceOptions(temperatures=[293.6], njoyExe=str(exe))
-    with pytest.raises(ValueError, match="not written to MF2") as refused:
-        perturbFromModel(str(gnds), REQUEST, 1, seed=1, outputDir=tmp_path / "run",
-                         formats=("ace",), ace=options)
-    assert "MAT 2631" in str(refused.value)
-    assert calls == []
-    # A dry run of the same request goes through: the options are checked,
-    # nothing is written, and the note records the MAT the table gives.
-    run = perturbFromModel(str(gnds), REQUEST, 1, seed=1, outputDir=tmp_path / "dry",
-                           formats=("ace",), ace=options, dryRun=True)
+    run = perturbFromModel(str(gnds), REQUEST, 1, seed=1, outputDir=tmp_path / "run",
+                           formats=("ace",), ace=options)
+    assert calls and 2 in read_endf(str(calls[0]["endf_path"]), mf_numbers=[2]).mf
     assert any("MAT 2631" in e.message for e in run.log.of("note"))
 
 
