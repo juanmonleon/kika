@@ -82,11 +82,11 @@ class Difference:
 EXPECTED: List[Expected] = [
     Expected("xs", r"\w+ MT\d+: forms \['eval'\] != \['eval', 'recon'\]",
              "NNDC also carries FUDGE's reconstructed resonance cross section as a 'recon' form"),
-    Expected("xs", r"Sums MT8(5[1-9]|6\d|7[01]): values", bound=4e-9,
+    Expected("xs", r"Sums MT8(5[1-9]|6\d|7[01]): values( \(NNDC's nine digits\))?", bound=4e-9,
              reason="MF33 lumped sums: each code adds the summands on its own and rounds the result"),
-    Expected("xs", r"Sums MT10[3-7]: values", bound=5e-9,
-             reason="a summed MT only MF33 states (B-VIII.1 Fe-56 MT103): kika keeps the sum of the "
-                    "partials as doubles, FUDGE writes it to nine significant digits"),
+    Expected("xs", r"Sums MT103: values \(NNDC's nine digits\)", tapes="n-026_Fe_056",
+             reason="a summed MT only MF33 states: kika keeps the sum of the partials as doubles, "
+                    "FUDGE writes it to nine significant digits"),
     Expected("field", r".*Q\.domainMin: kika's 1e-05 below NNDC's",
              "a constant Q: kika states it from the lowest incident energy, FUDGE from the threshold"),
     Expected("field", r".*multiplicity\.forms\['eval'\]: a constant XYs1d against Constant1d, same value",
@@ -332,7 +332,14 @@ def _comparePointwise(check, name, mine, theirs):
         return [Difference(check, f"{name}: npts {mx.size} != {tx.size}", size)]
     if np.array_equal(mx, tx) and np.array_equal(my, ty):
         return []
+    if check == "xs" and np.array_equal(mx, tx) and np.array_equal(_nineDigits(my), ty):
+        return [Difference(check, f"{name}: values (NNDC's nine digits)")]
     return [Difference(check, f"{name}: values", max(_relative(mx, tx), _relative(my, ty)))]
+
+
+def _nineDigits(values):
+    """*values* as FUDGE writes a computed table: nine significant digits."""
+    return np.array([float(f"{v:.8e}") for v in values])
 
 
 def crossSectionDifferences(mine, theirs):
