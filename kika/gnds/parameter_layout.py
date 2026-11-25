@@ -1,4 +1,4 @@
-"""ENDF MF32 → the resolved-range parameter covariance FUDGE writes to GNDS.
+"""ENDF MF32 → the parameter covariances FUDGE writes to GNDS.
 
 FUDGE (``ENDF_ITYPE_0_Misc.readMF32``) links each resonance table once (the
 Breit-Wigner table, or each R-Matrix spin group's) and states the matrix over
@@ -7,7 +7,8 @@ every cell of those tables, zeros where nothing is varied: Na-23 is 23 x 6 =
 which a GNDS reader cannot place. This module rebuilds FUDGE's layout from the
 MF32 text the decoder kept, with FUDGE's arithmetic, against the tables kika's
 GNDS writer writes, and the ``ENDFconversionFlags`` FUDGE leaves for the way
-back (``LRF3``, ``LCOMP=``, ``NDIGIT=``, ``sortByL``).
+back (``LRF3``, ``LCOMP=``, ``NDIGIT=``, ``sortByL``). An unresolved range
+becomes FUDGE's averageParameterCovariances, its MF32 averages kept as flags.
 """
 from __future__ import annotations
 
@@ -359,6 +360,87 @@ def _rMatrixLimited(lines, tables):
     return matrix, flags, []
 
 
+def _urrLayout(widths):
+    """``{(L, J): (Lposition, Jposition, group)}`` as kika's GNDS writer lays the URR out."""
+    layout, byL = {}, {}
+    for group in widths.spinGroups:
+        byL.setdefault(group.L, []).append(group)
+    for lpos, (L, groups) in enumerate(byL.items()):
+        for jpos, group in enumerate(groups):
+            layout[(L, float(group.J))] = (lpos, jpos, group)
+    return layout
+
+
+def _unresolved(lines, suite):
+    """The LRU=2 body as FUDGE writes it: one averageParameterCovariance per varied
+    average (relative, 1x1 over the region), a cross term per non-zero off-diagonal
+    term, and each average's MF32 values kept as a flag for the way back."""
+    from kika.nuclear_data.model import AverageParameterCovariance, CovarianceMatrix
+
+    region = suite.resonances.unresolved
+    widths = region.tabulatedWidths
+    base = (f"/reactionSuite/resonances/unresolved/tabulatedWidths[@label='{widths.label or 'eval'}']")
+    layout = _urrLayout(widths)
+    _, _, _, _, nls, _ = lines.ints()
+    rows = []
+    for _ in range(nls):
+        _, _, L, _, _, njs = lines.ints()
+        for _ in range(njs):
+            D, AJ, GNO, GG, GF, GX = lines.floats()
+            rows.append((L, AJ, {"D": D, "GNO": GNO, "GG": GG, "GF": GF, "GX": GX}))
+    _, _, mpar, _, length, npar = lines.ints()
+    data: List[float] = []
+    for _ in range(-(-length // 6)):
+        data += lines.floats()
+    matrix = np.zeros((npar, npar))
+    start, size = 0, npar
+    for i in range(npar):
+        matrix[i, i:] = matrix[i:, i] = data[start:start + size]
+        start += size
+        size -= 1
+    if not np.any(matrix):
+        return [], []
+    sections = []
+    for L, AJ, average in rows:
+        found = layout.get((L, float(AJ)))
+        if found is None:
+            raise ValueError(f"MF32's URR L={L} J={AJ} is not in MF2")
+        lpos, jpos, group = found
+        if mpar > len(group.channels) + 1:
+            raise ValueError(f"MF32 MPAR={mpar} for {len(group.channels)} widths")
+        flag = ",".join(f"{key}={value}" for key, value in sorted(average.items()) if value)
+        J = float(AJ)
+        at = f"{base}/Ls/L[@label='{lpos}']/Js/J[@label='{jpos}']"
+        sections.append((f"{at}/levelSpacing", f"URR levelSpacing: L={L} J={J}", flag))
+        for k in range(mpar - 1):
+            sections.append((f"{at}/widths/width[@label='{k}']",
+                             f"{group.channels[k].label} URR: L={L} J={J}", flag))
+    if len(sections) != npar:
+        raise ValueError(f"{npar} URR covariance rows for {len(sections)} averages")
+    bounds = np.array([float(region.domainMin), float(region.domainMax)])
+
+    def form(value):
+        return CovarianceMatrix(matrix=np.array([[value]]), rowGrid=bounds.copy(),
+                                columnGrid=bounds.copy(), isRelative=True, label="eval")
+
+    out, flags, cross = [], [], 0
+    for i, (href, label, flag) in enumerate(sections):
+        out.append(AverageParameterCovariance(label=label, rowData=DataLink(href=href),
+                                              form=form(matrix[i, i])))
+        if flag:
+            flags.append((f"$covariances#/covarianceSuite/parameterCovariances/"
+                          f"averageParameterCovariance[@label='{label}']/covarianceMatrix"
+                          f"[@label='eval']", flag))
+        for k, term in enumerate(matrix[i, i + 1:]):
+            if term != 0:
+                out.append(AverageParameterCovariance(
+                    label=f"URR cross term {cross}", rowData=DataLink(href=href),
+                    columnData=DataLink(href=sections[i + k + 1][0]), form=form(term),
+                    crossTerm=True))
+                cross += 1
+    return out, flags
+
+
 def fudgeParameterCovariances(suite, tables, report) -> Tuple[Optional[list], List[Tuple[str, str]]]:
     """*suite*'s parameter covariances in FUDGE's layout, and the flags to write with them.
 
@@ -378,25 +460,39 @@ def fudgeParameterCovariances(suite, tables, report) -> Tuple[Optional[list], Li
     if len(texts) != 1:
         return None, []
     lines = _Lines(next(iter(texts.values())))
+    converted, flags = [], []
     try:
         lines.ints()
         _, _, _, _, ner, _ = lines.ints()
-        _, _, lru, lrf, nro, _ = lines.ints()
-        if ner != 1 or lru != 1 or nro or tables is None:
-            raise ValueError(f"MF32 with NER={ner}, LRU={lru}, NRO={nro} is not converted")
-        rowHref, groups = tables
-        if lrf in (1, 2):
-            matrix, flags, dap = _breitWigner(lines, lrf, groups)
-        elif lrf == 3:
-            matrix, flags, dap = _reichMoore(lines, groups)
-        elif lrf == 7:
-            matrix, flags, dap = _rMatrixLimited(lines, groups)
-        else:
-            raise ValueError(f"LRF={lrf} is not converted")
-        converted = _toModel(matrix, groups, rowHref, dap)
+        resolved = 0
+        for _ in range(ner):
+            el, eh, lru, lrf, nro, _ = lines.ints()
+            if nro:
+                raise ValueError("MF32 with NRO=1 is not converted")
+            if lru == 2:
+                average, averageFlags = _unresolved(lines, suite)
+                converted += average
+                flags += averageFlags
+                continue
+            resolved += 1
+            if resolved > 1 or tables is None:
+                raise ValueError("several resolved ranges, or no resonance table to link")
+            rowHref, groups = tables
+            if lrf in (1, 2):
+                matrix, rangeFlags, dap = _breitWigner(lines, lrf, groups)
+            elif lrf == 3:
+                matrix, rangeFlags, dap = _reichMoore(lines, groups)
+            elif lrf == 7:
+                matrix, rangeFlags, dap = _rMatrixLimited(lines, groups)
+            else:
+                raise ValueError(f"LRF={lrf} is not converted")
+            converted.insert(0, _toModel(matrix, groups, rowHref, dap))
+            if rangeFlags:
+                flags.insert(0, (PARAMETER_COVARIANCE_HREF, ",".join(rangeFlags)))
     except (ValueError, IndexError) as why:
         report.lost(f"MF32 is written in kika's own layout, one link per resonance, not "
                     f"FUDGE's: {why}")
         return None, []
-    others = [c for c in covariances if type(c).__name__ != "ParameterCovariance"]
-    return [converted] + others, [(PARAMETER_COVARIANCE_HREF, ",".join(flags))]
+    others = [c for c in covariances if type(c).__name__ not in
+              ("ParameterCovariance", "AverageParameterCovariance")]
+    return converted + others, flags
