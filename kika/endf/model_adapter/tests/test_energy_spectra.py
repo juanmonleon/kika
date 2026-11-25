@@ -34,7 +34,7 @@ from kika.endf.model_adapter import decodeReactionSuite
 from kika.endf.model_adapter.energy import decodeMF5MT
 from kika.endf.read_endf import read_endf
 from kika.endf.writers.assemble import writeEndfTape
-from kika.nuclear_data.model import (ANALYTIC_SPECTRA, Evaporation,
+from kika.nuclear_data.model import (ANALYTIC_SPECTRA, Evaporation, Frame,
                                      GeneralEvaporation, MadlandNix,
                                      PhysicalQuantity, SimpleMaxwellianFission,
                                      Watt, WeightedFunctionals, XYs1d)
@@ -262,6 +262,15 @@ def test_the_delayed_families_survive_gnds(tmp_path):
         assert _walk(a.product.distribution["eval"].energy) == \
             _walk(b.product.distribution["eval"].energy)
         assert _walk(a.product.multiplicity.form) == _walk(b.product.multiplicity.form)
+
+
+def test_the_delayed_families_are_isotropic_in_the_lab():
+    families = kika.read(str(U235)).findReactionByENDF_MT(18) \
+        .outputChannel.fissionFragmentData.delayedNeutrons
+    assert families
+    for family in families:
+        form = family.product.distribution["eval"]
+        assert form.productFrame == form.angular.productFrame == Frame.lab
 
 
 @pytest.mark.parametrize("path", [RA223, O17, U235, U233, AM241])
