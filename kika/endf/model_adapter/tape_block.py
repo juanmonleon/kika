@@ -49,7 +49,46 @@ def collect(suite) -> Optional[EndfTapeData]:
     data = EndfTapeData()
     for path, _, qm, _, _ in levelQms(suite):
         data.nodes.setdefault(path, {})["qm"] = qm
+    data.mf32 = _mf32(suite)
     return data or None
+
+
+def _mf32(suite) -> Dict[str, object]:
+    """MF32's head fields GNDS's parameter covariance has no place for, by range kind.
+
+    NAPS of each range, NLS of an LCOMP=1 or 2 head, L2 of an LRF=7 particle-pair LIST and
+    the AWRI of each unresolved L block."""
+    from kika.endf.classes.mf32.mf32mt151 import (LCOMP1Body, LCOMP2Body, LCOMP2RMLBody,
+                                                  UnresolvedBody)
+    from kika.endf.parsers.parse_mf32 import parse_mf32_mt151
+    from kika.nuclear_data.model.endf_conversion import MF32MT151_KEY
+
+    texts = {}
+    for covariance in getattr(suite.covarianceSuite, "parameterCovariances", None) or ():
+        fields = getattr(getattr(covariance, "provenance", None), "headerFields", None) or {}
+        if fields.get(MF32MT151_KEY) is not None:
+            texts[id(fields[MF32MT151_KEY])] = fields[MF32MT151_KEY]
+    if len(texts) != 1:
+        return {}
+    lines = [line for line in next(iter(texts.values())) if line[70:72].strip() == "32"]
+    section = parse_mf32_mt151(lines, 151)
+    if len(section.isotopes) != 1:
+        return {}
+    out: Dict[str, object] = {}
+    ranges = section.isotopes[0].energy_ranges
+    resolved = [r for r in ranges if r.lru == 1]
+    for kind, found in (("resolved", resolved), ("unresolved", [r for r in ranges if r.lru == 2])):
+        if len(found) != 1:
+            continue
+        energyRange, body = found[0], found[0].body
+        entry = out[kind] = {"naps": int(energyRange.naps)}
+        if isinstance(body, (LCOMP1Body, LCOMP2Body)) and body.control is not None:
+            entry["nls"] = int(body.control.n1)
+        if isinstance(body, LCOMP2RMLBody) and body.particle_pairs is not None:
+            entry["pairsL2"] = int(body.particle_pairs.l2)
+        if isinstance(body, UnresolvedBody):
+            entry["awri"] = {int(block.l1): float(block.c1) for block in body.l_blocks}
+    return out
 
 
 def apply(suite, report) -> None:

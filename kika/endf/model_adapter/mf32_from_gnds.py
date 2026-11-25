@@ -104,7 +104,8 @@ def _upper(matrix):
     return out
 
 
-def _breitWigner(records, resonances, region, matrix, lcomp, sortByL, ndigit, awt, spi, dap):
+def _breitWigner(records, resonances, region, matrix, lcomp, sortByL, ndigit, awt, spi, dap,
+                 stated):
     from kika.gnds.encode_resonances import _breitWignerRows
     from .resonances import resolvedRangeRadius
     from kika.nuclear_data.model.resonances import radiusToEndf
@@ -116,6 +117,7 @@ def _breitWigner(records, resonances, region, matrix, lcomp, sortByL, ndigit, aw
     gnds = [(t[1], t[4], t[5]) for t in table]
     ls = [t[0] for t in table]
     nls = 0 if lcomp in (1, 2) or not sortByL else len(set(ls))
+    nls = stated.get("nls", nls) if lcomp in (1, 2) else nls
     radius = resolvedRangeRadius(resonances, region)
     if radius is None:
         raise ValueError("the Breit-Wigner range states no constant radius for AP")
@@ -176,7 +178,7 @@ def _breitWigner(records, resonances, region, matrix, lcomp, sortByL, ndigit, aw
 
 
 def _reichMoore(records, resonances, region, groups, matrix, lcomp, sortByL, ndigit, awt, spi,
-                ignoreChannelSpin, dap):
+                ignoreChannelSpin, dap, stated):
     from .resonances import resolvedRangeRadius
     from kika.gnds.encode_resonances import _rmRole
     from kika.nuclear_data.model.resonances import radiusToEndf
@@ -209,6 +211,7 @@ def _reichMoore(records, resonances, region, groups, matrix, lcomp, sortByL, ndi
     lad = int(lcomp == 2 and bool(getattr(formalism, "supportsAngularReconstruction", False)))
     # FUDGE's code keeps NLS for LCOMP=1 here; the tapes (Mn-55) write it only for LCOMP=0.
     nls = 0 if lcomp in (1, 2) or not sortByL else len(set(ls))
+    nls = stated.get("nls", nls) if lcomp in (1, 2) else nls
     records.head(spi, radiusToEndf(radius), lad, lcomp, nls, int(dap is not None))
     if dap is not None:
         records.head(0, 0, 0, 0, len(dap), 1)
@@ -273,7 +276,7 @@ def _reichMoore(records, resonances, region, groups, matrix, lcomp, sortByL, ndi
         _lcomp2(records, matrix, ndigit, count * mpar)
 
 
-def _rMatrixLimited(records, suite, region, groups, matrix, links, lcomp, ndigit, mat):
+def _rMatrixLimited(records, suite, region, groups, matrix, links, lcomp, ndigit, mat, stated):
     from kika.nuclear_data.model import EndfProvenance
 
     from .derive import DerivationContext
@@ -290,7 +293,7 @@ def _rMatrixLimited(records, suite, region, groups, matrix, links, lcomp, ndigit
         uncertainties = list(np.sqrt(matrix.diagonal()))
         records.head(0, 0, ifg, lcomp, len(links), 0)
         pairs = rml.particle_pairs
-        records.head(0, 0, len(pairs), 0, 12 * len(pairs), 2 * len(pairs))
+        records.head(0, 0, len(pairs), stated.get("pairsL2", 0), 12 * len(pairs), 2 * len(pairs))
         for p in pairs:
             records.data([p.ma, p.mb, p.za, p.zb, p.ia, p.ib])
             records.data([p.q, p.pnt, p.shf, p.mt, p.pa, p.pb])
@@ -377,7 +380,7 @@ def _urrRadius(resonances, widths):
     return radiusToEndf(float(radius))
 
 
-def _unresolved(records, suite, averages, conversions, awr, neutron, spi):
+def _unresolved(records, suite, averages, conversions, awr, neutron, spi, stated):
     """The sections become one LRU=2 body, laid out as FUDGE's ``averageParametersToENDF6``.
 
     AWRI is the unresolved range's own mass, as the resolved body's is (FUDGE writes
@@ -402,12 +405,14 @@ def _unresolved(records, suite, averages, conversions, awr, neutron, spi):
     byL = {}
     for (L, J), (lpos, jpos, group) in layout.items():
         byL.setdefault((lpos, L), []).append((jpos, J, group))
-    records.head(region.domainMin, region.domainMax, 2, 1, 0, _unresolvedNaps(suite))
+    records.head(region.domainMin, region.domainMax, 2, 1, 0,
+                 stated.get("naps", _unresolvedNaps(suite)))
     records.head(spi, _urrRadius(suite.resonances, region.tabulatedWidths), 0, 0, len(byL), 0)
     rows, values, mpars = [], [], set()
     for (lpos, L), groups in byL.items():
-        stated = groups[0][2].atomicWeightRatio
-        records.head(awri if stated is None else stated, 0, L, 0, 6 * len(groups), len(groups))
+        own = groups[0][2].atomicWeightRatio
+        own = stated.get("awri", {}).get(L, awri if own is None else own)
+        records.head(own, 0, L, 0, 6 * len(groups), len(groups))
         for jpos, J, group in groups:
             average = {"D": 0.0, "GNO": 0.0, "GG": 0.0, "GF": 0.0, "GX": 0.0}
             mpar = 0
@@ -458,7 +463,7 @@ def encodeMF32FromGnds(suite, mat: Optional[int], report: ConversionReport):
     """``(MF32MT151 or None, report)`` for *suite*'s resonance parameter covariances."""
     from kika.endf.parsers.parse_mf32 import parse_mf32_mt151
     from kika.nuclear_data.model import AverageParameterCovariance, ParameterCovariance
-    from kika.nuclear_data.model.endf_conversion import EndfConversionFlags
+    from kika.nuclear_data.model.endf_conversion import EndfConversionFlags, EndfTapeData
     from .derive import DerivationContext
     from .derive.resonances import _fileNeutronMass
 
@@ -472,6 +477,8 @@ def encodeMF32FromGnds(suite, mat: Optional[int], report: ConversionReport):
         return None, report
     resonances = suite.resonances
     conversions = EndfConversionFlags.of(suite)
+    tape = EndfTapeData.of(suite)
+    stated = tape.mf32 if tape is not None else {}
     try:
         target = suite.PoPs.get(suite.target)
         neutron = _fileNeutronMass(DerivationContext(suite=suite))
@@ -482,11 +489,12 @@ def encodeMF32FromGnds(suite, mat: Optional[int], report: ConversionReport):
         lfw = None
         if resolvedOnes:
             lfw = _resolved(records, suite, resolvedOnes[0], conversions, awr, neutron, spi,
-                            mat)
+                            mat, stated.get("resolved", {}))
         if averages:
             if resonances.unresolved is None:
                 raise ValueError("unresolved averages are varied but there is no unresolved range")
-            _unresolved(records, suite, averages, conversions, awr, neutron, spi)
+            _unresolved(records, suite, averages, conversions, awr, neutron, spi,
+                        stated.get("unresolved", {}))
             if lfw is None:
                 lfw = _urrFission(resonances.unresolved.tabulatedWidths)
         header = _Records()
@@ -517,7 +525,7 @@ def _linkedChannel(formalism, href):
     raise ValueError(f"no channel at {href!r}")
 
 
-def _resolved(records, suite, covariance, conversions, awr, neutron, spi, mat):
+def _resolved(records, suite, covariance, conversions, awr, neutron, spi, mat, stated):
     """The resolved range's body, as FUDGE's ``toENDF6`` writes it; returns LFW."""
     from kika.gnds.encode_resonances import resonanceTables
     from kika.nuclear_data.model.resonances import BreitWigner, RMatrix
@@ -588,13 +596,13 @@ def _resolved(records, suite, covariance, conversions, awr, neutron, spi, mat):
         raise ValueError(f"a {type(formalism).__name__} range")
     calculate = (formalism.radiusPolicy.channelMode == "mass" if formalism.radiusPolicy is not None
                  else bool(getattr(formalism, "calculateChannelRadius", True)))
-    naps = 0 if lrf == 7 else int(not calculate)
+    naps = stated.get("naps", 0 if lrf == 7 else int(not calculate))
     records.head(region.domainMin, region.domainMax, 1, lrf, 0, naps)
     if lrf in (1, 2):
         if dap is not None and len(dap) > 1:
             raise ValueError("an L-dependent scattering-radius uncertainty on a Breit-Wigner range")
         _breitWigner(records, resonances, region, matrix, lcomp, sortByL, ndigit, awt, spi,
-                     None if dap is None else dap[0])
+                     None if dap is None else dap[0], stated)
     elif lrf == 3:
         from kika.gnds.encode_resonances import _rmGroupsForGNDS, _withoutEmptyFission
         models = _rmGroupsForGNDS(formalism, ConversionReport())
@@ -602,9 +610,9 @@ def _resolved(records, suite, covariance, conversions, awr, neutron, spi, mat):
         ignore = "ignoreChannelSpin" in (conversions.flagsFor(rMatrixHref(suite, 0))
                                          if conversions else {})
         _reichMoore(records, resonances, region, models, matrix, lcomp, sortByL, ndigit,
-                    awt, spi, ignore, dap)
+                    awt, spi, ignore, dap, stated)
     else:
         if dap is not None:
             raise ValueError("a scattering-radius uncertainty on an LRF=7 range")
-        _rMatrixLimited(records, suite, region, groups, matrix, links, lcomp, ndigit, mat)
+        _rMatrixLimited(records, suite, region, groups, matrix, links, lcomp, ndigit, mat, stated)
     return lfw
