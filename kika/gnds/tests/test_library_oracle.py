@@ -171,9 +171,11 @@ EXPECTED: List[Expected] = [
              reason="NNDC wrong: FUDGE's lumped sum is 8.9e-4 off the tape's log-log summands, kika's 7.9e-5"),
     Expected("res", r"unresolved\.tabulatedWidths\.scatteringRadius: # != #", bound=2e-16,
              reason="AP * 10 to fm in binary; FUDGE writes the decimal"),
-    Expected("res", r"unresolved\.tabulatedWidths\.PoPs\.particles\['[^']+'\]\.mass\.value: # != #", bound=2.1e-10,
-             reason="the target mass is AWRI * m_n in kika, FUDGE's PoPs value"),
-    Expected("res", r"unresolved\.tabulatedWidths\.PoPs\.particles\['[^']+'\]\.(charge|energy): None != .*",
+    Expected("res", r"unresolved\.tabulatedWidths\.PoPs\.particles\['[^']+'\]\.mass\.value: one AWRI "
+                    r"times each code's neutron mass",
+             "the URR target mass is the tape's AWRI times the neutron mass: kika's is CODATA 2018's "
+             "1.00866491595 u, FUDGE's 1.00866491574 u, written to 12 digits"),
+    Expected("res", r"unresolved\.tabulatedWidths\.PoPs\.particles\['[^']+'\]\.(charge|energy|halflife): None != .*",
              "kika's URR PoPs carries the target's mass and spin only"),
     Expected("res", r"unresolved\.spinGroups\[i\]\.levelSpacingFunction\.label: 'eval' != None",
              "a form label kika writes and FUDGE omits"),
@@ -448,7 +450,8 @@ def resonanceDifferences(mine, theirs):
     if (ua is None) != (ub is None):
         out.append(Difference("res", f"unresolved only in {'kika' if ua is not None else 'NNDC'}"))
     elif ua is not None:
-        out += _unresolvedDifferences(ua, ub, _labelsToMT(mine), _labelsToMT(theirs))
+        out += _unresolvedDifferences(ua, ub, _labelsToMT(mine), _labelsToMT(theirs),
+                                      (_neutronMass(mine), _neutronMass(theirs)))
     return out
 
 
@@ -460,11 +463,33 @@ def _channelRoles(resonanceReactions, channels, labels):
             if c.constantWidth or (c.widths is not None and np.any(np.asarray(c.widths) != 0))}
 
 
-def _unresolvedDifferences(ua, ub, labelsA, labelsB):
+def _neutronMass(suite):
+    try:
+        return suite.PoPs[suite.projectile].mass.convertedTo("amu").value
+    except (KeyError, AttributeError):
+        return None
+
+
+def _sameAwri(mine, theirs, neutrons):
+    """*theirs* is *mine*'s AWRI times the other neutron mass, at some count of digits."""
+    if None in neutrons:
+        return False
+    other = mine / neutrons[0] * neutrons[1]
+    return any(float(f"{other:.{digits}g}") == theirs for digits in range(9, 18))
+
+
+def _unresolvedDifferences(ua, ub, labelsA, labelsB, neutrons=(None, None)):
     # resonanceReactions only name the channels' reactions; the channels are paired through them
     ignore = IGNORED_FIELDS + ("spinGroups", "resonanceReactions")
-    out = [_sized("res", "unresolved.", d, ua, ub)
-           for d in modelDifferences(ua, ub, path="@", ignore=ignore)]
+    out = []
+    for d in modelDifferences(ua, ub, path="@", ignore=ignore):
+        path = d.partition(": ")[0]
+        if (re.fullmatch(r"@\.tabulatedWidths\.PoPs\.particles\['[^']+'\]\.mass\.value", path)
+                and _sameAwri(_resolve(ua, path[1:]), _resolve(ub, path[1:]), neutrons)):
+            out.append(Difference("res", f"unresolved.{_normalisedPath(path)}: one AWRI times "
+                                         f"each code's neutron mass"))
+        else:
+            out.append(_sized("res", "unresolved.", d, ua, ub))
     ta, tb = ua.tabulatedWidths, ub.tabulatedWidths
     if ta is None or tb is None or len(ta.spinGroups) != len(tb.spinGroups):
         return out + [Difference("res", "unresolved: spin groups not paired")]
