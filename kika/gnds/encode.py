@@ -1605,6 +1605,11 @@ class _SuiteWriter:
             mt = getattr(reaction, "ENDF_MT", None)
             if mt is not None and mt not in hrefs:
                 hrefs[mt] = f"/reactionSuite/reactions/reaction[@label='{reaction.label}']"
+        # MT18 is a sum when the fission chances are tabulated, and the URR's fission width is its
+        for entry in self.suite.sums:
+            mt = getattr(entry, "ENDF_MT", None)
+            if mt is not None and mt not in hrefs and hasattr(entry, "crossSection"):
+                hrefs[mt] = f"/reactionSuite/sums/crossSectionSums/crossSectionSum[@label='{entry.label}']"
         writeResonances(root, self.suite.resonances, self.report, self.domain, hrefs)
 
     # -- the declaration ---------------------------------------------------
