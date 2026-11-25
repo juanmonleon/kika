@@ -302,11 +302,14 @@ def read_coverx(file_path: str, ascending: bool = True, energy_unit: str = 'eV',
     COVERX holds its group boundaries in eV, in descending order. Each matrix
     is stored under ``(isotope_row, mt_row, isotope_col, mt_col)``, with the
     vertical parameter of the file as the row and the horizontal one as the
-    column. The reader leaves ``is_relative`` empty (no per-matrix flag) and
-    keeps only the first Legendre block (P0) of a binary matrix. A matrix whose
-    MT is not a known reaction is skipped, in both formats. A matrix whose
-    values are all zero is skipped by the binary reader only; the text reader
-    keeps it.
+    column. A binary file says what its matrices are (NTYPE): relative
+    covariances (2) are flagged relative, covariances (1) absolute, and
+    correlations (3) are multiplied by the standard deviations of their two
+    pairs and flagged absolute. Its matrices may be split into blocks of
+    consecutive groups (NBLOK), which are put back together. The text reader
+    leaves ``is_relative`` empty (no per-matrix flag). A matrix whose MT is not
+    a known reaction is skipped, in both formats. A matrix whose values are all
+    zero is skipped by the binary reader only; the text reader keeps it.
 
     Parameters
     ----------
@@ -337,8 +340,9 @@ def read_coverx(file_path: str, ascending: bool = True, energy_unit: str = 'eV',
     EmptyParsingError
         If no valid covariance matrices were found in the file
     InvalidDataFormatError
-        If the binary structure is corrupted, or the energy grid of a text
-        file does not hold ``num_groups + 1`` numbers
+        If the binary structure is corrupted (its blocks do not add up to the
+        groups, or a correlation matrix has no standard deviations), or the
+        energy grid of a text file does not hold ``num_groups + 1`` numbers
     ValueError
         If *energy_unit* is not ``'eV'`` or ``'MeV'``
     """
@@ -498,6 +502,11 @@ def _read_coverx_text(file_path: str, ascending: bool = True, energy_unit: str =
 # COVERX binary parser
 # ---------------------------------------------------------------------------
 
+#: NTYPE of COVERX (ORNL/TM-7181, appendix A): 1 covariance and standard deviation,
+#: 2 relative covariance and relative standard deviation, 3 correlation and standard deviation.
+_COVERX_NTYPE_RELATIVE = {1: False, 2: True, 3: False}
+
+
 def _read_coverx_binary(file_path: str, ascending: bool = True, energy_unit: str = 'eV',
                         diagnostics: Optional[list] = None) -> CrossSectionCovariance:
     """
@@ -562,8 +571,9 @@ def _read_coverx_binary(file_path: str, ascending: bool = True, energy_unit: str
               format="coverx-binary",
               pairs=[[triplets[i * 3], triplets[i * 3 + 1], triplets[i * 3 + 2]] for i in range(nmmp)])
 
-        # Records 6 … 6+nmmp-1: cross-section data per (matid, mtid) pair
+        # Records 6 … 6+nmmp-1: cross sections and standard deviations per (matid, mtid) pair
         xs_data: Dict[Tuple[int, int], np.ndarray] = {}
+        stddevs: Dict[Tuple[int, int], np.ndarray] = {}
         for matid, mtid in pairs:
             rec = _read_fortran_record(f, endian)
             xs = np.array(struct.unpack(endian + f'{ngroup}f', rec[:ngroup * 4]))
@@ -573,15 +583,22 @@ def _read_coverx_binary(file_path: str, ascending: bool = True, energy_unit: str
                 _note(diagnostics, "dropped_values",
                       f"MAT{matid}/MT{mtid}: the cross sections are all zero and are not kept",
                       {"mat": matid, "mt": mtid}, values="cross_sections")
-            if diagnostics is not None:
-                where = {"mat": matid, "mt": mtid}
-                if len(rec) >= 2 * ngroup * 4:
-                    sd = np.array(struct.unpack(endian + f'{ngroup}f', rec[ngroup * 4:2 * ngroup * 4]))
-                    _note(diagnostics, "raw_stddev",
-                          f"MAT{matid}/MT{mtid}: the standard deviations the file gives, "
-                          "which the reader does not keep", where, stddev=sd, order="file")
-                _note_long_record(diagnostics, "cross sections and standard deviations",
-                                  len(rec), 2 * ngroup * 4, where)
+            where = {"mat": matid, "mt": mtid}
+            if len(rec) >= 2 * ngroup * 4:
+                stddevs[(matid, mtid)] = np.array(
+                    struct.unpack(endian + f'{ngroup}f', rec[ngroup * 4:2 * ngroup * 4]))
+                _note(diagnostics, "raw_stddev",
+                      f"MAT{matid}/MT{mtid}: the standard deviations the file gives (NTYPE={_ntype})",
+                      where, stddev=stddevs[(matid, mtid)].copy(), order="file")
+            _note_long_record(diagnostics, "cross sections and standard deviations",
+                              len(rec), 2 * ngroup * 4, where)
+
+        relative = _COVERX_NTYPE_RELATIVE.get(_ntype)
+        if _ntype not in _COVERX_NTYPE_RELATIVE:
+            _note(diagnostics, "unit_assumed",
+                  f"NTYPE={_ntype} is none of 1 (covariance), 2 (relative covariance) or "
+                  "3 (correlation); the matrices are kept as written, with no flag",
+                  ntype=_ntype, is_relative=None)
 
         # --- Covariance matrix blocks (nmtrix total) ----------------------
         covmat = CrossSectionCovariance(num_groups=ngroup, energy_unit=energy_unit)
@@ -611,21 +628,29 @@ def _read_coverx_binary(file_path: str, ascending: bool = True, energy_unit: str
             jband = [ints[i * 2] for i in range(ngroup)]
             ijj = [ints[i * 2 + 1] for i in range(ngroup)]
 
-            # Data record(s) — one per Legendre block; use only P0 (first)
-            total_vals = sum(jband)
-            rec_data = _read_fortran_record(f, endian)
-            vals = struct.unpack(endian + f'{total_vals}f', rec_data[:total_vals * 4])
-
             _note_long_record(diagnostics, "band", len(rec_band), n_ints * 4, where)
-            _note_long_record(diagnostics, "matrix data", len(rec_data), total_vals * 4, where)
 
-            # Skip remaining Legendre blocks if nblock > 1
-            for _ in range(1, nblock):
-                _read_fortran_record(f, endian)
-            if nblock > 1:
-                _note(diagnostics, "dropped_values",
-                      f"NBLOK={nblock}: only the first data record of the matrix is read",
-                      where, values="matrix_records", nblock=nblock, lgrp=list(ints[2 * ngroup:]))
+            # One data record per block of LGRP(N) consecutive groups (rows).
+            lgrp = list(ints[2 * ngroup:2 * ngroup + nblock])
+            if sum(lgrp) != ngroup:
+                if nblock != 1:
+                    raise InvalidDataFormatError(
+                        f"COVERX matrix {record} (MAT{mat2}/MT{mt2} x MAT{mat1}/MT{mt1}): its "
+                        f"{nblock} blocks hold {sum(lgrp)} groups (LGRP={lgrp}), not {ngroup}: "
+                        f"{file_path}")
+                _note(diagnostics, "count_mismatch",
+                      f"LGRP={lgrp[0]} for the one block of a {ngroup}-group matrix; read as "
+                      f"{ngroup}", where, declared=lgrp[0], found=ngroup)
+                lgrp = [ngroup]
+            vals: List[float] = []
+            first_row = 0
+            for rows in lgrp:
+                kmax = sum(jband[first_row:first_row + rows])
+                rec_data = _read_fortran_record(f, endian)
+                vals.extend(struct.unpack(endian + f'{kmax}f', rec_data[:kmax * 4]))
+                _note_long_record(diagnostics, "matrix data", len(rec_data), kmax * 4,
+                                  dict(where, row=first_row + 1))
+                first_row += rows
 
             if diagnostics is not None:
                 outside = [j + 1 for j in range(ngroup) if jband[j] > 0
@@ -659,12 +684,25 @@ def _read_coverx_binary(file_path: str, ascending: bool = True, energy_unit: str
                       where, reason="unknown_mt")
                 continue
 
+            if _ntype == 3:
+                sd_row, sd_col = stddevs.get((mat2, mt2)), stddevs.get((mat1, mt1))
+                if sd_row is None or sd_col is None:
+                    raise InvalidDataFormatError(
+                        f"COVERX correlation matrix (NTYPE 3) MAT{mat2}/MT{mt2} x MAT{mat1}/MT{mt1} "
+                        f"has no standard deviations for both pairs, so it cannot be turned "
+                        f"into a covariance: {file_path}")
+                _note(diagnostics, "raw_correlation",
+                      f"MAT{mat2}/MT{mt2} x MAT{mat1}/MT{mt1}: the correlations (NTYPE 3) as "
+                      "written, before the standard deviations multiply them",
+                      where, correlation=matrix.copy(), order="file")
+                matrix = matrix * np.outer(sd_row, sd_col)
+
             if reverse:
                 matrix = np.flipud(np.fliplr(matrix))
 
             # COVERX control fields 1/2 identify the horizontal (column)
             # parameter; fields 3/4 identify the vertical (row) parameter.
-            covmat.add_matrix(mat2, mt2, mat1, mt1, matrix)
+            covmat.add_matrix(mat2, mt2, mat1, mt1, matrix, is_relative=relative)
 
     if covmat.num_matrices == 0:
         raise EmptyParsingError(

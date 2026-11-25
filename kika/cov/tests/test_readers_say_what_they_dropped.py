@@ -122,14 +122,14 @@ def test_a_row_given_twice_is_a_row_order_event(tmp_path):
     assert event.evidence == {"previous": 4, "repeated": True}
 
 
-def test_coverx_binary_declares_ntype_and_gives_the_standard_deviations_it_does_not_keep(tmp_path):
+def test_coverx_binary_declares_ntype_and_gives_its_standard_deviations(tmp_path):
     events = []
     read_coverx(_written(tmp_path, "binary"), diagnostics=events)
     (head,) = [e for e in events if e.kind == "declared" and "ntype" in e.evidence]
     assert head.evidence["ntype"] == 2
     assert {(e.where["mat"], e.where["mt"]) for e in events if e.kind == "raw_stddev"} == {
         (FE56, 2), (FE56, 102)}
-    assert "unit_assumed" in _kinds(events)
+    assert "unit_assumed" not in _kinds(events)
 
 
 def test_coverx_text_says_it_skipped_an_unknown_mt(tmp_path):
