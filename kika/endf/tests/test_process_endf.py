@@ -545,24 +545,40 @@ def test_the_files_carry_heating_unless_the_plan_says_no(heating, tmp_path, monk
         assert staged.NO_HEATING_HDF5 in result.stages[-1].details["omitted"]
 
 
-def test_the_monte_carlo_outputs_omit_what_the_decoded_tape_keeps_aside(zr90_b81_tape, monkeypatch):
-    """The processed suite carries HDF5 provenance; the losses come from the decoded tape."""
+def test_the_monte_carlo_outputs_omit_what_the_decoded_tape_keeps_aside(
+        zr90_b81_tape, monkeypatch, tmp_path):
+    """Processing and writers stubbed: each write stage's ``omitted`` names the decoded tape's loss."""
+    import importlib
     from types import SimpleNamespace
 
     import kika
+    import kika.ace.model_adapter as ace
+    import kika.endf.process as process
     import kika.hdf5.processing as hp
+    import kika.hdf5.writer as hdf5Writer
     from kika.endf import EndfProcessing
 
+    # The package re-exports a function under the module's name.
+    aceWriter = importlib.import_module("kika.ace.writers.write_ace")
     work = kika.read(zr90_b81_tape, covariances=False)
     processed = SimpleNamespace(provenance=None)
+    table = SimpleNamespace(header=SimpleNamespace(zaid="40090", extension=".02c"))
     monkeypatch.setattr(hp, "processSuite", lambda *args, **kwargs: processed)
+    monkeypatch.setattr(process, "_neutrons_and_photons", lambda suite: suite)
+    monkeypatch.setattr(hdf5Writer, "writeSuite", lambda *args, **kwargs: None)
+    monkeypatch.setattr(ace, "encodeAce", lambda *args, **kwargs: (table, None))
+    monkeypatch.setattr(aceWriter, "write_ace_checked", lambda *args, **kwargs: None)
     run = EndfProcessing.__new__(EndfProcessing)
-    run._processed, run._heated, run._urr, run._broadened = None, {}, {}, {}
+    run._processed, run._urr, run.stages = None, {}, []
+    run._heated = run._broadened = {293.6: None}
     run.thnmax, run.plan = None, ProcessingPlan(heating=False)
     run.reconstruction = SimpleNamespace(context=None)
     run._full_suite = lambda *args, **kwargs: work
-    assert run._processed_suite()[0] is processed
+    run.write_hdf5(tmp_path / "Zr90.h5")
+    run.write_ace(tmp_path / "ace", xsdir=False)
     loss = "MF3/MT651: QM -6128816 eV; QI plus Y89_e1's energy gives -6128786 eV"
-    for written in ("the HDF5 library", "the ACE tables"):
-        assert [s.split("back: ", 1)[1] for s in run._tapeOnly[written]] == [loss]
-        assert run._tapeOnly[written][0].startswith(f"not in {written},")
+    stages = {s.details["format"]: s for s in run.stages if s.stage == "write"}
+    for fmt, written in (("hdf5", "the HDF5 library"), ("ace", "the ACE tables")):
+        assert stages[fmt].status == "done"
+        assert (f"not in {written}, kept only in the suite's ENDF provenance to write the tape "
+                f"back: {loss}") in stages[fmt].details["omitted"]
