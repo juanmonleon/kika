@@ -1222,6 +1222,40 @@ def _emitAceKika(suite, pset, sampleDir: Path, ctx, log, sample: int) -> List[Di
     return produced
 
 
+def _resonanceRefusal(suite, mat) -> Optional[str]:
+    """Why MF2/151 cannot be derived from a GNDS suite's resonances, or ``None``.
+
+    The ENDF writer's own deriver decides, on a scratch context: a range it
+    writes is a range a tape from this source has, and the loss it reports is
+    the reason. Approximations it declares (LAD, NLSC) do not refuse.
+    """
+    from kika.endf.model_adapter.derive import DerivationContext
+    from kika.endf.model_adapter.derive.resonances import deriveResonances
+    from kika.endf.model_adapter.derive.suite import deriveSuite
+    from kika.nuclear_data.model import ConversionReport
+    from kika.nuclear_data.model.endf_conversion import EndfConversionFlags
+
+    resonances = getattr(suite, "resonances", None)
+    provenance = getattr(resonances, "provenance", None)
+    if resonances is None or getattr(provenance, "sourceFormat", None) == "endf" or not (
+            resonances.resolved or resonances.unresolved is not None):
+        return None
+    context = DerivationContext(suite=suite, mat=mat)
+    flags = EndfConversionFlags.of(suite)
+    if flags:
+        context.conversionFlags.update(dict(flags.conversions))
+    report = ConversionReport()
+    try:
+        deriveSuite(suite, "/reactionSuite", context, report)
+    except ValueError as why:
+        return f"no MF1 header can be derived ({why})"
+    derived = deriveResonances(resonances, "/reactionSuite/resonances", context, report)
+    lost = [message for message in report.losses if message.startswith("MF2")]
+    if derived is None or lost:
+        return "; ".join(lost) or "no MF2/151 could be derived"
+    return None
+
+
 def _matOf(suite) -> Optional[int]:
     """The ENDF MAT of the suite's target, from the library's own table.
 
@@ -3302,8 +3336,8 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         matches nothing the evaluation states; the source is neither an ENDF
         tape nor a GNDS ``reactionSuite``, or the GNDS file has no covariance
         sibling; ``endf-delta`` is asked for a GNDS source, or a GNDS source whose
-        resonance parameters did not come from ENDF for ``endf-tape`` or an NJOY
-        ``ace`` (both only when files are written); a path is needed and *source*
+        resonances cannot be derived to MF2 for ``endf-tape`` or an NJOY ``ace``
+        (both only when files are written); a path is needed and *source*
         is a parsed object (``endf-delta``, the resonance reconstruction,
         ``nWorkers`` above 1 in a run that goes parallel);
         *covarianceSource* is missing or is another nuclide's; the pre-flight
@@ -3403,23 +3437,15 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
     if sourceFormat == "gnds":
         needsTape = [f for f in formats if f == "endf-tape"
                      or (f == "ace" and ace is not None and ace.engine == "njoy")]
-        resonances = getattr(suite, "resonances", None)
-        withParameters = resonances is not None and (
-            bool(resonances.resolved) or resonances.unresolved is not None)
-        hasMF2 = getattr(getattr(resonances, "provenance", None),
-                         "sourceFormat", None) == "endf"
-        if (needsTape and withParameters and not hasMF2
-                and not dryRun and outputDir is not None):
-            raise ValueError(
-                f"{needsTape} need an ENDF tape written from the model, and the "
-                f"resonance parameters of a suite read from GNDS are not written "
-                f"to MF2: QX, LRX, LAD and the particle-pair columns have no "
-                f"model node to derive them from. Without MF2 the tape's MF3 in "
-                f"the resonance region is only the background, so this GNDS "
-                f"source can be perturbed to 'gnds' only. A GNDS evaluation "
-                f"with no resolved or unresolved region is written as a tape "
-                f"(MAT {_matOf(suite)} from the library's table)."
-            )
+        if needsTape and not dryRun and outputDir is not None:
+            why = _resonanceRefusal(suite, mat if mat is not None else _matOf(suite))
+            if why is not None:
+                raise ValueError(
+                    f"{needsTape} need an ENDF tape written from the model, and "
+                    f"this GNDS source's resonances cannot be written to MF2: {why}. "
+                    f"Without them the tape's MF3 in the resonance region is only "
+                    f"the background, so this source can be perturbed to 'gnds' only."
+                )
         if mat is None:
             mat = _matOf(suite)
             if mat is not None and needsTape:
