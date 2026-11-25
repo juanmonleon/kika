@@ -5,6 +5,15 @@ import math
 from kika._constants import NEUTRON_MASS_AMU, NEUTRON_MASS_MEV
 
 
+def awri_from_mass(mass, neutron):
+    """AWRI from a target mass written as AWRI times *neutron*: of the doubles that give
+    the mass back, the shortest decimal, which is the AWRI the tape states."""
+    ratio = mass / neutron
+    candidates = [c for c in (ratio, math.nextafter(ratio, 0.0), math.nextafter(ratio, math.inf))
+                  if c * neutron == mass]
+    return min(candidates, key=lambda c: len(repr(c))) if candidates else ratio
+
+
 @dataclass(frozen=True)
 class NeutronContext:
     """Target/neutron mass ratio and target spin (in hbar).

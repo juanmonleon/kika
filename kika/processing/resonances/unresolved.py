@@ -295,13 +295,6 @@ def _group_breaks(group):
     return cuts
 
 
-def _stated_awri(mass,neutron):
-    """AWRI from a target mass of AWRI*neutron: of the doubles that give it back, the decimal ENDF wrote."""
-    a=mass/neutron
-    candidates=[c for c in (a,float(np.nextafter(a,0.)),float(np.nextafter(a,np.inf))) if c*neutron==mass]
-    return min(candidates,key=lambda c:len(repr(c))) if candidates else a
-
-
 def prepare_unresolved(region,context,notes):
     from .prepare import PreparedRegion,UnsupportedResonanceError
     from kika.nuclear_data.model.enums import INTERPOLATION_TO_ENDF_INT
@@ -318,7 +311,8 @@ def prepare_unresolved(region,context,notes):
         mass=particles[0].mass if len(particles)==1 else None
         if mass is not None:
             # ENDF states the URR's AWRI per l-block, and the region's PoPs holds it as a mass
-            stated_awri=_stated_awri(mass.convertedTo('amu').value,context.neutron_mass_amu)
+            from .context import awri_from_mass
+            stated_awri=awri_from_mass(mass.convertedTo('amu').value,context.neutron_mass_amu)
         if len(particles)==1 and particles[0].spin is not None:
             spin=particles[0].spin
             if spin.unit!='hbar':raise ValueError('URR target spin must be in hbar')

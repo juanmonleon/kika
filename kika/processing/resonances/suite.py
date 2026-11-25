@@ -1441,7 +1441,8 @@ def _reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',op
         if target.mass is None or neutron.mass is None or target.spin is None:
             raise ValueError('supply explicit NeutronContext when model mass/spin are incomplete')
         mass=_resonance_mass(suite.resonances,suite.target) or target.mass
-        context=NeutronContext(mass.convertedTo('amu').value/neutron.mass.convertedTo('amu').value,
+        from .context import awri_from_mass
+        context=NeutronContext(awri_from_mass(mass.convertedTo('amu').value,neutron.mass.convertedTo('amu').value),
                                target.spin.convertedTo('hbar').value)
     from .prepare_r_matrix import normalize_suite_pairs
     from .unresolved import normalize_unresolved_links
