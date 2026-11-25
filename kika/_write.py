@@ -59,7 +59,8 @@ COVARIANCE_SUBDIRECTORY = "Covariances"
 def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
           mat: Optional[int] = None, tapeId: Optional[str] = None,
           label: Optional[str] = None, compressed: bool = False, *,
-          resonance_extensions: bool = False, temperatures=None, **options):
+          resonance_extensions: bool = False, temperatures=None,
+          external_files: Optional[dict] = None, **options):
     """Write a reaction suite out, and say what did not go with it.
 
     The GNDS file is written to *path*, creating its parent directories and
@@ -139,6 +140,11 @@ def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
         URR's cross-section INT in the versioned KIKA applicationData
         institution. Other consumers require
         support for this institution before reconstructing the resonances.
+    external_files
+        GNDS only. Target id (``"U238"``) → the path the covariance file names
+        for that material's evaluation, for covariances with another material.
+        A material it does not map keeps the path the suite carries; one decoded
+        from ENDF gets kika's rule, which the reader's report states.
     **options
         Keyword options of the HDF5 writer (``format='hdf5'``) or of the ACE
         encoder (``format='ace'``: ``zaid``, ``awr``, ``extension``). Any option
@@ -174,6 +180,8 @@ def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
         )
     if resonance_extensions and format != 'gnds':
         raise ValueError('resonance_extensions is a GNDS-only option')
+    if external_files and format != 'gnds':
+        raise ValueError('external_files is a GNDS-only option')
     if format == "ace":
         from kika.ace.model_adapter.encode import writeAceSuite
 
@@ -220,7 +228,8 @@ def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
 
         return writeEndfTape(suite, Path(os.fspath(path)), mat=mat,
                              tapeId=tapeId, label=label)
-    return _writeGnds(suite, Path(os.fspath(path)), gnds,resonance_extensions)
+    return _writeGnds(suite, Path(os.fspath(path)), gnds, resonance_extensions,
+                      external_files)
 
 
 def _writePoPs(pops, path: Path, format: str, mat=None, tapeId=None):
@@ -243,7 +252,8 @@ def _writePoPs(pops, path: Path, format: str, mat=None, tapeId=None):
     return report
 
 
-def _writeGnds(suite, path: Path, gnds: Optional[str],resonance_extensions=False):
+def _writeGnds(suite, path: Path, gnds: Optional[str], resonance_extensions=False,
+               external_files=None):
     # Imported here, not at module scope: importing the encoder imports the
     # model, and `import kika` must not wake it. Same reason as `_read`.
     from kika.gnds.encode import (chooseFormat, serialise, sha1,
@@ -270,7 +280,7 @@ def _writeGnds(suite, path: Path, gnds: Optional[str],resonance_extensions=False
     try:
         report = _writeLinkedPair(suite, path, format, report,
                                   writeReactionSuite, writeCovarianceSuite,
-                                  serialise, sha1, ExternalFile)
+                                  serialise, sha1, ExternalFile, external_files)
     finally:
         suite.externalFiles.files = originalExternalFiles
         if originalBackLinks is not None:
@@ -345,7 +355,8 @@ def _withFlags(suite, flags):
 
 
 def _writeLinkedPair(suite, path, format, report, writeReactionSuite,
-                     writeCovarianceSuite, serialise, sha1, ExternalFile):
+                     writeCovarianceSuite, serialise, sha1, ExternalFile,
+                     externalPaths=None):
     covariancePath = None
     flags, radii = [], []
     if suite.covarianceSuite is not None:
@@ -364,7 +375,9 @@ def _writeLinkedPair(suite, path, format, report, writeReactionSuite,
         # a digest in the other direction cannot exist. The distribution's own
         # covariance files carry none for the same reason.
         suite.covarianceSuite.externalFiles = [
-            entry for entry in suite.covarianceSuite.externalFiles
+            (ExternalFile(label=entry.label, path=externalPaths[entry.label])
+             if entry.label in (externalPaths or {}) else entry)
+            for entry in suite.covarianceSuite.externalFiles
             if entry.label != "reactions"
         ] + [ExternalFile(label="reactions", path=f"../{path.name}")]
         layout, flags, radii = _fudgeParameterLayout(suite, report)

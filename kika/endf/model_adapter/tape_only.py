@@ -17,6 +17,7 @@ from .fission_energy import MF1MT460_KEY
 from .photons import PHOTONS_VERBATIM_KEY
 from .productions import (ACTIVATION_MF8_KEY, ACTIVATION_MF8_OPAQUE_KEY,
                           ACTIVATION_VERBATIM_KEY, _readMf8)
+from .resonances import MF2_TAPE_KEY
 
 __all__ = ["decayTapeOnlyData", "tapeOnlyData"]
 
@@ -86,6 +87,8 @@ def tapeOnlyData(suite, written: str = "the GNDS file", tapeData=None) -> List[s
                          f"({', '.join(f'MT{mt}' for mt in dict.fromkeys(found['mf7']))})")
     if found["mf7mt451"]:
         sentences.append("MF7/MT451: NAS and the digits of SFI as the tape writes them")
+    for mf2 in found["mf2"]:
+        sentences.append(f"MF2/151: {_mf2Sentence(mf2)}")
     sentences.extend(_levelQmSentences(suite, held))
     return [f"not in {written}, kept only in the suite's ENDF provenance to write "
             f"the tape back: {sentence}" for sentence in sentences]
@@ -104,7 +107,19 @@ KEYS = {
     "photons": (PHOTONS_VERBATIM_KEY,),
     "mf7": ("mf7",),
     "mf7mt451": ("mf7mt451",),
+    "mf2": (MF2_TAPE_KEY,),
 }
+
+
+def _mf2Sentence(entry) -> str:
+    ranges = (entry.get("ranges") or {}).values()
+    parts = (["the HEAD's AWR, which is not MF1's"] * ("awr" in entry)
+             + ["the isotope's LFW, which no unresolved range carries"] * ("lfw" in entry)
+             + ["AJ unsigned where L and J fix the channel spin"] * any("ajUnsigned" in r for r in ranges)
+             + ["a different AWRI per l"] * any("awri" in r for r in ranges)
+             + ["the order of rows of one energy from different spin groups"]
+             * any("ties" in r for r in ranges))
+    return ", ".join(parts)
 
 
 def tapeOnlyNodes(suite) -> Iterator[Tuple[str, str, object]]:
@@ -136,6 +151,8 @@ def tapeOnlyNodes(suite) -> Iterator[Tuple[str, str, object]]:
             if kept:
                 lawZero = sum(1 for p in mf6.get("products", ()) if p["law"] == 0)
                 yield path, "mf6", (_mt(path), int(mf6.get("jp", 0) or 0), kept, lawZero)
+        if fields.get(MF2_TAPE_KEY):
+            yield path, "mf2", fields[MF2_TAPE_KEY]
         if node is not suite:
             continue
         if MF1MT460_KEY in fields:

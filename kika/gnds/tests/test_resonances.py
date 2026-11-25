@@ -15,6 +15,7 @@ fixtures. Whether they are the *right* numbers is
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -412,18 +413,13 @@ def test_the_reactions_hard_sphere_radius_survives_a_write(micro_fe56_gnds,
     assert [child.tag for child in reaction] == ["link", "hardSphereRadius"]
 
 
-def test_supports_angular_reconstruction_stays_a_report_entry(ta182):
-    """The one case that closes as won't-fix rather than as work.
-
-    65 files set it and it still gets no node: there is no number under it. It
-    qualifies parameters that are all read, and modelling it would state inside
-    a format-neutral model what one particular reader can do with them.
-    """
-    _suite, report = ta182
-    said = "\n".join(report.losses)
-    if "supportsAngularReconstruction" not in said:
+def test_supports_angular_reconstruction_is_read_as_lad(ta182, micro_ta182_gnds):
+    """ENDF's LAD: read into the model, nothing reported."""
+    suite, report = ta182
+    if 'supportsAngularReconstruction="true"' not in Path(micro_ta182_gnds).read_text(encoding="utf-8"):
         pytest.skip("this fixture does not set the attribute")
-    assert "FUDGE's capability and not the evaluation's" in said
+    assert suite.resonances.resolved[0].formalism.supportsAngularReconstruction is True
+    assert not any("supportsAngularReconstruction" in message for message in report.losses)
 
 
 # ---------------------------------------------------------------------------

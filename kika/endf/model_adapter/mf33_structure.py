@@ -16,15 +16,13 @@ def _mixed(components):
 def decodeSums(section, report, xsSections):
     """Keep every NC LTY=0 range as a reference form, alongside any explicit NI."""
     from kika.nuclear_data.model import CovarianceSection, DataLink, Mixed, Sum, Summand
-    from .covariances import decodeMF33MT, reactionHref, _sectionProvenance
+    from .covariances import _crossMaterialSections, decodeMF33MT, reactionHref, _sectionProvenance
 
     provenance = _sectionProvenance(section)
     output = []
     for sub in section.subsections:
         if sub.mat1 not in (0, section._mat):
-            report.lost(f"MF33/MT{section.number}: NC-containing block with external "
-                        f"MAT1={sub.mat1} cannot be linked from this evaluation; not relabelled as local")
-            continue
+            continue  # _crossMaterialSections, below
         forms = []
         if sub.ni_records:
             ni = replace(sub, nc=0, nc_records=[])
@@ -63,6 +61,7 @@ def decodeSums(section, report, xsSections):
             columnData=DataLink(reactionHref(other), ENDF_MFMT=f"33/{other}") if other != mt else None,
             form=forms[0] if len(forms) == 1 else _mixed(forms),
             provenance=provenance))
+    output += _crossMaterialSections(section, 33, provenance, report)
     return output, report
 
 

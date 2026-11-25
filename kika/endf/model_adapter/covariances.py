@@ -193,10 +193,7 @@ def decodeMF33MT(mf33mt, report: Optional[ConversionReport] = None,
         rowMT = int(covmat.reaction_rows[index])
         colMT = int(covmat.reaction_cols[index])
         if covmat.isotope_cols[index] != covmat.isotope_rows[index]:
-            report.lost(f"MF33/MT{rowMT}: block with MT{colMT} of external "
-                        f"MAT1={covmat.isotope_cols[index]} cannot be linked from "
-                        f"this evaluation; not relabelled as local")
-            continue
+            continue  # read on its own grids by _crossMaterialSections below
         grid = covmat.energy_grids[index] if index < len(covmat.energy_grids) else None
 
         sections.append(CovarianceSection(
@@ -210,9 +207,120 @@ def decodeMF33MT(mf33mt, report: Optional[ConversionReport] = None,
             provenance=provenance,
         ))
 
+    sections += _crossMaterialSections(mf33mt, 33, provenance, report)
     if not sections:
         report.lost(f"MF33/MT{mf33mt.number}: no covariance blocks decoded")
     return sections, report
+
+
+def otherEvaluationPid(mat1: int) -> Optional[str]:
+    """The PoPs id of the target ENDF-6's MAT table gives *mat1*, or ``None`` when it names none."""
+    from kika._constants import ENDF_MAT_TO_ZAID, ZAID_TO_ENDF_MAT, ZAID_TO_ENDF_MAT_ISOMER
+    from kika.nuclear_data.model.pops import pidFromZA
+
+    za = ENDF_MAT_TO_ZAID.get(int(mat1))
+    if za is None:
+        return None
+    if ZAID_TO_ENDF_MAT.get(za) == int(mat1):
+        return pidFromZA(za)
+    if ZAID_TO_ENDF_MAT_ISOMER.get(za) == int(mat1):
+        return f"{pidFromZA(za)}_m1"
+    return None
+
+
+def _crossMaterialForm(sub) -> Optional[CovarianceMatrix]:
+    """A block with another material on the grids its one LB=5 or LB=6 record states, else ``None``."""
+    from kika.endf.classes.mf33.mf33 import MF33MT
+
+    if sub.nc_records or len(sub.ni_records) != 1:
+        return None
+    record = sub.ni_records[0]
+    lb = int(record.lb)
+    if lb == 6:
+        matrix, rows, columns = MF33MT._decode_lb6_matrix(record)
+        storage, linked = "full", False
+    elif lb == 5:
+        matrix, rows = MF33MT._decode_lb5_matrix(record)
+        columns = rows
+        storage, linked = ("symmetric" if int(record.ls or 0) == 1 else "full"), True
+    else:
+        return None
+    return CovarianceMatrix(matrix=np.asarray(matrix, dtype=float),
+                            rowGrid=np.asarray(rows, dtype=float),
+                            columnGrid=np.asarray(columns, dtype=float),
+                            isRelative=True, arrayStorage=storage, columnGridIsRowGrid=linked)
+
+
+def _crossMaterialSections(section, mf: int, provenance, report):
+    """The blocks of *section* with another material, each column linked into that material's file.
+
+    The column's href is ``$<pid>#`` plus the path kika gives the reaction in
+    its own files; :func:`crossMaterialExternalFiles` names the file.
+    """
+    mt = int(section.number)
+    own = int(getattr(section, "_mat", None) or 0)
+    sections = []
+    for sub in section.subsections:
+        mat1 = int(sub.mat1 or 0)
+        if mat1 in (0, own):
+            continue
+        colMT = int(sub.mt1)
+        pid = otherEvaluationPid(mat1)
+        form = _crossMaterialForm(sub) if pid is not None else None
+        if form is None:
+            why = ("ENDF-6's MAT table names no target for it" if pid is None
+                   else "only a block of one LB=5 or LB=6 record is read")
+            report.lost(f"MF{mf}/MT{mt}: block with MT{colMT} of external MAT1={mat1} "
+                        f"is not read: {why}")
+            continue
+        sections.append(CovarianceSection(
+            label=f"MF{mf}-MT{mt}-{pid}-MT{colMT}",
+            rowData=DataLink(href=reactionHref(mt), ENDF_MFMT=f"{mf}/{mt}"),
+            columnData=DataLink(href=f"${pid}#{reactionHref(colMT)}", ENDF_MFMT=f"{mf}/{colMT}"),
+            form=form,
+            provenance=provenance,
+        ))
+    return sections
+
+
+def crossMaterialPath(pid: str) -> str:
+    """``../n-092_U_238.endf.gnds.xml``: NNDC's file name, beside the reactionSuite the suite links."""
+    from kika._constants import ATOMIC_NUMBER_TO_SYMBOL
+    from kika.nuclear_data.model.pops import zaFromPid
+
+    z, a = divmod(zaFromPid(pid), 1000)
+    isomer = "m1" if pid.endswith("_m1") else ""
+    return f"../n-{z:03d}_{ATOMIC_NUMBER_TO_SYMBOL[z]}_{a:03d}{isomer}.endf.gnds.xml"
+
+
+def crossMaterialExternalFiles(suite, report, paths: Optional[dict] = None) -> None:
+    """One ``externalFile`` per other evaluation the suite's links point into and it does not name yet.
+
+    *paths* maps a label (the target's PoPs id) to the path to write; a label
+    it does not map gets :func:`crossMaterialPath`, and the report says so.
+    """
+    from kika.nuclear_data.model import ExternalFile
+
+    stated = {entry.label for entry in suite.externalFiles}
+    labels = []
+    for section in suite.covarianceSections:
+        for link in (section.rowData, section.columnData):
+            label = getattr(link, "otherEvaluation", None) if link is not None else None
+            if label is not None and label not in stated and label not in labels:
+                labels.append(label)
+    named = []
+    for label in labels:
+        path = (paths or {}).get(label)
+        if path is None:
+            path = crossMaterialPath(label)
+            named.append(f"{label} -> {path}")
+        suite.externalFiles.append(ExternalFile(label=label, path=path))
+    if named:
+        report.warn(
+            f"covariances with other materials name those materials' files by kika's "
+            f"rule, since ENDF-6 states only MAT1: NNDC's file name, in the directory "
+            f"of this evaluation's reactionSuite ({', '.join(named)}); pass "
+            f"external_files= to kika.write to name them yourself")
 
 
 class _NubarShim:
@@ -663,17 +771,18 @@ def _otherMaterial(link) -> int:
     """
     import re
 
-    from kika._constants import ZAID_TO_ENDF_MAT
+    from kika._constants import ZAID_TO_ENDF_MAT, ZAID_TO_ENDF_MAT_ISOMER
     from kika.nuclear_data.model.pops import zaFromPid
 
-    href = getattr(link, "href", "") or ""
-    match = re.match(r"\$([^#]+)#", href)
-    if match is None or match.group(1) in ("reactions",):
+    label = getattr(link, "otherEvaluation", None)
+    if label is None:
         return 0
     try:
-        return int(ZAID_TO_ENDF_MAT.get(zaFromPid(match.group(1)), 0))
+        za = zaFromPid(label)
     except ValueError:
         return 0
+    table = ZAID_TO_ENDF_MAT_ISOMER if re.search(r"_m\d+$", label) else ZAID_TO_ENDF_MAT
+    return int(table.get(za, 0))
 
 
 def _faithfulSection(sections, mf: int, mt: int, za, awr, mat, report):
@@ -723,10 +832,13 @@ def encodeMF33MT(source, mt: int, mat: Optional[int] = None,
     if _faithful(sections):
         return _faithfulSection(sections, 33, mt, za, awr, resolvedMat, report), report
 
-    built = None
+    built, external = None, []
     for section in sections:
         form = section.form
         colMT = _endfMT(section.columnData) if section.columnData is not None else mt
+        if section.columnData is not None and section.columnData.otherEvaluation is not None:
+            external.append(_crossMaterialSubsection(section, mt, report))
+            continue
         if not form.isRelative:
             report.approximated(
                 f"MF33/MT{mt}-MT{colMT}: the block is absolute and is written as "
@@ -747,8 +859,24 @@ def encodeMF33MT(source, mt: int, mat: Optional[int] = None,
         else:
             built.add_subsection(one.subsections[0])
 
+    if built is None:
+        from kika.endf.classes.mf33.mf33 import MF33MT
+        built = MF33MT(number=mt, _za=float(za), _awr=float(awr), _mat=int(resolvedMat or 0), _mf=33)
+    for sub in external:
+        built.add_subsection(sub)
     built._nl = len(built.subsections)
     return built, report
+
+
+def _crossMaterialSubsection(section, mt: int, report):
+    """The subsection of a block with another material: MAT1 from its file's label, one NI record."""
+    from kika.endf.classes.mf33.mf33 import Subsection
+
+    sub = Subsection(xmf1=0.0, xlfs1=0.0, mat1=_otherMaterial(section.columnData),
+                     mt1=_endfMT(section.columnData))
+    sub.ni_records.append(_niRecord(section.form, mt, report))
+    sub.nc, sub.ni = 0, 1
+    return sub
 
 
 def encodeMF31MT(source, mt: int, mat: Optional[int] = None,
@@ -1221,6 +1349,7 @@ def decodeCovarianceSuite(endf, report: Optional[ConversionReport] = None,
             "covariances"
         )
 
+    crossMaterialExternalFiles(suite, report)
     from .mf33_structure import bindSumLinks
     bindSumLinks(suite, report)
     if reactionSuite is not None:

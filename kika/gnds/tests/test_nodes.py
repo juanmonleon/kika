@@ -203,24 +203,10 @@ def test_the_writer_emits_the_tag_the_key_claims(family):
 # ---------------------------------------------------------------------------
 
 def test_the_known_defects_are_pinned_by_count():
-    """Four on the day the table landed, **zero** since 2026-08-24. One went
-    with the isotropic2d fix, and the two R-matrix flags and the nested PoPs
-    went with the commit after that. Each repair lowered the number and this
-    test is what noticed — the same shape as
-    ``test_the_only_schema_errors_are_the_distributions_phase_7b_will_fill``.
-
-    **The last one left by decision, not by repair, and that is the reason this
-    docstring is longer than the assert.** ``supportsAngularReconstruction`` is
-    still read, still reported and still never written; what changed is that
-    it was ruled won't-fix — no number sits under
-    the attribute — so it moved to ``ONE_SIDED_ATTRIBUTES`` carrying its count
-    and its reason. Zero here therefore means *nothing left that is wrong*, not
-    *nothing left that is one-sided*, and the second assert is what keeps the
-    difference visible. If a later reading disagrees with that ruling, the entry comes
-    back here rather than the count being quietly reinterpreted.
-    """
+    """Zero defects and zero one-sided attributes: ``supportsAngularReconstruction``,
+    the last one-sided attribute, is ENDF's LAD and is read and written."""
     assert len(nodes.KNOWN_DEFECTS) == 0
-    assert len(nodes.ONE_SIDED_ATTRIBUTES) == 1
+    assert len(nodes.ONE_SIDED_ATTRIBUTES) == 0
     for defect in nodes.KNOWN_DEFECTS:
         assert defect.where and defect.caughtBy
 

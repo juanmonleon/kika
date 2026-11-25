@@ -13,6 +13,7 @@ so it is stated here and has a constructor of its own:
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Iterator, List, Optional, Tuple
 
@@ -132,6 +133,18 @@ class DataLink:
             if entry.domainValue is not None and not entry.domainUnit:
                 return int(entry.domainValue)
         return None
+
+    @property
+    def otherEvaluation(self) -> Optional[str]:
+        """The ``externalFile`` label of another evaluation this link points into, else ``None``.
+
+        ``$U238#/reactionSuite/...`` names U-238's file; ``$reactions#`` and a
+        bare ``/reactionSuite`` path are this evaluation's own reactionSuite.
+        """
+        match = re.match(r"\$([^#]+)#", self.href or "")
+        if match is None or match.group(1) == "reactions":
+            return None
+        return match.group(1)
 
     # -- ENDF_MFMT, which is written two ways in this codebase ------------
 

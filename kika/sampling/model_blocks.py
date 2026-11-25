@@ -29,7 +29,7 @@ from typing import Any, Dict, Hashable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from kika._covariance_forms import require_single_matrix
+from kika._covariance_forms import local_sections, require_single_matrix
 
 __all__ = ["covariance_suite_blocks", "parameter_covariance_blocks",
            "mf35_band_domains",
@@ -407,7 +407,7 @@ def _mf34_entries(suite, mt=None, orders=None, relative=None):
     ls = _selection(orders)
 
     entries = []
-    for section in getattr(suite, "covarianceSections", suite):
+    for section in local_sections(suite):
         rowData, colData = section.rowData, section.columnData
         if not _is_endf_mf(rowData, 34):
             continue
@@ -471,7 +471,7 @@ def mf34_frames(suite) -> Dict[Tuple[int, int], str]:
     from kika._legendre_frames import normaliseFrame
 
     seen: Dict[Tuple[int, int], set] = {}
-    for section in getattr(suite, "covarianceSections", suite):
+    for section in local_sections(suite):
         rowData, colData = section.rowData, section.columnData
         if not _is_endf_mf(rowData, 34):
             continue
@@ -530,7 +530,7 @@ def _mf35_sections(suite, mt=None, bands=None):
     wanted_bands = _selection(bands)
 
     counters: Dict[Tuple[int, int], int] = {}
-    for section in getattr(suite, "covarianceSections", suite):
+    for section in local_sections(suite):
         rowData = section.rowData
         if not _is_endf_mf(rowData, 35):
             continue
@@ -785,7 +785,7 @@ def _cross_section_entries(suite, mf: int = 33, mt=None, relative=None):
     mts = _selection(mt)
 
     entries = []
-    for section in getattr(suite, "covarianceSections", suite):
+    for section in local_sections(suite):
         rowData, colData = section.rowData, section.columnData
         if not _is_endf_mf(rowData, mf):
             continue

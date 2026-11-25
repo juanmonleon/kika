@@ -675,10 +675,13 @@ def _dense(matrices, grid):
 
 
 def _sectionKey(section):
+    """(MAT1, MF, MT, slices) of row and column: kika labels reactions MT<n>, FUDGE by process."""
+    from kika.endf.model_adapter.covariances import _otherMaterial
+
     def end(link):
         sl = getattr(link, "slices", None)
         L = tuple(x.domainValue for x in sl.slices) if sl is not None and sl.slices else ()
-        return (link.ENDF_MF, link.ENDF_MT, L)
+        return (_otherMaterial(link), link.ENDF_MF, link.ENDF_MT, L)
 
     row = end(section.rowData)
     return row, end(section.columnData) if section.columnData is not None else row

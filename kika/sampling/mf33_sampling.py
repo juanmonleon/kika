@@ -25,6 +25,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from kika._constants import MT_GROUPS
+from kika._covariance_forms import local_sections
 from kika.endf import read_endf
 from kika.endf.parsers.parse_endf import parse_endf_file
 from kika.endf.classes.mf import MF
@@ -274,7 +275,7 @@ def relativiseAbsoluteSections(suite, binCentral, unionGrid, *, mf: int = 33,
 
     union = np.asarray(unionGrid, dtype=float)
     kept = []
-    for section in getattr(suite, "covarianceSections", suite):
+    for section in local_sections(suite):
         rowData = section.rowData
         if not _is_endf_mf(rowData, mf):
             kept.append(section)
@@ -372,7 +373,7 @@ def relativiseOnAssemblyGrids(suite, central, gridOf, *, mfs=(31, 33), mts=None)
     from kika.sampling.model_blocks import _endf_mt, _is_endf_mf, _stated_matrix, _za_of
 
     out, converted, unresolved, inertBins = [], [], [], {}
-    for section in getattr(suite, "covarianceSections", suite):
+    for section in local_sections(suite):
         mf = next((m for m in mfs if _is_endf_mf(section.rowData, m)), None)
         if mf is None:
             out.append(section)
@@ -544,7 +545,7 @@ def _absoluteSections(suite, mf: int):
     from kika.sampling.model_blocks import _endf_mt, _is_endf_mf, _stated_matrix
 
     found = []
-    for section in getattr(suite, "covarianceSections", suite):
+    for section in local_sections(suite):
         if not _is_endf_mf(section.rowData, mf):
             continue
         try:

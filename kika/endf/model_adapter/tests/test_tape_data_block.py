@@ -86,3 +86,25 @@ def test_the_sections_the_reader_kept_for_the_tape_come_back(tape, sections, tmp
     assert not [m for m in report.losses if m.startswith(PREFIX)]
     for mf, mt in sections:
         assert _sections(endf, mf).get(mt) == _sections(DATA / tape, mf)[mt], (mf, mt)
+
+
+@pytest.mark.tape
+@pytest.mark.parametrize("name", ["cl37_b81_tape", "co59_b81_tape", "dy162_b81_tape", "u233_b81_tape"])
+def test_mf2_values_gnds_cannot_hold_come_back(name, request, tmp_path):
+    """Cl-37's LFW, Co-59's unsigned AJ, Dy-162's HEAD AWR and AWRI per l, U-233's rows of one energy."""
+    tape = request.getfixturevalue(name)
+    report, back, endf = _roundTrip(tape, tmp_path)
+    assert not [m for m in report.losses if m.startswith(PREFIX) and "MF2/" in m]
+    assert _sections(endf, 2)[151] == _sections(tape, 2)[151]
+
+
+@pytest.mark.tape
+def test_a_per_l_awri_the_block_holds_is_not_declared_lost(dy162_b81_tape, tmp_path):
+    from kika.gnds.encode import writeReactionSuite
+    from kika.nuclear_data.model.endf_conversion import EndfTapeData
+
+    suite = kika.read(str(dy162_b81_tape), covariances=False)
+    awri = "per-group atomicWeightRatio"
+    assert not [m for m in kika.write(suite, tmp_path / "out.xml", format="gnds").losses if awri in m]
+    _, bare = writeReactionSuite(suite, tapeData=EndfTapeData())
+    assert [m for m in bare.losses if awri in m]
