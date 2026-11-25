@@ -44,7 +44,16 @@ class ReadEvent:
     Attributes
     ----------
     kind : str
-        One of :data:`READ_EVENT_KINDS`.
+        One of :data:`READ_EVENT_KINDS`: ``declared`` (a header as written),
+        ``unit_assumed`` (the file does not say relative or absolute; the flag
+        set), ``reaction_not_stated``, ``dropped_block`` (``reason``: ``zero``,
+        ``unknown_mt`` or ``unfinished``), ``dropped_values``,
+        ``count_mismatch``, ``count_defaulted`` (a blank or zero count or
+        boundary the reader supplied), ``record_longer``,
+        ``index_out_of_range``, ``row_order``, ``repeated_block`` (a pair of
+        reactions given twice, in either orientation), ``skipped_line`` (a
+        matrix header whose matrix could not be read), and ``raw_stddev`` and
+        ``raw_correlation`` (values as written, before the reader uses them).
     message : str
         One sentence, with the numbers.
     where : dict
@@ -52,8 +61,8 @@ class ReadEvent:
         ``mat1``, ``mt1``, ``l``, ``l1``, ``row`` (1-based group), ``record``
         (0-based matrix in file order).
     evidence : dict
-        The values behind the message. ``declared`` holds the header fields;
-        ``raw_stddev`` and ``raw_correlation`` hold BOXER arrays as written.
+        The values behind the message, such as the header fields of
+        ``declared`` or the arrays of ``raw_stddev`` and ``raw_correlation``.
     """
 
     kind: str
@@ -62,21 +71,6 @@ class ReadEvent:
     evidence: Dict[str, Any] = field(default_factory=dict)
 
 
-#: What a :class:`ReadEvent` can say.
-#:
-#: * ``declared`` -- the header of the file or of a section, as written.
-#: * ``unit_assumed`` -- the file does not say relative or absolute; the flag the reader set.
-#: * ``reaction_not_stated`` -- the reaction of a block is not written in the file.
-#: * ``dropped_block`` -- a matrix the reader left out (``reason``: ``zero``, ``unknown_mt``, ``unfinished``).
-#: * ``dropped_values`` -- values read and not kept (cross sections, standard deviations, matrix pieces).
-#: * ``count_mismatch`` -- a declared count differs from what the file holds.
-#: * ``count_defaulted`` -- a count left blank or zero and replaced by the reader.
-#: * ``record_longer`` -- a binary record with more bytes than its counts need.
-#: * ``index_out_of_range`` -- a row, column or band that falls outside the matrix.
-#: * ``row_order`` -- rows of a block written out of order or twice.
-#: * ``repeated_block`` -- the same pair of reactions given twice, in either orientation.
-#: * ``skipped_line`` -- a line that looked like a matrix header and could not be read.
-#: * ``raw_stddev``, ``raw_correlation`` -- BOXER vectors and correlation matrices as written.
 READ_EVENT_KINDS = (
     "declared", "unit_assumed", "reaction_not_stated", "dropped_block", "dropped_values",
     "count_mismatch", "count_defaulted", "record_longer", "index_out_of_range", "row_order",
@@ -516,12 +510,7 @@ def _is_coverx_text_header(line: str) -> bool:
 
 
 def _complete_upper_bounds(upper_ev: List[float], file_path, diagnostics: Optional[list]) -> List[float]:
-    """The group boundaries of a grid written as its NGROUP upper bounds only.
-
-    SCALE's text COVERX libraries write the upper bound of each group and no
-    lower bound of the last one. That bound is taken from the kika group
-    structure whose upper bounds are these, to 1e-6; with none, the grid is refused.
-    """
+    """SCALE's text grid (upper bounds only), with the lowest boundary of the kika structure it matches."""
     from kika import energy_grids
 
     upper = np.sort(np.asarray(upper_ev, dtype=float))
@@ -544,8 +533,7 @@ def _complete_upper_bounds(upper_ev: List[float], file_path, diagnostics: Option
         f"no group structure in kika.energy_grids has these upper bounds: {file_path}")
 
 
-#: NTYPE of COVERX (ORNL/TM-7181, appendix A): 1 covariance and standard deviation,
-#: 2 relative covariance and relative standard deviation, 3 correlation and standard deviation.
+#: NTYPE (ORNL/TM-7181, appendix A): 1 covariance, 2 relative covariance, 3 correlation.
 _COVERX_NTYPE_RELATIVE = {1: False, 2: True, 3: False}
 
 
@@ -2072,10 +2060,7 @@ def _parse_covfil_mf34(
     """
     Parse all MF34 covariance sections until FEND.
 
-    A section under MT251 is ERRORR's: its HEAD carries (ZA, AWR, 0, irelco, L, L1),
-    so its pairs are read up to the SEND and ``irelco`` says whether they are
-    relative. Any other section carries NMT1 in C4, as ENDF-6 and
-    :func:`write_covfil` write it, and its blocks are relative.
+    ERRORR writes MT251 with irelco, not NMT1, in C4 (errorr.f90, covout).
 
     Returns
     -------

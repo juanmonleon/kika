@@ -83,3 +83,40 @@ def test_blocks_that_do_not_add_up_to_the_groups_are_refused(tmp_path):
     path = _coverx(tmp_path / "bad.cx", ntype=2, matrix=MATRIX, lgrp=(2, 2))
     with pytest.raises(InvalidDataFormatError, match="blocks hold 4 groups"):
         _read(path)
+
+
+STRUCTURE = {"count_mismatch", "count_defaulted", "record_longer", "index_out_of_range",
+             "row_order", "repeated_block", "skipped_line"}
+
+
+def test_a_file_built_by_the_format_has_no_structure_event(tmp_path):
+    events = []
+    read_coverx(_coverx(tmp_path / "clean.cx", ntype=2, matrix=MATRIX, lgrp=(2, 1)),
+                diagnostics=events)
+    assert not STRUCTURE & {e.kind for e in events}
+
+
+def test_a_data_record_longer_than_its_band_is_said(tmp_path):
+    path = _coverx(tmp_path / "long.cx", ntype=2, matrix=MATRIX)
+    raw = path.read_bytes()
+    n = MATRIX.size * 4
+    head = raw[:-(n + 8)]
+    path.write_bytes(head + _record(raw[-(n + 4):-4] + struct.pack(E + "f", 0.0)))
+    events = []
+    read_coverx(path, diagnostics=events)
+    (event,) = [e for e in events if e.kind == "record_longer"]
+    assert (event.evidence["record_bytes"], event.evidence["needed_bytes"]) == (n + 4, n)
+
+
+def test_a_band_that_leaves_the_matrix_is_said_before_the_reader_fails(tmp_path):
+    path = _coverx(tmp_path / "band.cx", ntype=2, matrix=MATRIX)
+    raw = bytearray(path.read_bytes())
+    ijj_row1 = struct.pack(E + "2i", 3, 1)
+    at = raw.index(ijj_row1)
+    raw[at:at + 8] = struct.pack(E + "2i", 3, 2)  # row 1 now starts one column left of the matrix
+    path.write_bytes(bytes(raw))
+    events = []
+    with pytest.raises(ValueError):
+        read_coverx(path, diagnostics=events)
+    (event,) = [e for e in events if e.kind == "index_out_of_range"]
+    assert event.evidence["rows"] == [1]

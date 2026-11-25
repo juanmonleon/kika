@@ -9,7 +9,7 @@ from pathlib import Path
 
 import numpy as np
 
-from kika.cov import read_covfil, write_covfil
+from kika.cov import LegendreCovariance, read_covfil, write_covfil
 
 NJOY = Path(__file__).parent / "data" / "njoy2016"
 MF33 = NJOY / "test04_errorr_mf33.gendf"
@@ -37,10 +37,16 @@ def test_errorr_mf34_reads_its_pair_and_takes_the_unit_from_irelco(tmp_path):
     np.testing.assert_array_equal(cov0.matrices[0], cov.matrices[0])
 
 
-def test_an_mf34_file_kika_writes_still_reads_nmt1_from_the_head(tmp_path):
-    cov = read_covfil(MF34)
-    path = tmp_path / "rewritten.gendf"
+def test_an_mf34_section_of_another_reaction_still_reads_nmt1_from_the_head(tmp_path):
+    grid = [1.0e-5, 1.0e3, 1.0e6, 2.0e7]
+    cov = LegendreCovariance()
+    cov.metadata.update(awr=55.45443, temperature=293.6)
+    for l1, matrix in ((1, np.diag([0.01, 0.02, 0.03])), (2, np.full((3, 3), 0.001))):
+        cov.add_matrix(isotope_row=26056, reaction_row=2, l_row=1, isotope_col=26056,
+                       reaction_col=2, l_col=l1, matrix=matrix, energy_grid=grid,
+                       is_relative=True, frame="unknown")
+    path = tmp_path / "mt2.gendf"
     write_covfil(cov, path)
     again = read_covfil(path)
-    assert again.num_matrices == cov.num_matrices
-    np.testing.assert_array_equal(again.matrices[0], cov.matrices[0])
+    assert (again.reaction_rows, again.l_cols, again.is_relative) == ([2, 2], [1, 2], [True, True])
+    np.testing.assert_array_equal(again.matrices[1], cov.matrices[1])

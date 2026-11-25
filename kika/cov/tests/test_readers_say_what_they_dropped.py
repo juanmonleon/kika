@@ -166,3 +166,31 @@ def test_boxer_gives_the_standard_deviations_and_says_a_matrix_cut_short(tmp_pat
     assert {(e.where["mt"], e.evidence["order"]) for e in events if e.kind == "raw_stddev"} == {
         (2, "file"), (102, "file")}
     assert [e.evidence["reason"] for e in events if e.kind == "dropped_block"] == ["unfinished"]
+
+
+STRUCTURE = {"count_mismatch", "count_defaulted", "record_longer", "index_out_of_range",
+             "row_order", "repeated_block", "skipped_line"}
+
+
+@pytest.mark.parametrize("path", [MF33, MF34], ids=["errorr-mf33", "errorr-mf34"])
+def test_a_file_as_errorr_wrote_it_has_no_structure_event(path):
+    events = []
+    read_covfil(path, diagnostics=events)
+    assert not STRUCTURE & set(_kinds(events))
+
+
+def test_nmt1_larger_than_the_pairs_is_a_count_mismatch(tmp_path):
+    path = _edited(MF33, tmp_path / "nmt1.gendf", 50, "          1139533102", "          2139533102")
+    events = []
+    read_covfil(path, diagnostics=events)
+    (event,) = [e for e in events if e.kind == "count_mismatch"]
+    assert (event.where["mt"], event.evidence["declared"]) == (102, 2)
+
+
+def test_two_counts_of_one_row_that_disagree_are_a_count_mismatch(tmp_path):
+    path = _edited(MF33, tmp_path / "nw.gendf", 52, "          9          1          9",
+                   "          9          1          8")
+    events = []
+    read_covfil(path, diagnostics=events)
+    (event,) = [e for e in events if e.kind == "count_mismatch"]
+    assert (event.where["row"], event.evidence) == (1, {"declared": 9, "found": 8})

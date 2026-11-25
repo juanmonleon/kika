@@ -62,3 +62,15 @@ def test_the_scale_text_libraries_are_read_whole(name, groups, matrices):
     cov = read_coverx(path, diagnostics=events)
     assert (cov.num_groups, cov.num_matrices, len(cov.energy_grid)) == (groups, matrices, groups + 1)
     assert not [e for e in events if e.kind in ("dropped_block", "skipped_line")]
+
+
+def test_a_header_whose_matrix_is_cut_short_is_a_skipped_line(tmp_path):
+    path = _scale_text(tmp_path / "cut.txt", UPPER_EV, np.eye(44))
+    lines = path.read_text().split("\n")
+    lines.append(f"{8016:12d}{102:12d}{8016:12d}{102:12d}{1:12d}")
+    lines.append("".join(f"{0.01:15.7E}" for _ in range(5)))
+    path.write_text("\n".join(lines) + "\n")
+    events = []
+    cov = read_coverx(path, diagnostics=events)
+    (event,) = [e for e in events if e.kind == "skipped_line"]
+    assert event.where["mt"] == 102 and cov.reactions == [2]
