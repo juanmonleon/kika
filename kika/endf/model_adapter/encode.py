@@ -117,6 +117,17 @@ def backgroundTable(form, name: str, report=None, joins=None):
     return Regions1d.fromEndfRegions(energies, values, merged, axes=pieces[0].axes)
 
 
+def tapeBackground(form, regions):
+    """*form* with its background as the one table the tape states: the point the GNDS
+    writer added at the upper edge of each of *regions* taken out."""
+    from kika.nuclear_data.model import Background, ResonancesWithBackground
+
+    joins = {region: "mergeWithNextRegion,deletePoint" for region in regions}
+    return ResonancesWithBackground(
+        background=Background(fastRegion=backgroundTable(form, form.label, None, joins)),
+        resonanceRegionHref=form.resonanceRegionHref, label=form.label)
+
+
 def _joined(left, right, deletePoint: bool):
     """Two background pieces as one table, the shared point once or (deletePoint) not at all."""
     from kika.nuclear_data.model import XYs1d

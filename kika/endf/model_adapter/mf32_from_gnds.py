@@ -470,15 +470,16 @@ def encodeMF32FromGnds(suite, mat: Optional[int], report: ConversionReport):
     covariances = list(suite.covarianceSuite.parameterCovariances)
     resolvedOnes = [c for c in covariances if isinstance(c, ParameterCovariance)]
     averages = [c for c in covariances if isinstance(c, AverageParameterCovariance)]
-    if not covariances or len(resolvedOnes) > 1             or len(resolvedOnes) + len(averages) != len(covariances):
+    tape = EndfTapeData.of(suite)
+    stated = tape.mf32 if tape is not None else {}
+    kept = stated.get("unresolved", {}).get("body") if not averages else None
+    if (not covariances and not kept) or len(resolvedOnes) > 1             or len(resolvedOnes) + len(averages) != len(covariances):
         report.lost(f"MF32: {len(covariances)} parameter covariances, {len(resolvedOnes)} of "
                     f"them resolved; kika writes one resolved range's and the unresolved "
                     f"range's; MF32 is not written")
         return None, report
     resonances = suite.resonances
     conversions = EndfConversionFlags.of(suite)
-    tape = EndfTapeData.of(suite)
-    stated = tape.mf32 if tape is not None else {}
     try:
         target = suite.PoPs.get(suite.target)
         neutron = _fileNeutronMass(DerivationContext(suite=suite))
@@ -497,9 +498,14 @@ def encodeMF32FromGnds(suite, mat: Optional[int], report: ConversionReport):
                         stated.get("unresolved", {}))
             if lfw is None:
                 lfw = _urrFission(resonances.unresolved.tabulatedWidths)
+        for record in kept or ():
+            records.head(*record[:6])
+            records.dataList(record[6])
+        if kept and lfw is None:
+            lfw = _urrFission(resonances.unresolved.tabulatedWidths)
         header = _Records()
         header.head(za, awr, 0, 0, 1, 0)
-        header.head(za, 1.0, 0, lfw, int(bool(resolvedOnes)) + int(bool(averages)), 0)
+        header.head(za, 1.0, 0, lfw, int(bool(resolvedOnes)) + int(bool(averages or kept)), 0)
     except (ValueError, KeyError, IndexError, AttributeError) as why:
         report.lost(f"MF32 from the GNDS parameter covariance is not written: {why}")
         return None, report

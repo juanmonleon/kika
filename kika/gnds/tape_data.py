@@ -82,7 +82,9 @@ def read(block: ET.Element) -> EndfTapeData:
 
 
 def applyToModel(suite, data: EndfTapeData, report) -> None:
-    """Restore the entries that belong to the model: the LRF=7 particle pairs."""
+    """Restore the entries that belong to the model: the LRF=7 particle pairs and the
+    points an MF3 table states several times over."""
+    _restoreRepeats(suite, data.background.get("repeats") or {}, report)
     from kika.nuclear_data.model.resonances.r_matrix import ChannelKinematics, ChannelParticle
 
     regions = getattr(suite.resonances, "resolved", None) or ()
@@ -100,3 +102,28 @@ def applyToModel(suite, data: EndfTapeData, report) -> None:
             particleB=ChannelParticle(**value["particleB"]),
             penetrability=value["penetrability"], shift=value["shift"],
             effective=value["effective"])
+
+
+def _restoreRepeats(suite, repeats, report) -> None:
+    from kika.endf.model_adapter.derive import provenanceNodes
+    from kika.endf.model_adapter.tape_block import _pieces
+    from kika.nuclear_data.model import EVAL_LABEL
+
+    if not repeats:
+        return
+    nodes = dict(provenanceNodes(suite))
+    for path, runs in repeats.items():
+        form = getattr(getattr(nodes.get(path), "crossSection", None), "get", lambda _: None)(EVAL_LABEL)
+        pieces = _pieces(form) if form is not None else []
+        for x, y, times in runs:
+            hits = [(piece, np.flatnonzero((piece.xs == x) & (piece.ys == y))) for piece in pieces]
+            present = sum(found.size for _, found in hits)
+            first = next(((piece, found[0]) for piece, found in hits if found.size), None)
+            if first is None:
+                report.lost(f"kika's {TAG} states ({x}, {y}) {times} times in {path}, "
+                            f"whose table has no such point; it is not restored")
+                continue
+            piece, at = first
+            if present < times:
+                piece.xs = np.insert(piece.xs, at, [x] * (times - present))
+                piece.ys = np.insert(piece.ys, at, [y] * (times - present))

@@ -382,6 +382,12 @@ def _urrLayout(widths):
     return layout
 
 
+def unresolvedRowsNotInMF2(rows, widths) -> List[Tuple[int, float]]:
+    """The ``(L, J)`` of MF32's unresolved rows that MF2's unresolved range has no spin group for."""
+    layout = _urrLayout(widths)
+    return [(int(L), float(J)) for L, J in rows if (int(L), float(J)) not in layout]
+
+
 def _unresolved(lines, suite):
     """The LRU=2 body as FUDGE writes it: one averageParameterCovariance per varied
     average (relative, 1x1 over the region), a cross term per non-zero off-diagonal
@@ -411,11 +417,11 @@ def _unresolved(lines, suite):
         size -= 1
     if not np.any(matrix):
         return [], []
+    if unresolvedRowsNotInMF2([(L, AJ) for L, AJ, _ in rows], widths):
+        return None
     sections = []
     for L, AJ, average in rows:
         found = layout.get((L, float(AJ)))
-        if found is None:
-            raise ValueError(f"MF32's URR L={L} J={AJ} is not in MF2")
         lpos, jpos, group = found
         if mpar > len(group.channels) + 1:
             raise ValueError(f"MF32 MPAR={mpar} for {len(group.channels)} widths")
@@ -510,9 +516,14 @@ def fudgeParameterCovariances(suite, tables, report) -> Tuple[Optional[list], Li
             if nro:
                 raise ValueError("MF32 with NRO=1 is not converted")
             if lru == 2:
-                average, averageFlags = _unresolved(lines, suite)
-                converted += average
-                flags += averageFlags
+                unresolved = _unresolved(lines, suite)
+                if unresolved is None:
+                    report.lost("MF32's unresolved covariance states spin groups MF2's unresolved "
+                                "range does not have, which GNDS cannot link: it is not in the "
+                                "covariance file, and kika's endfTapeData keeps it for ENDF")
+                    continue
+                converted += unresolved[0]
+                flags += unresolved[1]
                 continue
             resolved += 1
             if resolved > 1 or tables is None:

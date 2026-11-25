@@ -58,7 +58,56 @@ def collect(suite) -> Optional[EndfTapeData]:
         kept.update({key: fields[key] for key in KEYS[kind] if key in fields})
     data.mf32 = _mf32(suite)
     data.kinematics = _kinematics(suite)
+    data.background = _background(suite)
     return data or None
+
+
+def _pieces(form) -> list:
+    """The XYs1d tables of a cross-section form, background regions included."""
+    from kika.nuclear_data.model import Regions1d, ResonancesWithBackground, XYs1d
+
+    if isinstance(form, ResonancesWithBackground):
+        background = form.background
+        return [piece for region in ("resolvedRegion", "unresolvedRegion", "fastRegion")
+                for piece in _pieces(getattr(background, region, None))]
+    if isinstance(form, Regions1d):
+        return [piece for child in form.function1ds for piece in _pieces(child)]
+    return [form] if isinstance(form, XYs1d) else []
+
+
+def _background(suite) -> Dict[str, object]:
+    """MF3 points GNDS's tables do not keep, by reaction path.
+
+    ``repeats``: a point a table states several times over, ``[x, y, times]``, which a
+    GNDS table holds once. ``absent``: the background regions whose upper edge the
+    GNDS writer adds a point at, where the tape has none."""
+    import numpy as np
+    from kika.gnds import resonance_background
+    from kika.nuclear_data.model import EVAL_LABEL
+
+    repeats, absent = {}, {}
+    how = resonance_background.plan(suite)
+    for path, node in provenanceNodes(suite):
+        form = getattr(getattr(node, "crossSection", None), "get", lambda _: None)(EVAL_LABEL)
+        if form is None:
+            continue
+        runs = []
+        for piece in _pieces(form):
+            xs, ys = np.asarray(piece.xs, float), np.asarray(piece.ys, float)
+            same = np.flatnonzero((xs[1:] == xs[:-1]) & (ys[1:] == ys[:-1]))
+            for start in same[np.r_[True, np.diff(same) > 1]] if same.size else ():
+                times = 1
+                while start + times < xs.size and xs[start + times] == xs[start]                         and ys[start + times] == ys[start]:
+                    times += 1
+                runs.append([float(xs[start]), float(ys[start]), times])
+        if runs:
+            repeats[path] = runs
+        wrapped = resonance_background.wrap(how, getattr(node, "ENDF_MT", None), form, EVAL_LABEL)             if how is not None else None
+        regions = [name for name, flag in (wrapped[1] if wrapped else {}).items()
+                   if resonance_background.DELETE in flag]
+        if regions:
+            absent[path] = regions
+    return {key: value for key, value in (("repeats", repeats), ("absent", absent)) if value}
 
 
 def _kinematics(suite) -> Dict[str, object]:
@@ -109,7 +158,28 @@ def _mf32(suite) -> Dict[str, object]:
             entry["pairsL2"] = int(body.particle_pairs.l2)
         if isinstance(body, UnresolvedBody):
             entry["awri"] = {int(block.l1): float(block.c1) for block in body.l_blocks}
+            if _unresolvedNotInMF2(suite, body):
+                entry["body"] = [_fields(record) for record in
+                                 (energyRange.control, body.control, *body.l_blocks, body.matrix)]
     return out
+
+
+def _fields(record) -> list:
+    """A record's six fields, then its LIST values."""
+    return [float(record.c1 or 0), float(record.c2 or 0), int(record.l1), int(record.l2),
+            int(record.n1), int(record.n2), [float(v) for v in record.values]]
+
+
+def _unresolvedNotInMF2(suite, body) -> bool:
+    """Whether the GNDS parameter covariance cannot link MF32's unresolved rows (JEFF-4.0 Al-26)."""
+    from kika.gnds.parameter_layout import unresolvedRowsNotInMF2
+
+    widths = getattr(getattr(suite.resonances, "unresolved", None), "tabulatedWidths", None)
+    if widths is None:
+        return True
+    rows = [(block.l1, values[6 * k + 1]) for block in body.l_blocks
+            for values in [block.values] for k in range(block.n2)]
+    return bool(unresolvedRowsNotInMF2(rows, widths))
 
 
 def apply(suite, report) -> None:
