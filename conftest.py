@@ -153,6 +153,12 @@ _TAPES: Dict[str, Sequence[str]] = {
     # MT455 spells the HEAD's ZA ``92233.0000`` and the encoder writes
     # ``9.223300+4``. The delta emitter's byte-identity gate runs on it.
     "u233_b81": ("endfb81/n-092_U_233.endf", "n-092_U_233.endf"),
+    # MF2/151 values GNDS cannot hold: an isotope LFW with no unresolved range
+    # (Cl-37), AJ unsigned where L and J fix the channel spin (Co-59), a HEAD AWR
+    # that is not MF1's and a different AWRI per l (Dy-162).
+    "cl37_b81": ("endfb81/n-017_Cl_037.endf", "n-017_Cl_037.endf"),
+    "co59_b81": ("endfb81/n-027_Co_059.endf", "n-027_Co_059.endf"),
+    "dy162_b81": ("endfb81/n-066_Dy_162.endf", "n-066_Dy_162.endf"),
     # The two PFNS tapes the pre-flight refused (PF-7, PF-8): a correlation
     # above 1 by 1.2e-5, and a band stated as a 1x1 zero.
     "pu240_b71": ("endfb71/neutrons/n-094_Pu_240.endf",),
@@ -688,6 +694,9 @@ si28_b81_tape = _tape_fixture("si28_b81")
 f19_b81_tape = _tape_fixture("f19_b81")
 o16_b81_tape = _tape_fixture("o16_b81")
 ne20_jeff40_tape = _tape_fixture("ne20_jeff40")
+cl37_b81_tape = _tape_fixture("cl37_b81")
+co59_b81_tape = _tape_fixture("co59_b81")
+dy162_b81_tape = _tape_fixture("dy162_b81")
 w186_jeff40_tape = _tape_fixture("w186_jeff40")
 fe57_jeff40_tape = _tape_fixture("fe57_jeff40")
 hf176_jeff40_tape = _tape_fixture("hf176_jeff40")

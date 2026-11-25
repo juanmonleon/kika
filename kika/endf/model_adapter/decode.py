@@ -681,6 +681,10 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
         # written. See `Resonances.provenance`.
         resonances, resonanceProvenance, report = decodeMF2MT151(mf2.mt[151], report)
         resonances.provenance = resonanceProvenance
+        from .resonances import MF2_TAPE_KEY, mf2TapeOnly
+        tapeOnly = mf2TapeOnly(mf2.mt[151], getattr(suite.provenance, "awr", None))
+        if tapeOnly:
+            resonanceProvenance.headerFields[MF2_TAPE_KEY] = tapeOnly
         suite.resonances = resonances
         _targetSpinFromMF2(suite, resonanceProvenance)
         from kika.nuclear_data.model.resonances import RMatrix

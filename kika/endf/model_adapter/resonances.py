@@ -66,6 +66,9 @@ __all__ = ["decodeMF2MT151", "encodeMF2MT151", "LRF_TO_APPROXIMATION",
 
 #: ENDF LRF → the GNDS ``BreitWigner`` approximation (§19.3.6). LRF=3 and LRF=7
 #: are not Breit-Wigner at all and become an ``RMatrix``.
+#: Where the resonance provenance keeps the MF2/151 values a GNDS range cannot hold.
+MF2_TAPE_KEY = "mf2Tape"
+
 LRF_TO_APPROXIMATION = {
     1: BreitWignerApproximation.singleLevel,
     2: BreitWignerApproximation.multiLevel,
@@ -150,6 +153,66 @@ def decodeMF2MT151(mf2mt151, report: Optional[ConversionReport] = None, *, compe
         },
     )
     return resonances, provenance, report
+
+
+def mf2TapeOnly(mf2mt151, awr) -> dict:
+    """The MF2/151 values GNDS has no place for, where the tape states them; ``{}`` if none.
+
+    ``awr``: the HEAD's AWR when it is not MF1's *awr*. ``lfw``: an isotope's LFW
+    when no LRU=2 range carries it. Per LRF=3 range, by its index among the
+    resolved ranges: ``ajUnsigned`` when AJ is not signed where L and J fix the
+    channel spin; ``awri`` by L when the l-blocks state different AWRIs; ``ties``
+    by L, ``[E, [AJ, ...]]``, where rows of one energy are not in AJ order.
+    """
+    out, lfw, ranges = {}, {}, {}
+    head = getattr(mf2mt151, "atomic_weight_ratio", None)
+    if head is not None and awr is not None and float(head) != float(awr):
+        out["awr"] = float(head)
+    resolved = 0
+    for index, isotope in enumerate(getattr(mf2mt151, "isotopes", None) or []):
+        if int(isotope.lfw or 0) and not any(r.lru == 2 for r in isotope.energy_ranges):
+            lfw[index] = int(isotope.lfw)
+        for energyRange in isotope.energy_ranges:
+            if energyRange.lru != 1:
+                continue
+            resolved += 1
+            if energyRange.lrf != 3:
+                continue
+            entry = _reichMooreTapeOnly(energyRange.parameters)
+            if entry:
+                ranges[resolved - 1] = entry
+    if lfw:
+        out["lfw"] = lfw
+    if ranges:
+        out["ranges"] = ranges
+    return out
+
+
+def _reichMooreTapeOnly(parameters) -> dict:
+    spin = float(parameters.spi or 0)
+    low, high = abs(spin - 0.5), spin + 0.5
+    entry, ties = {}, {}
+    blocks = parameters.l_values
+    if len({float(b.awri) for b in blocks}) > 1:
+        entry["awri"] = {int(b.l): float(b.awri) for b in blocks}
+    for block in blocks:
+        l = int(block.l)
+        rows = [(float(r.energy), float(r.spin)) for r in block.resonances]
+        if spin and any(aj > 0 and _entranceSpinAllowed(l, low, aj)
+                        and not _entranceSpinAllowed(l, high, aj) for _, aj in rows):
+            entry["ajUnsigned"] = True
+        start = 0
+        while start < len(rows):
+            end = start
+            while end + 1 < len(rows) and rows[end + 1][0] == rows[start][0]:
+                end += 1
+            order = [aj for _, aj in rows[start:end + 1]]
+            if order != sorted(order):
+                ties.setdefault(l, []).append([rows[start][0], order])
+            start = end + 1
+    if ties:
+        entry["ties"] = ties
+    return entry
 
 
 def _rangeFields(energyRange, isotope, isotopeIndex: int) -> dict:
@@ -958,7 +1021,10 @@ def encodeMF2MT151(resonances: Resonances, provenance, report=None):
                 )
             if (isinstance(region.formalism, RMatrix) and fields["lrf"] == 3
                     and not any(group.spins for group in region.formalism.spinGroups)):
-                parameters = _encodeReichMooreSpinGroups(resonances, region, fields)
+                ordinal = resonances.resolved.index(region)
+                parameters = _encodeReichMooreSpinGroups(
+                    resonances, region, fields,
+                    ((header.get(MF2_TAPE_KEY) or {}).get("ranges") or {}).get(ordinal))
             else:
                 parameters = _encodeResolved(region.formalism, fields, report)
             if isinstance(region.formalism, BreitWigner) or fields["lrf"] == 3:
@@ -995,13 +1061,15 @@ def encodeMF2MT151(resonances: Resonances, provenance, report=None):
             nro=fields["nro"], naps=fields["naps"], parameters=parameters, ap_e=apE,
         ))
 
+    tape = header.get(MF2_TAPE_KEY) or {}
     section = MF2MT151(number=151)
     section._za = provenance.za
-    section._awr = provenance.awr
+    section._awr = tape.get("awr", provenance.awr)
     section._mat = provenance.mat
     section._nis = header.get("nis")
     section._isotopes = [
-        Isotope(za=isotope["za"], abn=isotope["abn"], lfw=isotope["lfw"],
+        Isotope(za=isotope["za"], abn=isotope["abn"],
+                lfw=(tape.get("lfw") or {}).get(index, isotope["lfw"]),
                 num_energy_ranges=isotope["ner"],
                 energy_ranges=ranges.get(index, []))
         for index, isotope in enumerate(header.get("isotopes", []))
@@ -1133,7 +1201,8 @@ def _signedJ(l, j, channelSpin, targetSpin) -> float:
 
 
 def reichMooreLBlocks(formalism, rangeRadius: float, targetSpin: float,
-                      atomicWeightRatio: Optional[float], explicitAPL: bool = False) -> List[dict]:
+                      atomicWeightRatio: Optional[float], explicitAPL: bool = False,
+                      tape: Optional[dict] = None) -> List[dict]:
     """A Reich-Moore ``RMatrix`` grouped by (L, J, channel spin), as GNDS holds
     it → LRF=3's l-blocks: ``{"l", "awri", "apl", "rows"}``, one per L in
     ascending order.
@@ -1144,7 +1213,8 @@ def reichMooreLBlocks(formalism, rangeRadius: float, targetSpin: float,
     row is ``(E, AJ, GN, GG, GFA, GFB)``, sorted on ``(E, AJ)`` within its L;
     rows equal in both keep the spin group's table order, where FUDGE's tuple
     sort reorders them by width (U-233 at 3627.428 eV). Raises ``ValueError``
-    naming the first thing LRF=3 cannot state.
+    naming the first thing LRF=3 cannot state. *tape* is the range's entry of
+    :func:`mf2TapeOnly`, which puts back what the tape states and GNDS does not.
     """
     if formalism.approximation != "ReichMoore":
         raise ValueError(f"approximation {formalism.approximation!r} is not ReichMoore")
@@ -1205,6 +1275,10 @@ def reichMooreLBlocks(formalism, rangeRadius: float, targetSpin: float,
             raise ValueError(f"the spin groups of L={l} disagree on the radius or AWRI; "
                              f"LRF=3 states one per l")
         aj = _signedJ(l, float(group.spin), float(entrance.channelSpin), targetSpin)
+        if aj < 0 and (tape or {}).get("ajUnsigned") and not (
+                _entranceSpinAllowed(l, abs(targetSpin - 0.5), -aj)
+                and _entranceSpinAllowed(l, targetSpin + 0.5, -aj)):
+            aj = -aj
         neutron, capture = kinds.index("neutron"), kinds.index("capture")
         fission = [k for k, kind in enumerate(kinds) if kind == "fission"]
         for energy, widths in zip(group.energies, group.widths):
@@ -1212,7 +1286,28 @@ def reichMooreLBlocks(formalism, rangeRadius: float, targetSpin: float,
             block["rows"].append((energy, aj, widths[neutron], widths[capture], *gf))
     for block in byL.values():
         block["rows"].sort(key=lambda row: row[:2])
+        _restoreTapeOrder(block, (tape or {}).get("ties", {}).get(block["l"], ()))
+        block["awri"] = (tape or {}).get("awri", {}).get(block["l"], block["awri"])
     return [byL[l] for l in sorted(byL)]
+
+
+def _restoreTapeOrder(block, ties) -> None:
+    """Rows of one energy in the AJ order the tape states (:func:`mf2TapeOnly`'s ``ties``)."""
+    rows = block["rows"]
+    for energy, order in ties:
+        at = [k for k, row in enumerate(rows) if row[0] == energy]
+        if len(at) != len(order) or at != list(range(at[0], at[0] + len(at))):
+            continue
+        pending = [rows[k] for k in at]
+        placed = []
+        for aj in order:
+            match = next((row for row in pending if row[1] == aj), None)
+            if match is None:
+                break
+            pending.remove(match)
+            placed.append(match)
+        else:
+            rows[at[0]:at[0] + len(at)] = placed
 
 
 _URR_ROLE_BY_MT = {2: "neutron", 102: "capture", 18: "fission"}
@@ -1273,7 +1368,7 @@ def resolvedRangeRadius(resonances, region):
     return None
 
 
-def _encodeReichMooreSpinGroups(resonances, region, fields: dict):
+def _encodeReichMooreSpinGroups(resonances, region, fields: dict, tape=None):
     """LRF=3 from a Reich-Moore range grouped by (L, J, channel spin)."""
     from kika.endf.classes.mf2.mf2mt151 import (LValueBlock, ResolvedResonanceRange,
                                                 Resonance as EndfResonance)
@@ -1285,7 +1380,7 @@ def _encodeReichMooreSpinGroups(resonances, region, fields: dict):
     awri = fields.get("awri")
     blocks = reichMooreLBlocks(formalism, radius, float(fields["spi"]),
                                awri if awri is not None else formalismAtomicWeightRatio(formalism),
-                               explicitAPL=bool(fields.get("explicit_apl")))
+                               explicitAPL=bool(fields.get("explicit_apl")), tape=tape)
     lValues = [
         LValueBlock(awri=block["awri"], l=block["l"], num_resonances=len(block["rows"]),
                     apl_or_qx=0.0 if block["apl"] is None else radiusToEndf(block["apl"]),
