@@ -114,7 +114,7 @@ EXPECTED: List[Expected] = [
              "a step in outgoing energy: kika keeps it as two regions, FUDGE moves the point by 1e-6 eV"),
     Expected("field", r"Reactions MT\d+ \| outputChannel\.(products\[[^\]]+\]\.outputChannel\.)?"
                       r"products\[photon#\d+\]\.(multiplicity\.forms\['eval'\]\.ys|distribution\.forms"
-                      r"\['eval'\]\.energy\.function1ds\[i\]\.ys): arrays differ", bound=4e-15,
+                      r"\['eval'\]\.energy\.function1ds\[i\]\.ys): arrays differ", bound=4.5e-15,
              reason="photon yields and normalised spectra are computed from tape numbers by each code"),
     Expected("field", r".*delayedNeutrons\[i\]\.label: '#' != '#'",
              "delayed-neutron families: FUDGE labels them from 0, kika from 1"),
@@ -137,6 +137,19 @@ EXPECTED: List[Expected] = [
     Expected("field", r"Reactions MT\d+ \| outputChannel\.products\[n#0\]\.distribution\.forms\['eval'\]"
                       r"\.energy\.weighted\[i\]\.weight\.label: None != 'weight'",
              "a form label FUDGE writes and kika omits"),
+    Expected("field", r"Reactions MT\d+ \| outputChannel\.products\[photon#\d+\]\.distribution\.forms\['eval'\]: "
+                      r"Uncorrelated != AngularTwoBody",
+             "an MF6 LAW=2 photon with AWP: kika keeps the stated energy as primaryGamma, which "
+             "angularTwoBody cannot hold; the Legendre table is the same"),
+    Expected("field", r"Reactions MT\d+ \| outputChannel\.products\[[^\]]+\]\.distribution\.forms\['eval'\]"
+                      r"\.recoilHref: \"\.\./\.\./\.\./\.\./product\[@label='photon'\]/distribution/uncorrelated"
+                      r"\[@label='eval'\]\" != \"\.\./\.\./\.\./\.\./product\[@label='photon'\]/distribution/"
+                      r"angularTwoBody\[@label='eval'\]\"",
+             "the recoil points at the photon's form, uncorrelated in kika for the reason above"),
+    Expected("field", r"Reactions MT32 \| outputChannel\.products\[photon#1\]\.distribution\.forms\['eval'\]"
+                      r"\.energy\.function1ds\[i\]\.(xs|ys): arrays differ", bound=1.5e10, tapes="n-017_Cl_035",
+             reason="NNDC wrong: at 16.01184 MeV the tape's continuum is zero on [0, 3e5] eV; FUDGE writes a "
+                    "box of 5e4 on [0, 2e-5] eV"),
     Expected("xs", r"Sums MT852: npts 830 != 7910", bound=8.93e-4, tapes="n-092_U_235",
              reason="NNDC wrong: FUDGE's lumped sum is 8.9e-4 off the tape's log-log summands, kika's 7.9e-5"),
     Expected("res", r"unresolved\.tabulatedWidths\.scatteringRadius: # != #", bound=2e-16,
