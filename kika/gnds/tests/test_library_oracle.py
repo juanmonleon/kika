@@ -59,7 +59,11 @@ pytestmark = [pytest.mark.slow, pytest.mark.tape, pytest.mark.gnds]
 IGNORED_FIELDS = ("report", "provenance", "applicationData", "documentation", "crossSection")
 
 LIBRARY = os.environ.get("KIKA_LIBRARY", "endfb81")
-TAPE_GLOBS = {"endfb81": "n-*.endf", "jeff40": "*_jeff4.0.endf"}
+#: Each library's tape files, in every naming they come in.
+TAPE_GLOBS = {"endfb81": ("n-*.endf",), "jeff40": ("*_jeff4.0.endf", "n_*.jeff")}
+#: (symbol, mass, isomer) in a tape's stem: n-026_Fe_056, Fe56_jeff4.0, n_26-Fe-056g.
+STEM_NUCLIDE = (r"n-\d+_([A-Za-z]+)_(\d+)(m\d*)?", r"([A-Za-z]+)(\d+)(m\d*)?_jeff4\.0",
+                r"n_\d+-([A-Za-z]+)-(\d+)(?:g|(m\d*))?")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -210,17 +214,33 @@ def _nndcDirectory() -> Optional[Path]:
     return Path(tapes).parent / "gnds" / LIBRARY if tapes else None
 
 
-def _stemOf(token):
+def _nuclide(symbol, mass, isomer):
+    # JEFF writes the first isomer as plain m, ENDF/B as m1
+    return symbol.capitalize(), int(mass), "m1" if isomer == "m" else isomer or ""
+
+
+def _nuclideOfStem(stem):
+    for pattern in STEM_NUCLIDE:
+        match = re.fullmatch(pattern, stem)
+        if match:
+            return _nuclide(*match.groups())
+    return None
+
+
+def _wanted(token, stems):
+    """The stems *token* names: a stem itself, or a nuclide (``Fe-56``, ``Am-242m1``)."""
     token = token.strip()
-    if token.startswith("n-") or "_jeff" in token:
-        return token
+    if token in stems:
+        return {token}
     match = re.fullmatch(r"([A-Za-z]+)-?(\d+)(m\d*)?", token)
     if match is None:
         raise ValueError(f"KIKA_LIBRARY_TAPES: {token!r} is neither a tape stem nor a nuclide")
-    symbol, mass, meta = match.groups()
-    if LIBRARY == "jeff40":
-        return f"{symbol.capitalize()}{int(mass)}{'m' if meta else ''}_jeff4.0"
-    return f"_{symbol.capitalize()}_{int(mass):03d}{meta or ''}"
+    nuclide = _nuclide(*match.groups())
+    return {s for s in stems if _nuclideOfStem(s) == nuclide}
+
+
+def _tapeFiles(library):
+    return {p.stem: p for pattern in TAPE_GLOBS[LIBRARY] for p in library.glob(pattern)}
 
 
 def _tapes():
@@ -229,11 +249,11 @@ def _tapes():
     library = _root.resolve_library(LIBRARY)
     if library is None:
         return None, f"the {LIBRARY} tapes (set KIKA_LIB_TAPES)"
-    stems = sorted(p.stem for p in library.glob(TAPE_GLOBS[LIBRARY]))
+    stems = sorted(_tapeFiles(library))
     wanted = os.environ.get("KIKA_LIBRARY_TAPES")
     if wanted:
-        keys = [_stemOf(t) for t in wanted.split(",") if t.strip()]
-        stems = [s for s in stems if any(s == k or s.endswith(k) for k in keys)]
+        chosen = set().union(*(_wanted(t, stems) for t in wanted.split(",") if t.strip()))
+        stems = [s for s in stems if s in chosen]
     return library, stems
 
 
@@ -250,7 +270,7 @@ def pytest_generate_tests(metafunc):
 
 @pytest.fixture(scope="module")
 def endf(tape):
-    return _tapes()[0] / f"{tape}.endf"
+    return _tapeFiles(_tapes()[0])[tape]
 
 
 @pytest.fixture(scope="module")
