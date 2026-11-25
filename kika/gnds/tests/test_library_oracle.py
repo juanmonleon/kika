@@ -169,8 +169,9 @@ EXPECTED: List[Expected] = [
              "FUDGE replaces it by a box"),
     Expected("xs", r"Sums MT852: npts 830 != 7910", bound=8.93e-4, tapes="n-092_U_235",
              reason="NNDC wrong: FUDGE's lumped sum is 8.9e-4 off the tape's log-log summands, kika's 7.9e-5"),
-    Expected("res", r"unresolved\.tabulatedWidths\.scatteringRadius: # != #", bound=2e-16,
-             reason="AP * 10 to fm in binary; FUDGE writes the decimal"),
+    Expected("res", r"unresolved\.tabulatedWidths\.(scatteringRadius|radiusPolicy\.phaseRadius\.values): "
+                    r"NNDC's is kika's double written in decimal",
+             "AP * 10 to fm: kika keeps the double, FUDGE writes it in decimal"),
     Expected("res", r"unresolved\.tabulatedWidths\.PoPs\.particles\['[^']+'\]\.mass\.value: one AWRI "
                     r"times each code's neutron mass",
              "the URR target mass is the tape's AWRI times the neutron mass: kika's is CODATA 2018's "
@@ -179,6 +180,24 @@ EXPECTED: List[Expected] = [
              "kika's URR PoPs carries the target's mass and spin only"),
     Expected("res", r"unresolved\.spinGroups\[i\]\.levelSpacingFunction\.label: 'eval' != None",
              "a form label kika writes and FUDGE omits"),
+    Expected("res", r"unresolved\.tabulatedWidths\.(scatteringRadius: # != None|radiusUnit: 'fm' != None)",
+             tapes="n-079_Au_197",
+             reason="URR NRO=1, NAPS=0: the tape states AP = 0 beside AP(E); kika keeps the constant, "
+                    "which ENDF writes back, FUDGE only AP(E)"),
+    Expected("res", r"unresolved\.tabulatedWidths\.radiusPolicy\.channelMode: 'phase' != 'mass'",
+             tapes="n-075_Re_185",
+             reason="NNDC wrong: the tape's URR is NAPS=1, which GNDS 2.0 cannot state on tabulatedWidths, "
+                    "and FUDGE reads the absent flag as NAPS=0"),
+    Expected("res", r"unresolved\.(tabulatedWidths\.energyGrid|spinGroups\[i\]\.(levelSpacing|"
+                    r"channel\[MT\w+\]\.widths)): shape \(#,\) != \(#,\)", tapes="n-090_Th_229",
+             reason="the tape states 10 eV twice with equal values; kika keeps the node, which ENDF "
+                    "writes back, FUDGE drops it"),
+    Expected("res", r"unresolved\.spinGroups\[i\]\.(levelSpacingFunction|channel\[MT\w+\]\.averageFunction"
+                    r"(\.function1ds\[i\])?)\.(xs|ys): shape \(#,\) != \(#,\)", tapes="n-090_Th_229",
+             reason="the same repeated node in the curves; bound 0: the same function"),
+    Expected("res", r"resolved\[\d+\]: the same resonances, kika with more all-zero widths",
+             "an R-matrix spin group's fission column that is zero throughout: kika keeps the tape's "
+             "column, which LRF=3 writes back; FUDGE drops it (U-238 J=3/2 GFB)"),
     Expected("res", r"unresolved\.tabulatedWidths\.PoPs: PoPs != NoneType",
              "kika writes the URR's own PoPs (target spin and mass); FUDGE reads them from the suite's"),
     Expected("field", r".*products\[[^\]]+\]\.label: '[^']*' != '[^']*'",
@@ -422,6 +441,15 @@ def _resonanceRows(form):
     return sorted(rows)
 
 
+def _nonzero(rows):
+    """R-matrix rows without their zero widths: a channel of zero width adds nothing."""
+    return sorted(row[:2] + tuple(w for w in row[2:] if w != 0) for row in rows)
+
+
+def _zeros(rows):
+    return sum(w == 0 for row in rows for w in row[2:])
+
+
 def resonanceDifferences(mine, theirs):
     a, b = mine.resonances, theirs.resonances
     if a is None and b is None:
@@ -443,6 +471,10 @@ def resonanceDifferences(mine, theirs):
         A, B = _resonanceRows(ra.formalism), _resonanceRows(rb.formalism)
         if not A and not B:
             out.append(Difference("res", f"{name}: no resonance rows on either side"))
+        elif A != B and getattr(ra.formalism, "spinGroups", None) and _nonzero(A) == _nonzero(B):
+            out.append(Difference("res", f"{name}: the same resonances, kika with more all-zero "
+                                         f"widths" if _zeros(A) > _zeros(B) else
+                                         f"{name}: the same resonances, NNDC with more all-zero widths"))
         elif A != B:
             out.append(Difference("res", f"{name}: resonances differ ({len(A)} != {len(B)} rows, "
                                          f"{sum(x != y for x, y in zip(A, B))} rows unequal)"))
@@ -478,6 +510,16 @@ def _sameAwri(mine, theirs, neutrons):
     return any(float(f"{other:.{digits}g}") == theirs for digits in range(9, 18))
 
 
+def _isDecimalOf(mine, theirs):
+    """*theirs* is *mine* rounded to some count of significant digits, value by value."""
+    try:
+        pairs = list(zip(np.atleast_1d(np.asarray(mine, float)), np.atleast_1d(np.asarray(theirs, float))))
+    except (TypeError, ValueError):
+        return False
+    return bool(pairs) and np.size(mine) == np.size(theirs) and all(
+        any(float(f"{x:.{digits}g}") == y for digits in range(7, 17)) for x, y in pairs)
+
+
 def _unresolvedDifferences(ua, ub, labelsA, labelsB, neutrons=(None, None)):
     # resonanceReactions only name the channels' reactions; the channels are paired through them
     ignore = IGNORED_FIELDS + ("spinGroups", "resonanceReactions")
@@ -488,6 +530,10 @@ def _unresolvedDifferences(ua, ub, labelsA, labelsB, neutrons=(None, None)):
                 and _sameAwri(_resolve(ua, path[1:]), _resolve(ub, path[1:]), neutrons)):
             out.append(Difference("res", f"unresolved.{_normalisedPath(path)}: one AWRI times "
                                          f"each code's neutron mass"))
+        elif (re.fullmatch(r"@\.tabulatedWidths\.(scatteringRadius|radiusPolicy\.phaseRadius\.values)", path)
+                and _isDecimalOf(_resolve(ua, path[1:]), _resolve(ub, path[1:]))):
+            out.append(Difference("res", f"unresolved.{_normalisedPath(path)}: NNDC's is kika's "
+                                         f"double written in decimal"))
         else:
             out.append(_sized("res", "unresolved.", d, ua, ub))
     ta, tb = ua.tabulatedWidths, ub.tabulatedWidths
