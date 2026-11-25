@@ -550,6 +550,40 @@ def _limits(table, energies: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     return left_limit(*table, energies), right_limit(*table, energies)
 
 
+def _rederiveBackground(total, moves, keepZeros):
+    """:func:`rederiveSum` on a ``resonancesWithBackground``: region by region of its
+    background, which is the MF3 table the tape route rederives. A partial stated
+    as a plain table enters every region; one with a background, region by region.
+    """
+    from dataclasses import replace
+
+    from kika.nuclear_data.model.cross_section_forms import ResonancesWithBackground
+
+    def term(form, name):
+        if isinstance(form, ResonancesWithBackground):
+            return getattr(form.background, name)
+        return form
+
+    rebuilt, infos = {}, []
+    for name, region in total.background.regions.items():
+        if region is None:
+            continue
+        lo, hi = float(region.domainMin), float(region.domainMax)
+        local = []
+        for before, after, a, b in moves:
+            pb, pa = term(before, name), term(after, name)
+            if pb is not None and pa is not None and max(a, lo) < min(b, hi):
+                local.append((pb, pa, max(a, lo), min(b, hi)))
+        if not local:
+            continue
+        rebuilt[name], info = rederiveSum(region, local, keepZeros=keepZeros)
+        infos.append(info)
+    combined = {"n_inserted": sum(i.get("n_inserted", 0) for i in infos),
+                "max_rel_change": max([i.get("max_rel_change", 0.0) for i in infos] or [0.0]),
+                "n_negative": sum(i.get("n_negative", 0) for i in infos)}
+    return replace(total, background=replace(total.background, **rebuilt)), combined
+
+
 def rederiveSum(total, moves: Sequence[Tuple[object, object, float, float]], *,
                 keepZeros: bool = False):
     """``total`` moved by what its partials moved: ``S' = S + sum (p' - p)``.
@@ -597,9 +631,12 @@ def rederiveSum(total, moves: Sequence[Tuple[object, object, float, float]], *,
     """
     from kika.algebra import LINLIN, interval_laws, pairs_from_laws, to_linlin
     from kika.endf.writers.redundant import _as_written
+    from kika.nuclear_data.model.cross_section_forms import ResonancesWithBackground
     from kika.nuclear_data.model.enums import ENDF_INT_TO_INTERPOLATION
     from kika.nuclear_data.model.functions import Regions1d, XYs1d
 
+    if isinstance(total, ResonancesWithBackground):
+        return _rederiveBackground(total, moves, keepZeros)
     xs, ys, pairs = total.toEndfRegions()
     xs = np.asarray(xs, dtype=float)
     ys = np.asarray(ys, dtype=float)

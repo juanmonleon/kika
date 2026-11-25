@@ -17,7 +17,7 @@ from kika.endf import read_endf
 from kika.sampling.model_perturbation import _resonanceRefusal, perturbFromModel
 
 DATA = Path(__file__).resolve().parents[2] / "endf" / "tests" / "data"
-ANGULAR = {34: {"mt": [2], "index": [1, 2, 3]}}
+BY_FILE = {33: None, 34: {"mt": [2], "index": [1, 2, 3]}}
 
 
 def _viaGnds(name, tmp_path):
@@ -45,7 +45,19 @@ def test_a_range_the_deriver_cannot_write_is_refused_with_its_reason(tmp_path):
 
 def test_a_gnds_source_with_resonances_is_written_as_a_tape(tmp_path):
     gnds = _viaGnds("micro_fe56_xs_and_angular.endf", tmp_path)
-    run = perturbFromModel(str(gnds), ANGULAR, 1, seed=5, outputDir=tmp_path / "out",
+    run = perturbFromModel(str(gnds), BY_FILE, 1, seed=5, outputDir=tmp_path / "out",
                            formats=("endf-tape",))
     tape = run.samples[0]["files"]["endf-tape"]
     assert 2 in read_endf(str(tape), mf_numbers=[2]).mf
+
+
+def test_its_cross_sections_move_as_the_tapes_do(tmp_path):
+    """The background under the resonances is MF3: both routes perturb it alike."""
+    source = str(DATA / "micro_fe56_xs_and_angular.endf")
+    gnds = _viaGnds("micro_fe56_xs_and_angular.endf", tmp_path)
+    runs = [perturbFromModel(path, BY_FILE, 1, seed=5, outputDir=tmp_path / name,
+                             formats=("endf-tape",), resonanceRegion="evaluated")
+            for name, path in (("tape", source), ("gnds", str(gnds)))]
+    tapes = [read_endf(str(run.samples[0]["files"]["endf-tape"]), mf_numbers=[3]) for run in runs]
+    for mt in (1, 2, 102):
+        assert str(tapes[0].mf[3].mt[mt]) == str(tapes[1].mf[3].mt[mt]), mt

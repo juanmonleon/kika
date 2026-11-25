@@ -263,6 +263,10 @@ def applyFactors(function1d: Function1dT, factors: ArrayLike,
         Guessing which of the two is right would put a silently misaligned
         perturbation on a cross section.
     """
+    from .cross_section_forms import ResonancesWithBackground
+
+    if isinstance(function1d, ResonancesWithBackground):
+        return _applyToBackground(function1d, factors, binEdges)
     factors = np.asarray(factors, dtype=float)
     binEdges = np.asarray(binEdges, dtype=float)
     if binEdges.ndim != 1 or binEdges.size < 2:
@@ -312,6 +316,45 @@ def applyFactors(function1d: Function1dT, factors: ArrayLike,
         "n_inserted": int(sum(r.xs.size for r in regions)) - int(before),
     }
     return _rebuild(refined, scaled), diagnostics
+
+
+def _applyToBackground(form, factors, binEdges):
+    """A ``resonancesWithBackground`` with its background perturbed, the form kept.
+
+    The background is what a tape's MF3 states under the resonances, and the
+    tape route perturbs that table; each region is perturbed the same way here.
+    Where a region ends in a jump to the next one, its last point is the first
+    copy of the tape's repeated abscissa and takes that copy's factor.
+    """
+    from dataclasses import replace
+
+    background = form.background
+    terms = [(name, term) for name, term in background.regions.items() if term is not None]
+    factors = np.asarray(factors, dtype=float)
+    binEdges = np.asarray(binEdges, dtype=float)
+    perturbed, points, diagnostics = {}, [], []
+    for k, (name, term) in enumerate(terms):
+        result, diagnostic = applyFactors(term, factors, binEdges)
+        if k + 1 < len(terms):
+            last, following = _regionsOf(term)[-1], _regionsOf(terms[k + 1][1])[0]
+            x = float(last.xs[-1])
+            if (np.isclose(following.xs[0], x, rtol=0.0, atol=ABSCISSA_ATOL)
+                    and following.ys[0] != last.ys[-1]):
+                pair, _ = _flatFactors(np.array([x, x]), factors, binEdges)
+                tail = _regionsOf(result)[-1]
+                tail.ys[-1] = float(last.ys[-1]) * pair[0]
+        perturbed[name] = result
+        points.append(sum(r.xs.size for r in _regionsOf(result)))
+        diagnostics.append(diagnostic)
+    total = sum(points) or 1
+    combined = {
+        "min_factor": min(d["min_factor"] for d in diagnostics),
+        "max_factor": max(d["max_factor"] for d in diagnostics),
+        "frac_out_of_coverage": sum(d["frac_out_of_coverage"] * n
+                                    for d, n in zip(diagnostics, points)) / total,
+        "n_inserted": sum(d["n_inserted"] for d in diagnostics),
+    }
+    return replace(form, background=replace(background, **perturbed)), combined
 
 
 # ======================================================================
