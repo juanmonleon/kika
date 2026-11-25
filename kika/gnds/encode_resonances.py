@@ -158,9 +158,13 @@ def _scatteringRadius(parent: ET.Element, radius: Optional[ScatteringRadius],
 
 
 def _radiusAxes(parent: ET.Element, unit: Optional[str]) -> None:
+    _axes(parent, "radius", unit)
+
+
+def _axes(parent: ET.Element, label: str, unit: Optional[str]) -> None:
     axes = ET.SubElement(parent, "axes")
     _set(ET.SubElement(axes, "axis"), index="1", label="energy_in", unit="eV")
-    _set(ET.SubElement(axes, "axis"), index="0", label="radius", unit=unit or "")
+    _set(ET.SubElement(axes, "axis"), index="0", label=label, unit=unit or "")
 
 
 def _resolved(parent: ET.Element, region, report: ConversionReport,
@@ -735,7 +739,7 @@ def _unresolvedSpinGroup(parent: ET.Element, group, index: int, blockGrid,
         grid = channel.energies if channel.energies is not None else blockGrid
         _average(node, None, grid, channel.widths, channel.constantWidth,
                  f"spinGroup L={group.L} J={group.J} width {channel.label!r}",
-                 report, domain, unit="eV", label="width", form=channel.averageFunction)
+                 report, domain, unit="eV", label="average width", form=channel.averageFunction)
 
 
 def _average(parent: ET.Element, tag: Optional[str], grid, values,
@@ -780,7 +784,7 @@ def _average(parent: ET.Element, tag: Optional[str], grid, values,
         return
     node = ET.SubElement(holder, "XYs1d")
     node.attrib["label"] = "eval"
-    _radiusAxes(node, unit)
+    _axes(node, label, unit)
     text = ET.SubElement(node, "values")
     text.text = " ".join(_number(v)
                          for pair in zip(np.asarray(grid), np.asarray(values))
