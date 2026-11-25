@@ -453,29 +453,38 @@ def _captureResidual(suite, formalism, reaction, neutronMass: float) -> None:
 
 
 def _fissionQOfTheTape(suite) -> None:
-    """Q := QM and a ``QI=`` flag where a fission MF3 is not MF1/458's ER (B-VIII.1 U-238)."""
+    """A fission channel's Q is MF1/458's EFR+ENP+EGP, as NNDC's GNDS states it; MF3's QI is a ``QI=`` flag."""
     from kika.nuclear_data.model.endf_conversion import EndfConversionFlags, reactionHref
-    from .derive.reactions import _nonNeutrinoEnergy
 
     flags = EndfConversionFlags.of(suite)
     for container in (suite.reactions, suite.sums, suite.fissionComponents):
         for reaction in container:
             provenance = reaction.provenance
             q = getattr(getattr(reaction, "outputChannel", None), "Q", None)
-            released = _nonNeutrinoEnergy(reaction)
-            if (released is None or getattr(provenance, "sourceFormat", None) != "endf"
+            prompt = _promptFissionRelease(reaction)
+            if (prompt is None or getattr(provenance, "sourceFormat", None) != "endf"
                     or getattr(provenance, "qm", None) is None or getattr(q, "value", None) is None):
                 continue
-            qi, qm = float(q.value), float(provenance.qm)
-            if qi == qm == released:
-                continue
+            qi = float(q.value)
             if flags is None:
                 flags = EndfConversionFlags()
                 suite.applicationData.entries.append(flags)
-            if qi != qm:
-                provenance.headerFields = dict(provenance.headerFields or {}, qi=qi)
+            provenance.headerFields = dict(provenance.headerFields or {}, qi=qi)
             flags.conversions.append((reactionHref(reaction) + "/outputChannel/Q", f"QI={qi!r}"))
-            q.value = qm
+            q.value = prompt
+
+
+def _promptFissionRelease(reaction):
+    """MF1/458's EFR+ENP+EGP at 1e-5 eV, where NNDC's GNDS (FUDGE) takes them; or ``None``."""
+    data = getattr(getattr(reaction, "outputChannel", None), "fissionFragmentData", None)
+    releases = list(getattr(data, "fissionEnergyReleases", None) or [])
+    if not releases:
+        return None
+    terms = [getattr(releases[0], name, None)
+             for name in ("promptProductKE", "promptNeutronKE", "promptGammaEnergy")]
+    if any(term is None for term in terms):
+        return None
+    return float(sum(float(term.evaluate(1e-5)) for term in terms))
 
 
 def _pairParticlesFromMF2(suite) -> None:

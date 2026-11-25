@@ -285,10 +285,27 @@ def laws(suite):
             for g in suite.resonances.unresolved.tabulatedWidths.spinGroups]
 
 
-def test_urr_int_is_a_declared_loss_without_the_extension():
+def test_urr_int_is_the_interpolation_of_the_curves_without_the_extension(tmp_path):
+    """Where FUDGE writes it; a curve holding a zero width stays lin-lin (kika's choice:
+    a logarithm of 0 does not exist, and ENDF's reading takes those intervals lin-lin)."""
+    from kika.gnds.decode import readReactionSuite
     from kika.gnds.encode import writeReactionSuite
-    _, report = writeReactionSuite(suite_with_urr())
-    assert sum("cross-section interpolation" in line for line in report.losses) == 2
+    from kika.gnds.xpath import Document
+    tree, report = writeReactionSuite(suite_with_urr())
+    assert not any("URR" in line for line in report.losses)
+    path = tmp_path / "urr.xml"
+    tree.write(path)
+    loaded, _ = readReactionSuite(Document.parse(path))
+    assert laws(loaded) == ["lin-lin", "log-log"]
+    group = loaded.resonances.unresolved.tabulatedWidths.spinGroups[1]
+    curves = {c.label: str(c.averageFunction.interpolation) for c in group.channels
+              if c.averageFunction is not None and hasattr(c.averageFunction, "ys")}
+    zero = {label for c in group.channels for label in [c.label]
+            if c.averageFunction is not None and hasattr(c.averageFunction, "ys")
+            and not all(y > 0 for y in c.averageFunction.ys)}
+    assert zero and set(curves) - zero
+    assert all(curves[label] == "lin-lin" for label in zero)
+    assert all(curves[label] == "log-log" for label in set(curves) - zero)
 
 
 def test_urr_int_survives_gnds_in_the_kika_institution(tmp_path):

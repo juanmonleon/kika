@@ -56,3 +56,32 @@ def test_its_resonance_cross_sections_are_the_tapes(tmp_path):
     assert sigma[0].keys() == sigma[1].keys()
     for mt in sigma[0]:
         assert np.array_equal(sigma[0][mt], sigma[1][mt]), mt
+
+
+def _radiusTable(path):
+    (isotope,) = read_endf(str(path), mf_numbers=[2]).mf[2].mt[151].isotopes
+    (energyRange,) = isotope.energy_ranges
+    table = energyRange.ap_e
+    return (list(table.energies), list(table.ap_values), list(table.interpolation))
+
+
+def test_an_energy_dependent_radius_is_nro_1_with_ap_0(tmp_path):
+    """As the 52 MLBW ranges of ENDF/B-VIII.1 with NRO=1 state it (Si-31): AP(E), and AP 0."""
+    from kika.nuclear_data.model.resonances import ScatteringRadius
+
+    suite = kika.read(str(TAPE))
+    region = suite.resonances.resolved[0]
+    region.scatteringRadius = ScatteringRadius(
+        energies=np.array([region.domainMin, region.domainMax]), values=np.array([5.0, 4.5]),
+        interpolation=[(2, 2)], unit="fm")
+    region.formalism.scatteringRadius = 0.0
+    tape = tmp_path / "ne20-nro1.endf"
+    kika.write(suite, str(tape), format="endf")
+    gnds = tmp_path / "ne20-nro1.gnds.xml"
+    kika.write(kika.read(str(tape)), str(gnds), format="gnds")
+    back = tmp_path / "ne20-nro1.rt.endf"
+    kika.write(kika.read(str(gnds)), str(back), format="endf")
+    head, _ = _records(tape)
+    assert head[7] == 1 and head[10] == 0.0
+    assert _records(back) == _records(tape)
+    assert _radiusTable(back) == _radiusTable(tape) == ([1e-05, 2898332.0], [0.5, 0.45], [(2, 2)])

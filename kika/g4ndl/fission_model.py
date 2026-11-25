@@ -670,9 +670,11 @@ def _crossSection(reaction, provenance, header, bookkeeping, where) -> CrossSect
                               np.array(x, dtype=np.float64), np.array(y, dtype=np.float64))
 
 
-def _chanceBookkeeping(reaction, provenance) -> Tuple[int, int]:
-    q = reaction.outputChannel.Q if reaction.outputChannel is not None else None
-    q = float(q.value) if q is not None and q.value is not None else 0.0
+def _chanceBookkeeping(reaction, provenance, suite) -> Tuple[int, int]:
+    from kika.nuclear_data.model.endf_conversion import reactionQI
+
+    q = reactionQI(reaction, suite) if reaction.outputChannel is not None else None
+    q = float(q) if q is not None else 0.0
     carried = provenance.bookkeeping if provenance is not None else None
     if carried and abs(float(carried[0]) - q) <= _Q_BOOKKEEPING_TOLERANCE:
         return tuple(int(b) for b in carried)
@@ -1054,7 +1056,7 @@ def _chanceRecord(reaction, header, targetMass, suite, report) -> ChanceFissionR
     chance = CHANCE_DIRECTORY[mt]
     where = f"Fission/{chance} MT{mt}"
     provenance = _provenance(reaction)
-    cs = _crossSection(reaction, provenance, header, _chanceBookkeeping(reaction, provenance),
+    cs = _crossSection(reaction, provenance, header, _chanceBookkeeping(reaction, provenance, suite),
                        where)
     entries = list(provenance.sections) if provenance is not None else []
     heads = [(int(e["infoType"]), int(e["dataType"])) for e in entries] or [(1, 4), (3, 5)]

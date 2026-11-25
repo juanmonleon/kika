@@ -1,5 +1,5 @@
-"""A fission MF3's QM/QI survive GNDS where MF1/458's ER would move them (B-VIII.1 U-238 MT18):
-a ``QI=`` flag on the fission Q, none on a tape that follows the rule.
+"""A fission channel's Q in kika's GNDS is MF1/458's EFR+ENP+EGP, as NNDC writes it, and MF3's QM = QI
+goes in a ``QI=`` flag, so it comes back even where MF1/458's ER would move it (B-VIII.1 U-238 MT18).
 """
 from __future__ import annotations
 
@@ -39,10 +39,17 @@ def _header(path, mfmt):
             if l[70:75] == mfmt][1]
 
 
-def test_a_fission_q_that_is_mf1_458s_er_needs_no_flag(tmp_path):
-    text, endf = _roundTrip(DATA / "micro_th232_fission_energy.endf", tmp_path)
-    assert "QI=" not in text
+def test_the_fission_q_is_the_prompt_release_and_mf3_comes_back(tmp_path):
+    from kika.endf import read_endf
+
+    tape = DATA / "micro_th232_fission_energy.endf"
+    text, endf = _roundTrip(tape, tmp_path)
+    assert re.search(r'flags="QI=188470000\.0" href="[^"]*MT18\']/outputChannel/Q"', text)
     assert _header(endf, " 3 18") == " 1.884700+8 1.884700+8"
+    mf458 = read_endf(str(tape), mf_numbers=[1]).mf[1].mt[458]
+    prompt = float(mf458.efr[0]) + float(mf458.enp[0]) + float(mf458.egp[0])
+    gnds = kika.read(str(tmp_path / "rt.gnds.xml"))
+    assert gnds.reactionByENDF_MT(18).outputChannel.Q.value == prompt
 
 
 def test_a_fission_q_off_mf1_458s_er_comes_back_and_fudges_rule_without_the_flag(tmp_path):

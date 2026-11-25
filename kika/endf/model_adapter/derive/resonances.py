@@ -18,6 +18,7 @@ them by L when the tape is written. Per range:
                 with the suite's
 ``AP``          the region's radius, else the formalism's, else the
                 evaluation's; a radius that depends on energy is refused
+                here (LRF=3), and written as NRO=1 for Breit-Wigner below
 ``APL``         the entrance channel's radius where it differs from AP
 ``AWRI``        the formalism's target mass over the neutron's; MF1's AWR,
                 reported, when the formalism states none
@@ -33,6 +34,8 @@ them by L when the tape is written. Per range:
 fields are the same, less APL, AJ's sign, LAD and NLSC, which LRF=1/2 does not
 have; QX and LRX come from the group's competitive channel, else 0, reported
 where GT is not GN+GG+GF.
+An energy-dependent radius is NRO=1: its AP(E) table, and AP the constant radius the
+source still holds, else 0 (FUDGE always writes 0).
 
 **The unresolved range** is LRU=2. LRF is 2 unless FUDGE's ``LRF1`` flag says
 otherwise, and the isotope's LFW is 1 when the suite has fission, unless an
@@ -168,6 +171,48 @@ def _fallbackAwri(formalism, groups, context, report, lrf, where) -> Optional[fl
     return float(context.awr)
 
 
+def _energyDependentRadius(resonances, region):
+    """The range's AP(E) table (NRO=1), or ``None`` when its radius is a constant."""
+    policy = region.formalism.radiusPolicy
+    candidates = ((policy.phaseRadius if policy is not None else None), region.scatteringRadius,
+                  region.formalism.scatteringRadius, resonances.scatteringRadius)
+    for radius in candidates:
+        if radius is None:
+            continue
+        return radius if getattr(radius, "isEnergyDependent", False) else None
+    return None
+
+
+def _constantRadius(radius):
+    """A radius that is one number, in fm, or ``None``."""
+    if radius is None or getattr(radius, "isEnergyDependent", False):
+        return None
+    value = getattr(radius, "constant", radius)
+    return None if value is None else float(value)
+
+
+def _radiusFields(resonances, region, where) -> dict:
+    """NRO, AP and AP(E) of a resolved range; beside a table, AP is the constant the source still holds, else 0."""
+    import numpy as np
+
+    from kika.nuclear_data.model.resonances import radiusToEndf
+    from ..resonances import resolvedRangeRadius
+
+    table = _energyDependentRadius(resonances, region)
+    if table is not None:
+        held = next((r for r in (region.scatteringRadius, region.formalism.scatteringRadius,
+                                 resonances.scatteringRadius) if _constantRadius(r) is not None), None)
+        # FUDGE always writes 0 here; a constant the GNDS holds is the tape's AP.
+        return {"nro": 1, "ap": 0.0 if held is None else float(radiusToEndf(_constantRadius(held))),
+                "radius_table": (np.asarray(table.energies, dtype=float),
+                                 radiusToEndf(np.asarray(table.values, dtype=float)),
+                                 [tuple(pair) for pair in table.interpolation])}
+    radius = resolvedRangeRadius(resonances, region)
+    if radius is None:
+        raise ValueError(f"{where} states no scattering radius for AP")
+    return {"nro": 0, "ap": float(radiusToEndf(radius))}
+
+
 def _breitWignerRange(resonances, region, context, report, where) -> dict:
     """The fields of one LRF=1/2 range; raises ``ValueError`` saying why it cannot be one."""
     import math
@@ -179,10 +224,9 @@ def _breitWignerRange(resonances, region, context, report, where) -> dict:
     lrf = {BreitWignerApproximation.singleLevel: 1,
            BreitWignerApproximation.multiLevel: 2}[BreitWignerApproximation(formalism.approximation)]
     spin = _rangeSpin(formalism, context, where)
+    radiusFields = _radiusFields(resonances, region, where)
     radius = resolvedRangeRadius(resonances, region)
     policy = formalism.radiusPolicy
-    if radius is None or (policy is not None and policy.phaseRadius is not None):
-        raise ValueError(f"{where} states no constant scattering radius for AP")
     if policy is not None and policy.channelMode == "constant":
         raise ValueError(f"{where} states a channel radius of its own (NAPS=2)")
     groups = formalism.resonanceParameters.spinGroups
@@ -204,9 +248,9 @@ def _breitWignerRange(resonances, region, context, report, where) -> dict:
             f"written 0 and the difference stays in GT as the model has it")
     calculate = (policy.channelMode == "mass" if policy is not None
                  else bool(formalism.calculateChannelRadius))
-    return {"kind": "resolved", "lru": 1, "lrf": lrf, "nro": 0, "naps": 0 if calculate else 1,
+    return {"kind": "resolved", "lru": 1, "lrf": lrf, "naps": 0 if calculate else 1,
             "el": float(region.domainMin), "eh": float(region.domainMax),
-            "spi": spin, "ap": float(radiusToEndf(radius)), "nls": len(groups),
+            "spi": spin, **radiusFields, "nls": len(groups),
             "nlsc": 0, "lad": 0, "abn": 1.0, "isotope_index": 0,
             **({} if awri is None else {"awri": awri}),
             "l_blocks": [{"l": g.L,
