@@ -449,7 +449,7 @@ def fudgeParameterCovariances(suite, tables, report) -> Tuple[Optional[list], Li
     ``(None, [])`` when there is nothing to convert (no MF32 text: a suite read
     from GNDS already has FUDGE's layout).
     """
-    from kika.endf.model_adapter.parameter_covariances import MF32MT151_KEY
+    from kika.nuclear_data.model.endf_conversion import MF32MT151_KEY
 
     covariances = list(getattr(suite.covarianceSuite, "parameterCovariances", None) or ())
     texts = {}

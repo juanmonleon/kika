@@ -17,10 +17,15 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 __all__ = ["ENDF_CONVERSION_INSTITUTION", "EndfConversionFlags", "parseFlags",
-           "OMIT_FLAG", "QI_FLAGGED_MTS", "isOmitted", "levelSeries", "reactionHref", "reactionQI"]
+           "OMIT_FLAG", "QI_FLAGGED_MTS", "isOmitted", "levelSeries", "reactionHref", "reactionQI",
+           "MF32MT151_KEY"]
 
 #: The ``institution`` label FUDGE files the node under.
 ENDF_CONVERSION_INSTITUTION = "LLNL"
+
+#: Where the decoder of the suite keeps an MF32 section's text, on the
+#: provenance every parameter covariance of that section shares.
+MF32MT151_KEY = "mf32mt151"
 
 #: FUDGE's flag on a crossSectionSum with no MF3 section (``toENDF6/sums.py``).
 OMIT_FLAG = "omit"
