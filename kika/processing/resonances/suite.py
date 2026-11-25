@@ -1463,7 +1463,13 @@ def _reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',op
     raised=_raise_thresholds(curves,entries,graph,_target_awr(suite,context),suite)
     mt_keys={}
     for key,r in entries.items():
-        if r.ENDF_MT is not None:
+        if r.ENDF_MT is not None and key.container!='orphanProducts':
+            if r.ENDF_MT in mt_keys:raise UnsupportedResonanceError('ambiguous MT projection for model reactions')
+            mt_keys[r.ENDF_MT]=key
+    # an MF13 orphan shares the MT of the sum its photons belong to (MT3, MT18); the sum owns the MT
+    owned=set(mt_keys)
+    for key,r in entries.items():
+        if r.ENDF_MT is not None and key.container=='orphanProducts' and r.ENDF_MT not in owned:
             if r.ENDF_MT in mt_keys:raise UnsupportedResonanceError('ambiguous MT projection for model reactions')
             mt_keys[r.ENDF_MT]=key
     physical_owners=dict(mt_keys)
