@@ -117,8 +117,9 @@ EXPECTED: List[Expected] = [
              "a step in outgoing energy: kika keeps it as two regions, FUDGE moves the point by 1e-6 eV"),
     Expected("field", r"Reactions MT\d+ \| outputChannel\.(products\[[^\]]+\]\.outputChannel\.)?"
                       r"products\[photon#\d+\]\.(multiplicity\.forms\['eval'\]\.ys|distribution\.forms"
-                      r"\['eval'\]\.energy\.function1ds\[i\]\.ys): arrays differ", bound=4.5e-15,
-             reason="photon yields and normalised spectra are computed from tape numbers by each code"),
+                      r"\['eval'\]\.energy\.function1ds\[i\]\.ys): arrays differ", bound=5e-15,
+             reason="photon yields and normalised spectra are computed doubles; FUDGE writes them at 15 "
+                    "significant digits, at most 5e-15 off (Pb-207 MT16: kika's equal the tape's decode)"),
     Expected("field", r".*delayedNeutrons\[i\]\.label: '#' != '#'",
              "delayed-neutron families: FUDGE labels them from 0, kika from 1"),
     Expected("field", r".*delayedNeutrons\[i\]\.product\.distribution\.forms\['eval'\]\.energy\.g\.axes"
@@ -131,6 +132,10 @@ EXPECTED: List[Expected] = [
     Expected("field", r"Reactions MT802 \| outputChannel\.products\[Cr53_e2#0\]\.outputChannel\.Q\.value: # != #",
              bound=1e-7, tapes="n-026_Fe_056",
              reason="NNDC wrong: the tape's QM - QI is 1006270.1 eV, FUDGE writes its PoPs level, 1006270.0"),
+    Expected("field", r"Reactions MT6(0[2-9]|1[0-6]) \| outputChannel\.products\[Tl207_e\d+#0\]\.outputChannel"
+                      r"\.Q\.value: # != #", bound=2.3e-7, tapes="n-082_Pb_207",
+             reason="the tape disagrees with itself: MF3's QM - QI puts each level 0.3 eV below MF12's ES "
+                    "(MT602: 1348179.7 against 1348180 eV); kika takes MF3's, as its PoPs does, FUDGE MF12's"),
     Expected("field", r"Reactions MT\d+ \| outputChannel\.products\[[^\]]+\]\.distribution\.forms\['eval'\]"
                       r"\.energy\.mass\.value: # != #", bound=2.1e-10,
              reason="phase-space mass APSX * m_n: kika's m_n is CODATA's 1.00866491595 u, FUDGE's differs"),
