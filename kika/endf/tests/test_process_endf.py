@@ -543,3 +543,26 @@ def test_the_files_carry_heating_unless_the_plan_says_no(heating, tmp_path, monk
         assert staged.NO_HEATING_ACE in omitted
         result.write_hdf5(tmp_path / "fe56.h5")
         assert staged.NO_HEATING_HDF5 in result.stages[-1].details["omitted"]
+
+
+def test_the_monte_carlo_outputs_omit_what_the_decoded_tape_keeps_aside(zr90_b81_tape, monkeypatch):
+    """The processed suite carries HDF5 provenance; the losses come from the decoded tape."""
+    from types import SimpleNamespace
+
+    import kika
+    import kika.hdf5.processing as hp
+    from kika.endf import EndfProcessing
+
+    work = kika.read(zr90_b81_tape, covariances=False)
+    processed = SimpleNamespace(provenance=None)
+    monkeypatch.setattr(hp, "processSuite", lambda *args, **kwargs: processed)
+    run = EndfProcessing.__new__(EndfProcessing)
+    run._processed, run._heated, run._urr, run._broadened = None, {}, {}, {}
+    run.thnmax, run.plan = None, ProcessingPlan(heating=False)
+    run.reconstruction = SimpleNamespace(context=None)
+    run._full_suite = lambda *args, **kwargs: work
+    assert run._processed_suite()[0] is processed
+    loss = "MF3/MT651: QM -6128816 eV; QI plus Y89_e1's energy gives -6128786 eV"
+    for written in ("the HDF5 library", "the ACE tables"):
+        assert [s.split("back: ", 1)[1] for s in run._tapeOnly[written]] == [loss]
+        assert run._tapeOnly[written][0].startswith(f"not in {written},")
