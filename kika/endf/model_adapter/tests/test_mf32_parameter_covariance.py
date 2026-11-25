@@ -19,6 +19,7 @@ why that test reaches into the flat section rather than trusting the model.
 """
 from __future__ import annotations
 
+import copy
 import dataclasses
 
 import numpy as np
@@ -167,6 +168,46 @@ def test_lcomp2_covers_columns_not_entries(mf32Endf):
     assert nonZeroEntries == 65
     assert int((form.uncertainties() == 0).sum()) == 4
     assert form.parameters[0].parameterNames == ["ER", "GN", "GG"]
+
+
+def _th232ResolvedCopy(mf32Endf):
+    if _byName(mf32Endf) != 90232:
+        pytest.skip("the fissility rule is asserted on a copy of Th-232's LRF=3 range")
+    section = copy.deepcopy(mf32Endf.mf[32].mt[151])
+    body = section.isotopes[0].energy_ranges[0].body
+    flat = np.asarray(body.parameters.values, dtype=float).reshape(-1, 12)
+    return section, body, flat
+
+
+def test_lcomp2_keeps_a_width_with_no_uncertainty_anywhere(mf32Endf):
+    """JEFF-4.0 Tc-98: DGN = 0 on every resonance and NNN = 3 NRSA, as §32.2.3 states."""
+    section, body, flat = _th232ResolvedCopy(mf32Endf)
+    flat[:, 6 + 2] = 0.0
+    body.parameters.body.set_values(list(flat.reshape(-1)))
+
+    covariances, report = decodeMF32MT(section)
+    form = covariances[0].form
+
+    assert not any("NNN" in line for line in report.losses)
+    assert form.order == int(body.correlations.nnn) == 3 * len(flat)
+    assert form.parameters[0].parameterNames == ["ER", "GN", "GG"]
+    assert not form.uncertainties()[1::3].any()
+
+
+def test_lcomp2_counts_a_fission_width_by_its_value_not_its_uncertainty(mf32Endf):
+    """JEFF-4.0 Ac-227: GF given, DGF = 0 everywhere, NNN = 4 NRSA (fissile, one channel)."""
+    section, body, flat = _th232ResolvedCopy(mf32Endf)
+    flat[0, 4] = 1.0e-3
+    body.parameters.body.set_values(list(flat.reshape(-1)))
+    body.correlations.nnn = 4 * len(flat)
+
+    covariances, report = decodeMF32MT(section)
+    form = covariances[0].form
+
+    assert not any("NNN" in line for line in report.losses)
+    assert form.order == 4 * len(flat)
+    assert form.parameters[0].parameterNames == ["ER", "GN", "GG", "GFA"]
+    assert not form.uncertainties()[3::4].any()
 
 
 def test_lrf7_retains_every_parameter_including_the_zero_ones(mf32Endf):

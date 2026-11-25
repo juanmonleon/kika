@@ -18,6 +18,10 @@
 
 ### Changed results
 
+- MF32 LCOMP=2 (LRF=1-3): the matrix covers ER, GN, GG and, on a fissile nuclide, the fission
+  widths, as ENDF-6 §32.2.3.1-2 states, zero uncertainties included. kika counted only the widths
+  with a non-zero uncertainty, so sections that follow the format (JEFF-4.0 Tc-98, Re-186m, Pt-191,
+  Ac-227; JENDL-5 Pu-240) were refused with a `decode_error` defect. They now decode and pass.
 - An MF33 block that sums absolute (LB=0/8/9) and relative components no longer needs NJOY.
   `decodeCovarianceSuite` (and `kika.read`) takes σ(E) from the tape's own MF3 when it has no
   resonance ranges, and from kika's reconstruction at 1e-3 otherwise; a PENDF set on

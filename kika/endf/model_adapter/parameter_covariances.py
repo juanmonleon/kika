@@ -8,22 +8,20 @@ nothing — so the container, the links and the decode all differ, and mixing th
 into the cross-section path would eventually collapse a resonance index into an
 energy without anything noticing.
 
-**What this module had to measure rather than read.** ENDF-102 §32 leaves three
-things ambiguous enough that implementing from the text alone gives a decoder
-that is wrong on real tapes, and each was settled against the evaluations on
-this machine:
+**What this module had to measure rather than read.** Each point was settled
+against the evaluations on this machine:
 
 1. **The vector is resonance-major.** Every parameter of resonance 1, then every
    parameter of resonance 2. Read parameter-major, Mn-55's block gives resonance
    50 a 67 % uncertainty on GG and resonance 5 a 2.5e-8 one on GN — absurd both
    ways, which is what makes this checkable rather than a matter of taste.
-2. **LCOMP=2's matrix does not cover every parameter.** It covers those columns
-   carrying a non-zero uncertainty *somewhere in the section*, which is ER, GN
-   and GG on both Na-23 and Th-232 — three per resonance, not six. Na-23 makes
-   the distinction visible: 69 rows for 65 non-zero uncertainties, so the rule
-   is per-column and not per-entry, and a per-entry reading is off by four.
-3. **LRF=7 is the exception to (2)** — its NNN counts ``(NCH+1)`` per resonance
-   whatever the uncertainties are, zeros included. Cl-35, Cu-63 and W-186 agree.
+2. **LCOMP=2's matrix for LRF=1-3 is fixed by fissility, not by the
+   uncertainties** (§32.2.3.1-2): ER, GN, GG, plus GF (or GFA, and GFB when both
+   channels are used) on a fissile nuclide, zero uncertainties included. Ac-227
+   of JEFF-4.0 has GF with DGF = 0 everywhere and NNN = 4 NRSA; Tc-98 has
+   DGN = 0 everywhere and NNN = 3 NRSA.
+3. **LRF=7 counts ``(NCH+1)`` per resonance** whatever the uncertainties are,
+   zeros included. Cl-35, Cu-63 and W-186 agree.
 
 Every one of those is cross-checked at decode time against NNN, and a section
 whose arithmetic disagrees is reported and skipped rather than reshaped into
@@ -277,6 +275,15 @@ def _decodeLCOMP1Block(block, lrf: int, href: str, blockIndex: int,
     )
 
 
+def _lcomp2Columns(slots: Tuple[str, ...], order_names: Tuple[str, ...],
+                   parameters: np.ndarray) -> List[int]:
+    """§32.2.3.1-2: ER, GN, GG, then each fission width up to the last one used in the section."""
+    fission = [name for name in order_names[3:] if name.startswith("GF")]
+    used = [k for k, name in enumerate(fission) if np.any(parameters[:, slots.index(name)] != 0.0)]
+    names = order_names[:3] + tuple(fission[:used[-1] + 1] if used else ())
+    return [slots.index(name) for name in names]
+
+
 def _decodeLCOMP2(body, lrf: int, href: str,
                   report: ConversionReport) -> Optional[ParameterCovarianceMatrix]:
     """§32.2.3.1-2 — parameters and uncertainties interleaved, then INTG.
@@ -305,15 +312,10 @@ def _decodeLCOMP2(body, lrf: int, href: str,
     table = np.asarray(raw[:12 * count], dtype=float).reshape(count, 12)
     parameters, uncertainties = table[:, :6], table[:, 6:]
 
-    # Which columns the matrix covers: those carrying an uncertainty anywhere in
-    # the section. Per column and not per entry -- Na-23 has 69 rows against 65
-    # non-zero uncertainties, so a per-entry rule is off by four and every row
-    # after the first zero would be misassigned.
-    candidates = [slots.index(name) for name in order_names]
-    columns = [c for c in candidates if np.any(uncertainties[:, c] != 0.0)]
-    if not columns:
+    if not np.any(uncertainties != 0.0):
         report.lost("MF32 LCOMP=2: no parameter carries an uncertainty")
         return None
+    columns = _lcomp2Columns(slots, order_names, parameters)
 
     names = tuple(slots[c] for c in columns)
     width = len(columns)
