@@ -84,6 +84,9 @@ EXPECTED: List[Expected] = [
              "NNDC also carries FUDGE's reconstructed resonance cross section as a 'recon' form"),
     Expected("xs", r"Sums MT8(5[1-9]|6\d|7[01]): values", bound=4e-9,
              reason="MF33 lumped sums: each code adds the summands on its own and rounds the result"),
+    Expected("xs", r"Sums MT10[3-7]: values", bound=5e-9,
+             reason="a summed MT only MF33 states (B-VIII.1 Fe-56 MT103): kika keeps the sum of the "
+                    "partials as doubles, FUDGE writes it to nine significant digits"),
     Expected("field", r".*Q\.domainMin: kika's 1e-05 below NNDC's",
              "a constant Q: kika states it from the lowest incident energy, FUDGE from the threshold"),
     Expected("field", r".*multiplicity\.forms\['eval'\]: a constant XYs1d against Constant1d, same value",
