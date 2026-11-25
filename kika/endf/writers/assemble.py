@@ -586,7 +586,16 @@ def _covarianceSections(suite, mat, report):
     # the encoder existed, said nothing at all. `encodeMF32MT` writes into the
     # section the decoder kept, and declares the suites it cannot write.
     if getattr(covarianceSuite, "parameterCovariances", None):
-        section, report = encodeMF32MT(covarianceSuite, mat, report)
+        from ..model_adapter.mf32_from_gnds import encodeMF32FromGnds
+        from ..model_adapter.parameter_covariances import MF32MT151_KEY
+
+        # A covariance read from GNDS has no MF32 text to write into: FUDGE's layout.
+        fromTape = any(MF32MT151_KEY in (getattr(getattr(c, "provenance", None), "headerFields", None) or {})
+                       for c in covarianceSuite.parameterCovariances)
+        if fromTape:
+            section, report = encodeMF32MT(covarianceSuite, mat, report)
+        else:
+            section, report = encodeMF32FromGnds(suite, mat, report)
         if section is not None:
             sections.append((32, 151, section))
     return sections, report
