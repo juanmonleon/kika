@@ -34,7 +34,8 @@ them by L when the tape is written. Per range:
 fields are the same, less APL, AJ's sign, LAD and NLSC, which LRF=1/2 does not
 have; QX and LRX come from the group's competitive channel, else 0, reported
 where GT is not GN+GG+GF.
-An energy-dependent radius is NRO=1: its AP(E) table and AP 0, as FUDGE writes it.
+An energy-dependent radius is NRO=1: its AP(E) table, and AP the constant radius the
+source still holds, else 0 (FUDGE always writes 0).
 
 **The unresolved range** is LRU=2. LRF is 2 unless FUDGE's ``LRF1`` flag says
 otherwise, and the isotope's LFW is 1 when the suite has fission, unless an
@@ -182,8 +183,16 @@ def _energyDependentRadius(resonances, region):
     return None
 
 
+def _constantRadius(radius):
+    """A radius that is one number, in fm, or ``None``."""
+    if radius is None or getattr(radius, "isEnergyDependent", False):
+        return None
+    value = getattr(radius, "constant", radius)
+    return None if value is None else float(value)
+
+
 def _radiusFields(resonances, region, where) -> dict:
-    """NRO, AP and AP(E) of a resolved range: FUDGE writes AP 0 beside an AP(E) table."""
+    """NRO, AP and AP(E) of a resolved range; beside a table, AP is the constant the source still holds, else 0."""
     import numpy as np
 
     from kika.nuclear_data.model.resonances import radiusToEndf
@@ -191,7 +200,10 @@ def _radiusFields(resonances, region, where) -> dict:
 
     table = _energyDependentRadius(resonances, region)
     if table is not None:
-        return {"nro": 1, "ap": 0.0,
+        held = next((r for r in (region.scatteringRadius, region.formalism.scatteringRadius,
+                                 resonances.scatteringRadius) if _constantRadius(r) is not None), None)
+        # FUDGE always writes 0 here; a constant the GNDS holds is the tape's AP.
+        return {"nro": 1, "ap": 0.0 if held is None else float(radiusToEndf(_constantRadius(held))),
                 "radius_table": (np.asarray(table.energies, dtype=float),
                                  radiusToEndf(np.asarray(table.values, dtype=float)),
                                  [tuple(pair) for pair in table.interpolation])}
