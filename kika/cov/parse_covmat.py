@@ -306,8 +306,11 @@ def read_coverx(file_path: str, ascending: bool = True, energy_unit: str = 'eV',
     covariances (2) are flagged relative, covariances (1) absolute, and
     correlations (3) are multiplied by the standard deviations of their two
     pairs and flagged absolute. Its matrices may be split into blocks of
-    consecutive groups (NBLOK), which are put back together. The text reader
-    leaves ``is_relative`` empty (no per-matrix flag). A matrix whose MT is not
+    consecutive groups (NBLOK), which are put back together. A text file may
+    give its grid as the NGROUP upper bounds only, as SCALE's libraries do; the
+    lowest boundary is then the one of the ``kika.energy_grids`` structure with
+    those upper bounds. The text reader leaves ``is_relative`` empty (no
+    per-matrix flag). A matrix whose MT is not
     a known reaction is skipped, in both formats. A matrix whose values are all
     zero is skipped by the binary reader only; the text reader keeps it.
 
@@ -402,6 +405,8 @@ def _read_coverx_text(file_path: str, ascending: bool = True, energy_unit: str =
     energy_values = []
     cursor = 2
     while cursor < len(file_lines) and len(energy_values) < num_groups + 1:
+        if len(energy_values) == num_groups and _is_coverx_text_header(file_lines[cursor]):
+            break
         try:
             energy_values.extend(
                 float(token.replace("D", "E"))
@@ -412,6 +417,9 @@ def _read_coverx_text(file_path: str, ascending: bool = True, energy_unit: str =
                 "Invalid COVERX text energy grid"
             ) from exc
         cursor += 1
+
+    if len(energy_values) == num_groups:
+        energy_values = _complete_upper_bounds(energy_values, file_path, diagnostics)
 
     if len(energy_values) != num_groups + 1:
         raise InvalidDataFormatError(
@@ -501,6 +509,40 @@ def _read_coverx_text(file_path: str, ascending: bool = True, energy_unit: str =
 # ---------------------------------------------------------------------------
 # COVERX binary parser
 # ---------------------------------------------------------------------------
+
+def _is_coverx_text_header(line: str) -> bool:
+    tokens = line.split()
+    return len(tokens) == 5 and all(t.lstrip("-").isdigit() for t in tokens)
+
+
+def _complete_upper_bounds(upper_ev: List[float], file_path, diagnostics: Optional[list]) -> List[float]:
+    """The group boundaries of a grid written as its NGROUP upper bounds only.
+
+    SCALE's text COVERX libraries write the upper bound of each group and no
+    lower bound of the last one. That bound is taken from the kika group
+    structure whose upper bounds are these, to 1e-6; with none, the grid is refused.
+    """
+    from kika import energy_grids
+
+    upper = np.sort(np.asarray(upper_ev, dtype=float))
+    for name in energy_grids.__all__:
+        preset = getattr(energy_grids, name)
+        if not isinstance(preset, list) or len(preset) != upper.size + 1:
+            continue
+        edges = np.sort(np.asarray(preset, dtype=float))
+        edges_ev = edges * (1.0e6 if edges[-1] < 1.0e3 else 1.0)
+        if np.allclose(edges_ev[1:], upper, rtol=1e-6, atol=0.0):
+            emin = float(edges_ev[0])
+            _note(diagnostics, "count_defaulted",
+                  f"the grid gives the {upper.size} upper bounds only; the lowest boundary, "
+                  f"{emin:g} eV, is the one of {name}, whose upper bounds these are",
+                  structure=name, emin_ev=emin)
+            descending = upper_ev[0] > upper_ev[-1]
+            return list(upper_ev) + [emin] if descending else [emin] + list(upper_ev)
+    raise InvalidDataFormatError(
+        f"the COVERX text grid gives {upper.size} upper bounds and no lowest boundary, and "
+        f"no group structure in kika.energy_grids has these upper bounds: {file_path}")
+
 
 #: NTYPE of COVERX (ORNL/TM-7181, appendix A): 1 covariance and standard deviation,
 #: 2 relative covariance and relative standard deviation, 3 correlation and standard deviation.
