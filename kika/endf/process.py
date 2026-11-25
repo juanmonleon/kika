@@ -489,6 +489,7 @@ class EndfProcessing:
         self._heating = {}               # {T: {301: (E, h), 444: (E, d)}}, 0.0 for 0 K
         self._displacements = {}         # {T: {"nrt": (E, n), "arc-dpa": (E, n)}}
         self._processed = None           # (suite, report): every temperature tabulated for Monte Carlo
+        self._tapeOnly = {}              # what the decoded tape keeps only for the way back, by output
 
     def __getstate__(self):
         # The processed suite is a cache of write_ace/write_hdf5, rebuilt on demand:
@@ -850,6 +851,9 @@ class EndfProcessing:
             return self._processed
         temps = list(self.temperatures)
         work = self._full_suite(progress, category=category)
+        # The processed suite carries HDF5 provenance, so the decoded one is asked here.
+        from kika.endf.model_adapter.tape_only import tapeOnlyData
+        self._tapeOnly = {name: tapeOnlyData(work, name) for name in ("the HDF5 library", "the ACE tables")}
         resonances = work.resonances
         omit = ("urr",) if resonances is not None and resonances.unresolved is not None and not self._urr else ()
         if self.plan.heating is False:
@@ -996,6 +1000,7 @@ class EndfProcessing:
                 raise ProcessingOutputError(
                     "hdf5-needs-temperature", PROCESSING_REJECTION_CATEGORIES["hdf5-needs-temperature"])
             processed, _, omit = self._processed_suite(progress, category="hdf5-failed")
+            omitted += self._tapeOnly.get("the HDF5 library", [])
             if "urr" in omit:
                 omitted.append("URR probability tables (the URR stage did not produce them)")
             if "kerma" in omit:
@@ -1108,6 +1113,7 @@ class EndfProcessing:
                     "ace-failed", f"extension={extension!r} names one table, and {len(temps)} "
                                   f"temperatures {temps} were asked for")
             processed, processing_report, omit = self._processed_suite(progress, category="ace-failed")
+            omitted += self._tapeOnly.get("the ACE tables", [])
             if "urr" in omit:
                 omitted.append("URR probability tables (the URR stage did not produce them)")
             if "kerma" in omit:
