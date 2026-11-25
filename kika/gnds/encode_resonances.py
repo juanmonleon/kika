@@ -716,6 +716,8 @@ def _unresolved(parent: ET.Element, region, report: ConversionReport,
         _scatteringRadius(node, table, report, "tabulatedWidths", domain,
                           tag="hardSphereRadius")
 
+    # a constant average holds on the unresolved region only
+    regionDomain = (_number(region.domainMin), _number(region.domainMax))
     Ls = ET.SubElement(node, "Ls")
     byL = {}
     for group in widths.spinGroups:
@@ -726,7 +728,7 @@ def _unresolved(parent: ET.Element, region, report: ConversionReport,
         Js = ET.SubElement(lNode, "Js")
         for index, group in enumerate(groups):
             _unresolvedSpinGroup(Js, group, index, widths.energyGrid, report,
-                                 domain)
+                                 regionDomain)
 
 
 #: The URR width labels the ENDF decoder writes, and the MT each one is. The
