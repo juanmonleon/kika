@@ -262,7 +262,9 @@ class LegendreCovariance:
         result = cls()
         result.energy_unit = energy_unit
 
-        for section in getattr(suite, 'covarianceSections', suite):
+        from kika._covariance_forms import local_sections
+
+        for section in local_sections(suite):
             rowData = getattr(section, 'rowData', None)
             if not _is_endf_mf(rowData, 34):
                 continue

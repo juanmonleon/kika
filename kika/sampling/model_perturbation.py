@@ -43,6 +43,7 @@ from typing import Any, Dict, Hashable, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 
+from kika._covariance_forms import local_sections
 from kika.cov.conditioning import block_key_text
 from kika.sampling.joint_blocks import (assembleRequest, collectEntries,
                                         componentDomains, describeRequest)
@@ -1444,7 +1445,7 @@ def _statedCrossSectionMTs(covariances) -> set:
     from kika.sampling.model_blocks import _endf_mt, _is_endf_mf, _states_only_sums
 
     stated = set()
-    for section in getattr(covariances, "covarianceSections", covariances):
+    for section in local_sections(covariances):
         row = section.rowData
         col = section.columnData if section.columnData is not None else row
         # NC LTY=0 alone states the MT through others: a derived sum or a remainder.

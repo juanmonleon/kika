@@ -35,7 +35,7 @@ one of them importing the other. Nothing here imports the model, so
 """
 from __future__ import annotations
 
-__all__ = ["require_single_matrix", "explain_missing_matrix"]
+__all__ = ["require_single_matrix", "explain_missing_matrix", "local_sections"]
 
 def _node_name(form: object) -> str:
     """The GNDS tag a model class is written as. ``Mixed`` → ``mixed``."""
@@ -104,3 +104,13 @@ def require_single_matrix(form: object, where: str) -> object:
     if form is None or getattr(form, "matrix", None) is None:
         raise ValueError(explain_missing_matrix(form, where))
     return form
+
+
+def local_sections(suite) -> list:
+    """The covariance sections of *suite* (or a list of them) whose column stays in this evaluation.
+
+    A block with another material (a column linked into that material's file,
+    ENDF-6's MAT1) cannot be sampled from one evaluation, so samplers leave it out.
+    """
+    return [section for section in getattr(suite, "covarianceSections", suite)
+            if getattr(getattr(section, "columnData", None), "otherEvaluation", None) is None]
