@@ -39,13 +39,11 @@ def _form(reaction):
 
 
 def _same1d(a, b):
-    """W'(T), T_effective: the same curve, a repeated identical point aside."""
+    """W'(T), T_effective: the same points, a repeated one included (kika's endfTapeData)."""
     xa, ya, _ = a.toEndfRegions()
     xb, yb, _ = b.toEndfRegions()
-    keep = np.ones(len(xa), dtype=bool)
-    keep[1:] = ~((np.diff(xa) == 0) & (np.diff(ya) == 0))
-    np.testing.assert_array_equal(np.asarray(xa)[keep], xb)
-    np.testing.assert_array_equal(np.asarray(ya)[keep], yb)
+    np.testing.assert_array_equal(xa, xb)
+    np.testing.assert_array_equal(ya, yb)
 
 
 def _sameGridded(a, b):
@@ -138,19 +136,24 @@ def test_writing_twice_gives_the_same_file(roundTrip, tmp_path):
            ET.canonicalize(from_file=str(second), strip_text=True)
 
 
-def test_a_repeated_point_is_kept_in_the_model_and_dropped_from_the_file(
+def test_a_repeated_point_is_dropped_from_the_xys1d_and_kept_in_kikas_block(
         micro_tsl_sch4_tape, tmp_path):
     """s-CH4's W'(T) is two identical points at 22 K. A GNDS XYs1d must ascend,
-    and FUDGE refuses the file otherwise; the model keeps the tape's two."""
+    and FUDGE refuses the file otherwise, so the file's table states 22 K once;
+    kika's endfTapeData keeps the repeat, and the model read back has the tape's two."""
     suite, _ = decodeReactionSuite(read_endf(str(micro_tsl_sch4_tape)))
     form = next(_form(r) for r in suite.reactions if isinstance(_form(r), IncoherentElastic))
     assert list(form.DebyeWallerIntegral.toEndfRegions()[0]) == [22.0, 22.0]
     path = tmp_path / "sch4.xml"
     report = kika.write(suite, path)
+    table = next(node for node in ET.parse(path).getroot().iter("DebyeWallerIntegral"))
+    values = [float(v) for v in table.find(".//values").text.split()]
+    assert values[0::2] == [22.0]
     back = kika.read(path, covariances=False)
     again = next(_form(r) for r in back.reactions if isinstance(_form(r), IncoherentElastic))
-    assert list(again.DebyeWallerIntegral.toEndfRegions()[0]) == [22.0]
+    assert list(again.DebyeWallerIntegral.toEndfRegions()[0]) == [22.0, 22.0]
     assert any("repeating the one before" in line for line in report.approximations)
+    assert not [line for line in report.losses if "kept only in the suite's ENDF provenance" in line]
 
 
 def test_mf7_mt451_is_written_from_target_info_when_no_text_was_kept(micro_tsl_sch4_tape):
