@@ -39,7 +39,8 @@ from typing import List, Optional
 import numpy as np
 import pytest
 
-from kika.nuclear_data.model import Reference, Regions1d, ResonancesWithBackground, XYs1d
+from kika.nuclear_data.model import (Interpolation, Reference, Regions1d,
+                                     ResonancesWithBackground, XYs1d)
 from kika.nuclear_data.model.compare import modelDifferences
 from kika.nuclear_data.model.covariances import (CovarianceMatrix, Mixed,
                                                  ShortRangeSelfScalingVariance, Sum)
@@ -93,6 +94,57 @@ EXPECTED: List[Expected] = [
              "FUDGE adds the residual ENDF does not tabulate, with an unspecified distribution"),
     Expected("field", r"Sums MT\d+ \| summands: MT \[.*\] != \[.*\]",
              "kika sums over partial sums (MT3, MT4…), FUDGE over the leaves; the xs test compares the values"),
+    Expected("field", r"OrphanProducts MT\d+ \| outputChannel\.products\[photon#\d+\]\.multiplicity"
+                      r"\.forms\['eval'\](\.function1ds\[i\])?\.(xs|ys): shape \(#,\) != \(#,\)",
+             bound=7.9, tapes="n-005_B_011|n-011_Na_023",
+             reason="MF13 sigma_g/sigma: kika divides on the union grid (m*sigma is the tape's sigma_g), "
+                    "FUDGE on MF13's grid only"),
+    Expected("field", r"OrphanProducts MT\d+ \| outputChannel\.products\[photon#\d+\]\.distribution"
+                      r"\.forms\['eval'\]\.energy\.domainMin: # != #", bound=3.4, tapes="n-005_B_011",
+             reason="a line's domain: kika starts it where its MF13 table does, FUDGE at the threshold"),
+    Expected("field", r"OrphanProducts MT3 \| outputChannel\.products\[photon#0\]\.multiplicity\.forms"
+                      r"\['eval'\]\.function1ds\[i\]\.interpolation: <Interpolation\.linlin: 'lin-lin'> != "
+                      r"<Interpolation\.flat: 'flat'>", tapes="n-011_Na_023",
+             reason="the tape's histogram region has sigma_g = 0; a zero multiplicity is the same in any law"),
+    Expected("field", r".*: only the last value of a histogram, which no interval uses",
+             "kika keeps the tape's trailing value of a flat table, FUDGE writes 0"),
+    Expected("field", r".*: NNDC moved a step or end point by at most 0\.001 eV",
+             "FUDGE moves a repeated or final outgoing energy by 1e-3 eV; kika keeps the tape's table"),
+    Expected("field", r".*: two regions in kika, one table with a step moved by at most 0\.001 eV in NNDC",
+             "a step in outgoing energy: kika keeps it as two regions, FUDGE moves the point by 1e-6 eV"),
+    Expected("field", r"Reactions MT\d+ \| outputChannel\.(products\[[^\]]+\]\.outputChannel\.)?"
+                      r"products\[photon#\d+\]\.(multiplicity\.forms\['eval'\]\.ys|distribution\.forms"
+                      r"\['eval'\]\.energy\.function1ds\[i\]\.ys): arrays differ", bound=4e-15,
+             reason="photon yields and normalised spectra are computed from tape numbers by each code"),
+    Expected("field", r".*delayedNeutrons\[i\]\.label: '#' != '#'",
+             "delayed-neutron families: FUDGE labels them from 0, kika from 1"),
+    Expected("field", r".*delayedNeutrons\[i\]\.product\.distribution\.forms\['eval'\]\.energy\.g\.axes"
+                      r"\.axes\[i\]\.label: 'energy_out / theta\(energy_in\)' != 'energy_out / theta\( energy_in \)'",
+             "axis label text; FUDGE pads the parentheses"),
+    Expected("field", r".*delayedNeutrons\[i\]\.product\.multiplicity\.forms\['eval'\]\.ys: arrays differ",
+             bound=2e-16, reason="p_k(E) * nu_d(E) evaluated by each code"),
+    Expected("field", r"Reactions MT\d+ \| outputChannel\.products\[[^\]]+\]\.outputChannel\.Q\.value: # != #",
+             bound=2e-16, reason="a level energy QM - QI computed in binary; FUDGE keeps the decimal"),
+    Expected("field", r"Reactions MT802 \| outputChannel\.products\[Cr53_e2#0\]\.outputChannel\.Q\.value: # != #",
+             bound=1e-7, tapes="n-026_Fe_056",
+             reason="NNDC wrong: the tape's QM - QI is 1006270.1 eV, FUDGE writes its PoPs level, 1006270.0"),
+    Expected("field", r"Reactions MT\d+ \| outputChannel\.products\[[^\]]+\]\.distribution\.forms\['eval'\]"
+                      r"\.energy\.mass\.value: # != #", bound=2.1e-10,
+             reason="phase-space mass APSX * m_n: kika's m_n is CODATA's 1.00866491595 u, FUDGE's differs"),
+    Expected("field", r"Productions MT\d+ \| outputChannel\.products\[[^\]]+\]\.multiplicity\.forms\['eval'\]"
+                      r"\.domain(Min|Max)_: # != #", bound=3e12, tapes="n-025_Mn_055|n-040_Zr_090|n-092_U_235",
+             reason="kika states the MF10 table's domain (Mn-55 MT30: 29.4-60 MeV); FUDGE the reaction's, or 1e-5-20 MeV"),
+    Expected("field", r"Reactions MT\d+ \| outputChannel\.products\[n#0\]\.distribution\.forms\['eval'\]"
+                      r"\.energy\.weighted\[i\]\.weight\.label: None != 'weight'",
+             "a form label FUDGE writes and kika omits"),
+    Expected("xs", r"Sums MT852: npts 830 != 7910", bound=8.93e-4, tapes="n-092_U_235",
+             reason="NNDC wrong: FUDGE's lumped sum is 8.9e-4 off the tape's log-log summands, kika's 7.9e-5"),
+    Expected("res", r"unresolved\.tabulatedWidths\.scatteringRadius: # != #", bound=2e-16,
+             reason="AP * 10 to fm in binary; FUDGE writes the decimal"),
+    Expected("res", r"unresolved\.tabulatedWidths\.PoPs\.particles\['[^']+'\]\.mass\.value: # != #", bound=2.1e-10,
+             reason="the target mass is AWRI * m_n in kika, FUDGE's PoPs value"),
+    Expected("res", r"unresolved\.tabulatedWidths\.PoPs\.particles\['[^']+'\]\.(charge|energy): None != .*",
+             "kika's URR PoPs carries the target's mass and spin only"),
     Expected("res", r"unresolved\.spinGroups\[i\]\.levelSpacingFunction\.label: 'eval' != None",
              "a form label kika writes and FUDGE omits"),
     Expected("res", r"unresolved\.tabulatedWidths\.PoPs: PoPs != NoneType",
@@ -356,24 +408,24 @@ def _channelRoles(resonanceReactions, channels, labels):
 def _unresolvedDifferences(ua, ub, labelsA, labelsB):
     # resonanceReactions only name the channels' reactions; the channels are paired through them
     ignore = IGNORED_FIELDS + ("spinGroups", "resonanceReactions")
-    out = [Difference("res", _normalised(d))
-           for d in modelDifferences(ua, ub, path="@unresolved", ignore=ignore)]
+    out = [_sized("res", "unresolved.", d, ua, ub)
+           for d in modelDifferences(ua, ub, path="@", ignore=ignore)]
     ta, tb = ua.tabulatedWidths, ub.tabulatedWidths
     if ta is None or tb is None or len(ta.spinGroups) != len(tb.spinGroups):
         return out + [Difference("res", "unresolved: spin groups not paired")]
     for k, (ga, gb) in enumerate(zip(ta.spinGroups, tb.spinGroups)):
         name = f"unresolved.spinGroups[{k}]"
-        out += [Difference("res", _normalised(d)) for d in
-                modelDifferences(ga, gb, path=f"@{name}", ignore=IGNORED_FIELDS + ("channels",))]
+        out += [_sized("res", "unresolved.spinGroups[i].", d, ga, gb) for d in
+                modelDifferences(ga, gb, path="@", ignore=IGNORED_FIELDS + ("channels",))]
         ca = _channelRoles(ta.resonanceReactions, ga.channels, labelsA)
         cb = _channelRoles(tb.resonanceReactions, gb.channels, labelsB)
         if set(ca) != set(cb):
             out.append(Difference("res", f"{name}: channels with widths for MT {sorted(ca, key=str)} "
                                          f"!= {sorted(cb, key=str)}"))
         for role in sorted(set(ca) & set(cb), key=str):
-            out += [Difference("res", _normalised(d)) for d in
-                    modelDifferences(ca[role], cb[role], path=f"@{name}.channel[MT{role}]",
-                                     ignore=IGNORED_FIELDS + ("label",))]
+            out += [_sized("res", f"unresolved.spinGroups[i].channel[MT{role}].", d, ca[role], cb[role])
+                    for d in modelDifferences(ca[role], cb[role], path="@",
+                                              ignore=IGNORED_FIELDS + ("label",))]
     return out
 
 
@@ -405,16 +457,57 @@ def _tabulated(node):
     return None
 
 
+#: How far FUDGE moves a repeated or final abscissa when it rewrites a table.
+NUDGE = 1e-3
+
+
+def _snapped(mine, theirs):
+    """*theirs* with each value within NUDGE of one of *mine* replaced by it."""
+    mine, theirs = np.asarray(mine, float), np.asarray(theirs, float)
+    nearest = mine[np.abs(theirs[:, None] - mine[None, :]).argmin(axis=1)]
+    return np.where(np.abs(nearest - theirs) <= NUDGE + 1e-12 * np.abs(theirs), nearest, theirs)
+
+
+def _nudged(mine, theirs):
+    """*theirs* is *mine* with steps moved by at most NUDGE eV, and maybe closed by a final zero."""
+    (xa, ya), (xb, yb) = mine, theirs
+    if np.array_equal(xa, xb):
+        return False
+    b = list(zip(_snapped(xa, xb), yb))
+    a = list(zip(xa, ya))
+    return b == a or (b[:-1] == a and b[-1] == (a[-1][0], 0.0))
+
+
+def _regionsAreNudgedTable(regions, table):
+    mine = [f for region in regions.function2ds for f in region.function1ds]
+    theirs = list(table.function1ds)
+    outerA = [f.outerDomainValue for f in mine]
+    outerB = list(_snapped(outerA, [f.outerDomainValue for f in theirs]))
+    if outerA != outerB:
+        return False
+    return all(not modelDifferences(f, g, ignore=IGNORED_FIELDS + ("outerDomainValue", "index"))
+               for f, g in zip(mine, theirs))
+
+
 def _sized(check, where, message, a, b):
     """One ``modelDifferences`` message as a Difference, with its relative size where it has one."""
     path, _, rest = message.partition(": ")
     relative = path[1:]
     if rest == "arrays differ":
         x, y = (np.asarray(_resolve(o, relative), float) for o in (a, b))
-        return Difference(check, f"{where}{_normalised(message)}", _relative(x, y))
+        table = _resolve(a, relative[:-3]) if relative.endswith(".ys") else None
+        if (isinstance(table, XYs1d) and table.interpolation == Interpolation.flat
+                and np.array_equal(x[:-1], y[:-1])):
+            return Difference(check, f"{where}{_normalisedPath(path)}: only the last value of a "
+                                     f"histogram, which no interval uses")
+        return Difference(check, f"{where}{_normalised(message)}",
+                          float(np.max(np.abs(x - y)) / (np.max(np.abs(y)) or 1.0)))
     if rest.startswith("shape") and relative.endswith((".xs", ".ys")):
         pa, pb = (_tabulated(_resolve(o, relative[:-3])) for o in (a, b))
         if pa is not None and pb is not None:
+            if _nudged(pa, pb):
+                return Difference(check, f"{where}{_normalisedPath(path[:-3])}: NNDC moved a step "
+                                         f"or end point by at most {NUDGE} eV")
             grid = np.union1d(pa[0], pb[0])
             size = _relative(np.interp(grid, *pa), np.interp(grid, *pb))
             return Difference(check, f"{where}{_normalised(message)}", size)
@@ -422,12 +515,20 @@ def _sized(check, where, message, a, b):
         x, y = _resolve(a, relative), _resolve(b, relative)
         if x == 1e-5 and y > x:
             return Difference(check, f"{where}{_normalisedPath(path)}: kika's 1e-05 below NNDC's")
+    if rest == "Regions2d != XYs2d" and _regionsAreNudgedTable(_resolve(a, relative),
+                                                               _resolve(b, relative)):
+        return Difference(check, f"{where}{_normalisedPath(path)}: two regions in kika, one table "
+                                 f"with a step moved by at most {NUDGE} eV in NNDC")
     if rest in ("XYs1d != Constant1d", "Constant1d != XYs1d"):
         x, y = _resolve(a, relative), _resolve(b, relative)
         table, constant = (x, y) if isinstance(x, XYs1d) else (y, x)
         if np.all(np.asarray(table.ys, float) == float(constant.constant)):
             return Difference(check, f"{where}{_normalisedPath(path)}: a constant XYs1d against "
                                      f"Constant1d, same value")
+    numbers = re.fullmatch(r"(\S+) != (\S+)", rest)
+    if numbers and all(re.fullmatch(r"[-+]?[\d.]+(e[-+]?\d+)?", v) for v in numbers.groups()):
+        x, y = (float(v) for v in numbers.groups())
+        return Difference(check, f"{where}{_normalised(message)}", abs(x - y) / (abs(y) or 1.0))
     return Difference(check, f"{where}{_normalised(message)}")
 
 
