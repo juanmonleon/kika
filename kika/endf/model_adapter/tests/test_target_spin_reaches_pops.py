@@ -56,7 +56,7 @@ def test_rml_formalism_pops_states_the_elastic_pair_spin():
     range's spin from the elastic pair and not from the 0 of its CONT."""
     suite = kika.read(str(DATA / "micro_cl35_mf32.endf"), format="endf", covariances=False)
     (region,) = suite.resonances.resolved
-    (target,) = region.formalism.PoPs.particles.values()
+    target = region.formalism.PoPs.particles[suite.target]
     assert target.spin.value == 1.5
 
 
