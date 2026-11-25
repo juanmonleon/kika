@@ -695,6 +695,9 @@ class _ResonanceReader:
                 spin=float(row[index["J"]]),
                 **widths,
             ))
+        # One l-block per L in ascending L, as FUDGE's toENDF6 writes them; the
+        # table is sorted by energy, so first appearance is no order at all.
+        parameters.spinGroups.sort(key=lambda group: group.L)
         return parameters
 
     # -- unresolved --------------------------------------------------------

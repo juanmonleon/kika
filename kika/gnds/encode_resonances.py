@@ -374,7 +374,8 @@ def _rmGroupsForGNDS(formalism, report):
     if formalism.approximation != 'ReichMoore':return formalism.spinGroups
     particles=[] if formalism.PoPs is None else list(formalism.PoPs.particles.values())
     target=particles[0] if len(particles)==1 else None
-    result=[]
+    roles={r.label:_rmRole(r) for r in formalism.resonanceReactions}
+    result,converted=[],[]
     for source in formalism.spinGroups:
         if not source.spins:
             result.append(source);continue
@@ -396,16 +397,20 @@ def _rmGroupsForGNDS(formalism, report):
             j=abs(aj);cs=abs(spin-.5) if aj<0 else spin+.5
             if not abs(l-cs)<=j<=l+cs and aj>=0:cs=abs(spin-.5)
             buckets.setdefault((j,cs),[]).append(i)
+        # FUDGE's columns: capture, then the entrance channel, then fission.
+        order=sorted(range(len(source.channels)),key=lambda k:{'capture':0,'neutron':1}.get(roles.get(source.channels[k].resonanceReaction),2))
         for ordinal,((j,cs),indices) in enumerate(buckets.items()):
             group=deepcopy(source);group.label=f'{source.label}-J{j}-s{cs}-{ordinal}'
             group.spin=j;group.parity=parity*(-1)**l
             group.spins=[];group.energies=[source.energies[i] for i in indices]
-            group.widths=[list(source.widths[i]) for i in indices];group.atomicWeightRatio=None
+            group.widths=[[source.widths[i][k] for k in order] for i in indices];group.atomicWeightRatio=None
+            group.channels=[group.channels[k] for k in order]
             for position,channel in enumerate(group.channels):
                 channel.columnIndex=position+1
                 if channel.resonanceReaction=='elastic':channel.channelSpin=cs
-            result.append(group)
-    return result
+            converted.append(((l,j,cs),group))
+    # FUDGE's spin-group order: by L, then J, then channel spin.
+    return result+[group for _,group in sorted(converted,key=lambda item:item[0])]
 
 
 def _rmlBoundaryCondition(formalism, groups) -> Optional[str]:
@@ -564,14 +569,59 @@ def _rMatrixTable(parent: ET.Element, group, report: ConversionReport, widthUnit
              name=f"{entry[1].resonanceReaction} width" if entry else f"column{index}",
              unit=widthUnit)
 
+    data = ET.SubElement(table, "data")
+    data.text = " ".join(_number(v) for row in _rMatrixRows(group) for v in row)
+
+
+def _breitWignerRows(formalism):
+    """``(L, resonance)`` in the table's order: by energy, as FUDGE sorts it."""
+    rows = [(group.L, resonance)
+            for group in formalism.resonanceParameters.spinGroups
+            for resonance in group.resonances]
+    return sorted(rows, key=lambda row: row[1].energy)
+
+
+def _breitWignerTable(formalism):
+    resonances = _breitWignerRows(formalism)
+    withFission = any(r.fissionWidth for _, r in resonances)
+    columns = [c for c in BREIT_WIGNER_COLUMNS if c[0] != "fissionWidth" or withFission]
+    return [[L if field is None else getattr(resonance, field) for _, _, field in columns]
+            for L, resonance in resonances]
+
+
+def _rMatrixRows(group):
+    """A spin group's table rows, laid out by ``columnIndex`` (see :func:`_rMatrixTable`)."""
+    byIndex = {channel.columnIndex: position for position, channel in enumerate(group.channels)
+               if channel.columnIndex is not None}
+    columns = max([len(group.channels) + 1] + [index + 1 for index in byIndex])
     rows = []
     for position, energy in enumerate(group.energies):
         row = [energy] + [0.0] * (columns - 1)
-        for index, (channelPosition, _) in byIndex.items():
+        for index, channelPosition in byIndex.items():
             row[index] = group.widths[position][channelPosition]
         rows.append(row)
-    data = ET.SubElement(table, "data")
-    data.text = " ".join(_number(v) for row in rows for v in row)
+    return rows
+
+
+def resonanceTables(resonances, report):
+    """``(rowHref, [(label, href, rows), ...])`` of the one resolved range's tables, as written."""
+    regions = getattr(resonances, "resolved", None) or []
+    if len(regions) != 1:
+        return None
+    formalism = regions[0].formalism
+    label = formalism.label or "eval"
+    if isinstance(formalism, BreitWigner):
+        base = f"/reactionSuite/resonances/resolved/BreitWigner[@label='{label}']"
+        return base, [("resonanceParameters", f"{base}/resonanceParameters/table",
+                       _breitWignerTable(formalism))]
+    if isinstance(formalism, RMatrix):
+        groups = _rmGroupsForGNDS(formalism, report)
+        _, groups = _withoutEmptyFission(formalism, groups, report)
+        base = f"/reactionSuite/resonances/resolved/RMatrix[@label='{label}']"
+        return base, [(group.label, f"{base}/spinGroups/spinGroup[@label='{group.label}']"
+                                    f"/resonanceParameters/table", _rMatrixRows(group))
+                      for group in groups]
+    return None
 
 
 def _breitWigner(parent: ET.Element, formalism: BreitWigner,
@@ -591,9 +641,7 @@ def _breitWigner(parent: ET.Element, formalism: BreitWigner,
             constant=formalism.scatteringRadius,
             unit=formalism.radiusUnit), report, "BreitWigner", domain)
 
-    resonances = [(group.L, resonance)
-                  for group in formalism.resonanceParameters.spinGroups
-                  for resonance in group.resonances]
+    resonances = _breitWignerRows(formalism)
     if any(group.competitiveChannel is not None for group in formalism.resonanceParameters.spinGroups):
         report.unsupportedNode("GNDS BreitWigner has no native competitive descriptor; exit metadata is not serialized")
     if formalism.radiusPolicy is not None and formalism.radiusPolicy.channelMode == "constant":
@@ -610,12 +658,8 @@ def _breitWigner(parent: ET.Element, formalism: BreitWigner,
         _set(ET.SubElement(headers, "column"), index=str(index), name=name,
              unit=unit)
 
-    numbers = []
-    for L, resonance in resonances:
-        for name, _, field in columns:
-            numbers.append(L if field is None else getattr(resonance, field))
     data = ET.SubElement(table, "data")
-    data.text = " ".join(_number(v) for v in numbers)
+    data.text = " ".join(_number(v) for row in _breitWignerTable(formalism) for v in row)
 
 
 def _unresolved(parent: ET.Element, region, report: ConversionReport,

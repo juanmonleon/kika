@@ -91,9 +91,11 @@ def test_spin_groups_of_one_l_that_disagree_on_the_radius_are_refused(tmp_path):
     gnds = tmp_path / "mn55.gnds.xml"
     kika.write(kika.read(str(DATA / "micro_mn55_mf2.endf")), str(gnds), format="gnds")
     suite = kika.read(str(gnds))
-    groups = [g for g in suite.resonances.resolved[0].formalism.spinGroups
-              if g.channels[0].L == 1]
-    groups[0].channels[0].scatteringRadius = 6.0
+    formalism = suite.resonances.resolved[0].formalism
+    elastic = {r.label for r in formalism.resonanceReactions if r.reactionMT == 2}
+    entrances = [c for g in formalism.spinGroups for c in g.channels
+                 if c.resonanceReaction in elastic and c.L == 1]
+    entrances[0].scatteringRadius = 6.0
     out = tmp_path / "mn55.endf"
     report = kika.write(suite, str(out), format="endf")
     assert 2 not in read_endf(str(out)).mf
