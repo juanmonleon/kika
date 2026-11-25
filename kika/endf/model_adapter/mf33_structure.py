@@ -128,6 +128,51 @@ def attachLumps(endf, suite, report):
     return retained
 
 
+def attachCovarianceSums(endf, suite, report):
+    """A crossSectionSum flagged ``omit`` for a summed MT with MF33 and no MF3 (Fe-56 MT103)."""
+    from kika._constants import MF3_SUM_RULES, mf3SumComponents
+    from kika.algebra import add
+    from kika.algebra.laws import interval_laws
+    from kika.nuclear_data.model import (Add, CrossSection, CrossSectionSum, OutputChannel,
+        Q, ReactionId, Summands, XYs1d, crossSectionAxes)
+    from kika.nuclear_data.model.endf_conversion import OMIT_FLAG, EndfConversionFlags, reactionHref
+
+    mf3, mf33 = endf.mf.get(3), endf.mf.get(33)
+    if mf3 is None or mf33 is None:
+        return
+    byMT = {r.ENDF_MT: r for r in list(suite.reactions) + list(suite.sums)}
+    present = set(byMT)
+    for mt in sorted(getattr(mf33, "mt", {})):
+        if mt in byMT or mt not in MF3_SUM_RULES or mf33.mt[mt]._mtl:
+            continue
+        parts = [part for part in mf3SumComponents(mt, present) if part in mf3.mt]
+        if not parts:
+            report.lost(f"MF33/MT{mt}: no MF3 for it or for any reaction it sums, "
+                        f"so its covariance links to no cross section")
+            continue
+        tables = []
+        for part in parts:
+            s = mf3.mt[part]
+            tables.append((s.energies, s.cross_sections, interval_laws(len(s.energies), s.energy_interpolation)))
+        x, y = add(tables)
+        if any(any(law > 2 for law in laws) for _, _, laws in tables):
+            from kika.algebra.arithmetic import LINEARIZATION_TOLERANCE
+            report.approximated(f"MF33/MT{mt}: nonlinear MF3 curves of the reactions it sums "
+                                f"linearized to {LINEARIZATION_TOLERANCE:g} for its cross section")
+        qs = [byMT[part].outputChannel.Q.value for part in parts
+              if byMT[part].outputChannel is not None and byMT[part].outputChannel.Q is not None]
+        cross = CrossSection(); cross["eval"] = XYs1d(x, y, label="eval", axes=crossSectionAxes())
+        node = CrossSectionSum(id=ReactionId(label=f"MT{mt}", ENDF_MT=mt), crossSection=cross,
+            outputChannel=OutputChannel(Q=Q(value=float(max(qs)) if qs else 0.0, unit="eV")),
+            summands=Summands([Add(reactionHref(byMT[part]) + "/crossSection") for part in parts]))
+        suite.sums.append(node)
+        flags = EndfConversionFlags.of(suite)
+        if flags is None:
+            flags = EndfConversionFlags()
+            suite.applicationData.entries.append(flags)
+        flags.conversions.append((reactionHref(node), OMIT_FLAG))
+
+
 def bindReactionLinks(covariances, reactions):
     """Point rows and columns to the actual sum/reaction containers, not guessed MTs."""
     from kika.nuclear_data.model.endf_conversion import reactionHref

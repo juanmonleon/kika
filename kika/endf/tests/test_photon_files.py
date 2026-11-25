@@ -83,7 +83,8 @@ def textual_divergence(source: list, kika: list) -> list:
             if a == b:
                 continue
             value = parse_number(a)
-            canonical = a.strip() and format_endf_number(value).strip() == a.strip()
+            # Left-aligned ``'1109309.99 '`` (B-VIII.1 Ge-71 MF12/608) is not canonical.
+            canonical = a.strip() and format_endf_number(value) == a
             if value != parse_number(b) or canonical:
                 bad.append((i, col, a, b))
     return bad

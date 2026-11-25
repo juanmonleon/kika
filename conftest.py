@@ -143,6 +143,8 @@ _TAPES: Dict[str, Sequence[str]] = {
                  "endfb81/neutrons/n-092_U_235.endf", "endfb8.1/n/92235.endf"),
     "u238_b81": ("endfb81/n-092_U_238.endf", "endfb81/neutrons/n-092_U_238.endf",
                  "endfb8.1/n/92238.endf"),
+    "zr90_b81": ("endfb81/n-040_Zr_090.endf", "endfb81/neutrons/n-040_Zr_090.endf",
+                 "endfb8.1/n/40090.endf"),
     "cf252_b81": ("endfb81/n-098_Cf_252.endf", "n-098_Cf_252.endf",
                   "endfb81/neutrons/n-098_Cf_252.endf"),
     "pu239_b81": ("endfb81/n-094_Pu_239.endf", "n-094_Pu_239.endf",
@@ -664,6 +666,7 @@ fe56_jeff40_tape = _tape_fixture("fe56_jeff40")
 u238_b80_tape = _tape_fixture("u238_b80")
 u235_b81_tape = _tape_fixture("u235_b81")
 u238_b81_tape = _tape_fixture("u238_b81")
+zr90_b81_tape = _tape_fixture("zr90_b81")
 cf252_b81_tape = _tape_fixture("cf252_b81")
 pu239_b81_tape = _tape_fixture("pu239_b81")
 u233_b81_tape = _tape_fixture("u233_b81")

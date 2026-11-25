@@ -426,6 +426,58 @@ def _groundStateQOfContinua(suite) -> None:
         q.value = float(provenance.qm)
 
 
+def _captureResidual(suite, formalism, reaction, neutronMass: float) -> None:
+    """A capture pair's particles where GNDS keeps them: the photon as ejectile and
+    the compound nucleus, with the pair's MB, in the formalism's PoPs.
+
+    ENDF lists no residual among a capture's products when MF6 states only the
+    photons, so the pair matching by products finds none. The compound nucleus is
+    the target plus one neutron by definition. Its spin and parity stay unstated:
+    ENDF writes them 0 for a capture residual.
+    """
+    from kika.nuclear_data.model.pops import Nuclide, PoPs, pidFromZA
+
+    target = suite.PoPs.particles.get(suite.target)
+    if not isinstance(target, Nuclide) or target.ZA is None or target.nuclearLevel:
+        return
+    pid = pidFromZA(target.ZA + 1)
+    if reaction.ejectile is None:
+        reaction.ejectile = "photon"
+    if formalism.PoPs is None:
+        formalism.PoPs = PoPs(name="resolved resonances")
+    if formalism.PoPs.particles.get(pid) is None:
+        formalism.PoPs.add(Nuclide(
+            id=pid, Z=target.Z, A=target.A + 1,
+            mass=PhysicalQuantity(value=float(reaction.kinematics.particleB.massRatio) * neutronMass,
+                                  unit="amu")))
+
+
+def _fissionQOfTheTape(suite) -> None:
+    """Q := QM and a ``QI=`` flag where a fission MF3 is not MF1/458's ER (B-VIII.1 U-238)."""
+    from kika.nuclear_data.model.endf_conversion import EndfConversionFlags, reactionHref
+    from .derive.reactions import _nonNeutrinoEnergy
+
+    flags = EndfConversionFlags.of(suite)
+    for container in (suite.reactions, suite.sums, suite.fissionComponents):
+        for reaction in container:
+            provenance = reaction.provenance
+            q = getattr(getattr(reaction, "outputChannel", None), "Q", None)
+            released = _nonNeutrinoEnergy(reaction)
+            if (released is None or getattr(provenance, "sourceFormat", None) != "endf"
+                    or getattr(provenance, "qm", None) is None or getattr(q, "value", None) is None):
+                continue
+            qi, qm = float(q.value), float(provenance.qm)
+            if qi == qm == released:
+                continue
+            if flags is None:
+                flags = EndfConversionFlags()
+                suite.applicationData.entries.append(flags)
+            if qi != qm:
+                provenance.headerFields = dict(provenance.headerFields or {}, qi=qi)
+            flags.conversions.append((reactionHref(reaction) + "/outputChannel/Q", f"QI={qi!r}"))
+            q.value = qm
+
+
 def _pairParticlesFromMF2(suite) -> None:
     """What an RML pair (LRF=7) states of its two particles, where a GNDS
     file keeps it: the ejectile on the ``resonanceReaction``, each particle's
@@ -467,6 +519,9 @@ def _pairParticlesFromMF2(suite) -> None:
         stated = {}
         for channelReaction in formalism.resonanceReactions:
             kinematics = channelReaction.kinematics
+            if kinematics is not None and channelReaction.reactionMT == 102:
+                _captureResidual(suite, formalism, channelReaction, neutronMass)
+                continue
             if kinematics is None or kinematics.effective or channelReaction.reactionMT is None:
                 continue
             reactions = [r for r in suite.reactions if r.ENDF_MT == channelReaction.reactionMT]
@@ -480,6 +535,10 @@ def _pairParticlesFromMF2(suite) -> None:
             for particle in (kinematics.particleA, kinematics.particleB):
                 match = [pid for pid in products if nuclearCharge(pid) == particle.charge]
                 pair.append(match[0] if len(match) == 1 else None)
+            if channelReaction.reactionMT == 2:
+                # Elastic is the projectile and the target by definition; some tapes
+                # write ZB=0 for a neutral pair (Cu-63), which no charge matches.
+                pair = [suite.projectile, suite.target]
             if None in pair or pair[0] == pair[1]:
                 continue
             if channelReaction.ejectile is None:
@@ -721,6 +780,7 @@ def decodeReactionSuite(endf, report: Optional[ConversionReport] = None):
 
     # Last of the reaction passes, which all read the outputChannel Q as QI.
     _groundStateQOfContinua(suite)
+    _fissionQOfTheTape(suite)
 
     if style is not None:
         report = _attachEvaluatedDomain(suite, style, headerProvenance, report)

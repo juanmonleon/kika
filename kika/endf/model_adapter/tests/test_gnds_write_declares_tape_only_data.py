@@ -74,3 +74,52 @@ def test_the_suite_level_stores_and_ldg1_are_each_named(tmp_path):
         "MF1/455", "MF1/460", "MF6", "MF8", "MF9/MF10"]
     assert found[3] == "MF8: 2 product state(s) that no MF9 or MF10 describes (MT102)"
     assert found[4] == "MF9/MF10: the sections kika could not model (MF10/102)"
+
+
+def test_another_format_names_itself():
+    from kika._write import _declareTapeOnly
+    from kika.nuclear_data.model import ConversionReport
+
+    suite = kika.read(DATA / "micro_u235_mf6.endf")
+    report = _declareTapeOnly(suite, ConversionReport(), "the ACE table")
+    assert [m.split(",")[0] for m in report.losses] == ["not in the ACE table"]
+
+
+@pytest.mark.parametrize("tape, expected", [
+    ("dec-026_Fe_056.endf", []),
+    ("dec-055_Cs_137.endf", ["MF8/MT457: each spectrum's normalisation (FD, FC), its ERAV "
+                             "and the order of its lines"]),
+    ("dec-094_Pu_244.endf", ["MF8/MT457: each spectrum's normalisation (FD, FC), its ERAV "
+                             "and the order of its lines",
+                             "the sections a decay PoPs has no node for (MF1/MT452)"]),
+])
+def test_a_decay_pops_declares_what_it_keeps_for_the_tape(tape, expected, tmp_path):
+    report = kika.write(kika.read(DATA / tape), tmp_path / "out.xml", format="gnds")
+    declared = [m.split("back: ", 1)[1] for m in report.losses
+                if m.startswith("not in the GNDS file, kept only in the PoPs' ENDF provenance")]
+    assert declared == expected
+
+
+def test_a_level_qm_off_its_pops_energy_is_declared(zr90_b81_tape):
+    """B-VIII.1 Zr-90 MT651: MF3's QM - QI is 908970 eV, MF8 puts Y89_e1 at 909000 eV."""
+    found = [s.split("back: ", 1)[1] for s in tapeOnlyData(kika.read(zr90_b81_tape, covariances=False))]
+    assert [s for s in found if s.startswith("MF3/")] == [
+        "MF3/MT651: QM -6128816 eV; QI plus Y89_e1's energy gives -6128786 eV"]
+
+
+@pytest.mark.parametrize("tape, expected", [
+    ("micro_tsl_sch4.endf", ["MF7: the B array's digits, LLN, each TAB1 and TAB2's "
+                             "interpolation regions and each temperature's LI (MT2, MT4)"]),
+    ("micro_tsl_bemetal_elastic.endf", ["MF7: the B array's digits, LLN, each TAB1 and TAB2's "
+                                        "interpolation regions and each temperature's LI (MT2)",
+                                        "MF7/MT451: NAS and the digits of SFI as the tape "
+                                        "writes them"]),
+])
+def test_a_thermal_scattering_suite_declares_its_mf7_bookkeeping(tape, expected, tmp_path):
+    report = _writeGnds(kika.read(DATA / tape), tmp_path)
+    assert [m.split("back: ", 1)[1] for m in _tapeOnlyLosses(report)] == expected
+
+
+def test_a_fission_yield_tape_at_one_energy_declares_nothing(tmp_path):
+    report = kika.write(kika.read(DATA / "nfy-096_Cm_242.endf"), tmp_path / "out.xml", format="gnds")
+    assert not [m for m in report.losses if "kept only in the PoPs' ENDF provenance" in m]

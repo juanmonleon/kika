@@ -18,10 +18,10 @@ from .photons import PHOTONS_VERBATIM_KEY
 from .productions import (ACTIVATION_MF8_KEY, ACTIVATION_MF8_OPAQUE_KEY,
                           ACTIVATION_VERBATIM_KEY, _readMf8)
 
-__all__ = ["tapeOnlyData"]
+__all__ = ["decayTapeOnlyData", "tapeOnlyData"]
 
 
-def tapeOnlyData(suite) -> List[str]:
+def tapeOnlyData(suite, written: str = "the GNDS file") -> List[str]:
     """One sentence per kind of ENDF data that only the suite's provenance holds.
 
     Each sentence names the sections it covers. None of these data changes a cross
@@ -32,6 +32,8 @@ def tapeOnlyData(suite) -> List[str]:
     suite
         A ``ReactionSuite``, normally one decoded from an ENDF tape. A suite with no
         ENDF provenance gives an empty list.
+    written
+        What is being written instead of the tape, as the sentences name it.
 
     Returns
     -------
@@ -56,6 +58,8 @@ def tapeOnlyData(suite) -> List[str]:
             raw = [p["lf"] for p in mf5.get("partials", ()) if "raw_lines" in p]
             if raw:
                 found["mf5"].append((_mt(path), raw))
+        if "mf7" in fields:
+            found["mf7"].append(getattr(node, "ENDF_MT", None) or _mt(path))
         mf6 = fields.get("mf6")
         if isinstance(mf6, dict):
             # Only the negative LAWs: a positive one kika does not map leaves its
@@ -99,8 +103,77 @@ def tapeOnlyData(suite) -> List[str]:
     if photons:
         sentences.append(f"photons: the sections kika could not model "
                          f"(MF{', MF'.join(photons)})")
-    return [f"not in the GNDS file, kept only in the suite's ENDF provenance to write "
+    if found["mf7"]:
+        sentences.append(f"MF7: the B array's digits, LLN, each TAB1 and TAB2's interpolation "
+                         f"regions and each temperature's LI "
+                         f"({', '.join(f'MT{mt}' for mt in dict.fromkeys(found['mf7']))})")
+    if "mf7mt451" in suiteFields:
+        sentences.append("MF7/MT451: NAS and the digits of SFI as the tape writes them")
+    sentences.extend(_levelQmSentences(suite))
+    return [f"not in {written}, kept only in the suite's ENDF provenance to write "
             f"the tape back: {sentence}" for sentence in sentences]
+
+
+def decayTapeOnlyData(pops, written: str = "the GNDS file") -> List[str]:
+    """:func:`tapeOnlyData` for a decay or fission-yield ``PoPs`` read from ENDF."""
+    from .decay_sublibrary import DECAY_KEY, VERBATIM_KEY
+    from .fission_yields import FPY_KEY
+
+    provenance = getattr(pops, "provenance", None)
+    if not isinstance(provenance, EndfProvenance):
+        return []
+    fields = provenance.headerFields or {}
+    sentences = []
+    book = fields.get(DECAY_KEY)
+    if isinstance(book, dict):
+        if book.get("layout"):
+            sentences.append("MF8/MT457: each spectrum's normalisation (FD, FC), its ERAV "
+                             "and the order of its lines")
+        overrides = book.get("overrides") or {}
+        if "verbatim" in overrides:
+            sentences.append("MF8/MT457: the section as read, which the model does not rebuild")
+        elif overrides.get("fields"):
+            sentences.append(f"MF8/MT457: the text of {len(overrides['fields'])} field(s) the "
+                             f"model holds as another number or not at all")
+    for mt, entry in sorted((fields.get(FPY_KEY) or {}).items()):
+        if len(entry.get("interp") or ()) > 1:
+            sentences.append(f"MF8/MT{mt}: the interpolation between incident energies (I)")
+        fpyOverrides = entry.get("overrides") or {}
+        if "verbatim" in fpyOverrides:
+            sentences.append(f"MF8/MT{mt}: the section as read, which the model does not rebuild")
+        elif fpyOverrides.get("fields"):
+            sentences.append(f"MF8/MT{mt}: the text of {len(fpyOverrides['fields'])} field(s) the "
+                             f"model holds as another number or not at all")
+    kept = fields.get(VERBATIM_KEY) or []
+    if kept:
+        sentences.append(f"the sections a decay PoPs has no node for "
+                         f"({', '.join(f'MF{mf}/MT{mt}' for mf, mt, _ in kept)})")
+    return [f"not in {written}, kept only in the PoPs' ENDF provenance to write the tape "
+            f"back: {sentence}" for sentence in sentences]
+
+
+def _levelQmSentences(suite) -> List[str]:
+    """MF3's QM of a level reaction where QI plus the level's PoPs energy, FUDGE's rule, is not it."""
+    from kika._records import format_endf_number
+    from kika.nuclear_data.model.endf_conversion import reactionQI
+    from .derive.reactions import _decayingResidual, _levelEnergy
+
+    sentences = []
+    for reaction in suite.reactions:
+        provenance = reaction.provenance
+        if (not isinstance(provenance, EndfProvenance) or provenance.qm is None
+                or int(getattr(provenance, "lr", 0) or 0) != 0 or reaction.outputChannel is None):
+            continue
+        residual = _decayingResidual(reaction)
+        level = _levelEnergy(suite, residual) if residual is not None else None
+        qi = reactionQI(reaction, suite)
+        if level is None or qi is None:
+            continue
+        derived = float(qi) + level
+        if format_endf_number(derived) != format_endf_number(float(provenance.qm)):
+            sentences.append(f"MF3/MT{reaction.ENDF_MT}: QM {float(provenance.qm):.7g} eV; QI plus "
+                             f"{residual.pid}'s energy gives {derived:.7g} eV")
+    return sentences
 
 
 def _mf6Sentences(entries) -> List[str]:

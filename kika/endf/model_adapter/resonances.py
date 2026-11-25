@@ -1071,9 +1071,9 @@ def _encodeResolved(formalism, fields: dict, report: ConversionReport):
 
         awri = group.atomicWeightRatio
         if awri is None:
-            awri = formalismAtomicWeightRatio(formalism)
+            awri = fields.get("awri")
         lValues.append(LValueBlock(
-            awri=awri if awri is not None else fields.get("awri"), l=l,
+            awri=awri if awri is not None else formalismAtomicWeightRatio(formalism), l=l,
             num_resonances=block["num_resonances"],
             apl_or_qx=c2, lrx=(1 if isinstance(formalism, BreitWigner) and group.competitiveChannel is not None
                               else block["lrx"]), resonances=records,
@@ -1207,14 +1207,47 @@ def reichMooreLBlocks(formalism, rangeRadius: float, targetSpin: float,
     return [byL[l] for l in sorted(byL)]
 
 
-def formalismAtomicWeightRatio(formalism) -> Optional[float]:
-    """AWRI as a resolved range states it: its own target's mass over the neutron's."""
+_URR_ROLE_BY_MT = {2: "neutron", 102: "capture", 18: "fission"}
+_URR_ROLES = {"neutron": "neutron", "elastic": "neutron", "capture": "capture",
+              "fission": "fission", "competitive": "competitive"}
+
+
+def unresolvedChannelRoles(widths) -> dict:
+    """Each URR width label → its ENDF column (neutron, capture, fission, competitive).
+
+    A label a ``resonanceReaction`` carries goes by that reaction's MT, as FUDGE
+    matches them; the competitive width, which no reaction carries, by its label.
+    """
+    roles = {}
+    for reaction in widths.resonanceReactions:
+        mt = getattr(reaction, "reactionMT", None)
+        role = _URR_ROLE_BY_MT.get(mt) if mt is not None else _URR_ROLES.get(reaction.label)
+        if role is None:
+            raise ValueError(f"the unresolved resonanceReaction {reaction.label!r} is not "
+                             f"elastic, capture or fission, which LRU=2 has columns for")
+        roles[reaction.label] = role
+    for group in widths.spinGroups:
+        for channel in group.channels:
+            if channel.label not in roles:
+                if channel.label not in _URR_ROLES:
+                    raise ValueError(f"the unresolved width {channel.label!r} names no "
+                                     f"reaction LRU=2 has a column for")
+                roles[channel.label] = _URR_ROLES[channel.label]
+    for group in widths.spinGroups:
+        columns = [roles[c.label] for c in group.channels]
+        if len(set(columns)) != len(columns):
+            raise ValueError(f"L={group.L} J={group.J:g} has two widths for one ENDF column")
+    return roles
+
+
+def formalismAtomicWeightRatio(formalism, neutronMass: Optional[float] = None) -> Optional[float]:
+    """AWRI: the range's target mass over *neutronMass*, the file's own neutron in amu."""
     pops = getattr(formalism, "PoPs", None)
     particles = list(pops.particles.values()) if pops is not None else []
     mass = particles[0].mass if len(particles) == 1 else None
     if mass is None or mass.unit != "amu":
         return None
-    return float(mass.value) / NEUTRON_MASS_AMU
+    return float(mass.value) / (NEUTRON_MASS_AMU if neutronMass is None else neutronMass)
 
 
 def resolvedRangeRadius(resonances, region):
@@ -1241,9 +1274,9 @@ def _encodeReichMooreSpinGroups(resonances, region, fields: dict):
     radius = resolvedRangeRadius(resonances, region)
     if radius is None:
         raise ValueError("MF2/151 LRF=3: the range states no constant radius for AP")
-    awri = formalismAtomicWeightRatio(formalism)
+    awri = fields.get("awri")
     blocks = reichMooreLBlocks(formalism, radius, float(fields["spi"]),
-                               awri if awri is not None else fields.get("awri"))
+                               awri if awri is not None else formalismAtomicWeightRatio(formalism))
     lValues = [
         LValueBlock(awri=block["awri"], l=block["l"], num_resonances=len(block["rows"]),
                     apl_or_qx=0.0 if block["apl"] is None else radiusToEndf(block["apl"]),
@@ -1365,7 +1398,9 @@ def _encodeRMatrixLimited(formalism: RMatrix, fields: dict):
         encoded_spin=original_spin if spin_unchanged else group.spin*group.parity
         encoded_parity=perGroup['pj'] if spin_unchanged else group.parity if group.spin == 0 else 0
         channels = []
-        for channel in group.channels:
+        derivedRadii = perGroup.get("radii")
+        derivedBnd = perGroup.get("bnd")
+        for index, channel in enumerate(group.channels):
             ipp = order.get(channel.resonanceReaction)
             if ipp is None:
                 raise ValueError(
@@ -1373,11 +1408,15 @@ def _encodeRMatrixLimited(formalism: RMatrix, fields: dict):
                     f"{channel.resonanceReaction!r}, which is not one of "
                     f"{sorted(order)}; IPP cannot be resolved"
                 )
+            ape, apt = (derivedRadii[index] if derivedRadii is not None
+                        else (channel.hardSphereRadius, channel.scatteringRadius))
             channels.append(RML_Channel(
                 ipp=ipp, l=channel.L, sch=channel.channelSpin,
-                bnd=channel.boundaryConditionValue if channel.boundaryConditionValue is not None else formalism.boundaryConditionValue,
-                ape=radiusToEndf(channel.hardSphereRadius),
-                apt=radiusToEndf(channel.scatteringRadius),
+                bnd=(derivedBnd[index] if derivedBnd is not None
+                     else channel.boundaryConditionValue if channel.boundaryConditionValue is not None
+                     else formalism.boundaryConditionValue),
+                ape=radiusToEndf(ape),
+                apt=radiusToEndf(apt),
             ))
 
         for ch in group.channels:
@@ -1437,12 +1476,24 @@ def _encodeUnresolved(unresolved: UnresolvedRegion, fields: dict):
             f"and {len(states)} J-state records in provenance"
         )
 
+    roles = unresolvedChannelRoles(widths)
+    awri = fields.get("awri")
+    awri = awri if awri is not None else formalismAtomicWeightRatio(widths)
     #: (L, awri) → the J-state records of that l-block, in file order.
     blocks: dict = {}
     for group, state in zip(widths.spinGroups, states):
-        entry = blocks.setdefault(group.L, {"awri": group.atomicWeightRatio,
-                                            "states": []})
-        channels = {channel.label: channel for channel in group.channels}
+        entry = blocks.setdefault(group.L, {
+            "awri": group.atomicWeightRatio if group.atomicWeightRatio is not None else awri,
+            "states": []})
+        channels = {roles[channel.label]: channel for channel in group.channels}
+        if case == "C":
+            grid = np.asarray(group.levelSpacingEnergies if group.levelSpacingEnergies is not None
+                              else widths.energyGrid, dtype=float)
+            for role in ("competitive", "neutron", "capture", "fission"):
+                if role not in channels:
+                    channels[role] = UnresolvedChannel(label=role, degreesOfFreedom=0.0,
+                                                       widths=np.zeros(grid.size),
+                                                       energies=grid)
         entry["states"].append((group, state, channels))
 
     common = dict(spi=fields["spi"], ap=radiusToEndf(widths.scatteringRadius), lssf=int(widths.selfShieldingOnly),

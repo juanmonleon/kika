@@ -924,7 +924,8 @@ class EndfProcessing:
             with tempfile.TemporaryDirectory(prefix="kika-gnds-", dir=path.parent) as scratch:
                 provisional = Path(scratch) / path.name
                 try:
-                    kika.write(suite, provisional, format="gnds")
+                    report = kika.write(suite, provisional, format="gnds")
+                    omitted += [m for m in report.losses if "kept only in the suite's ENDF provenance" in m]
                     back = kika.read(provisional, format="gnds", covariances=False)
                 except Exception as error:
                     raise ProcessingOutputError("gnds-failed", f"{type(error).__name__}: {error}") from error

@@ -158,7 +158,28 @@ def _withResonanceFlags(suite, conversions):
                          for key, value in flags.items()
                          if not (key == _NLSC and value is None)]
                 conversions[k] = (href, ",".join(items))
-    return [(href, text) for href, text in conversions if text]
+    return _withUnresolvedFlags(suite, [(href, text) for href, text in conversions if text])
+
+
+def _withUnresolvedFlags(suite, conversions):
+    """FUDGE's note on an unresolved range read from ENDF: ``LRF1`` for case A or B,
+    and ``LFW<n>`` where the tape's LFW is not what fission in the suite implies."""
+    resonances = getattr(suite, "resonances", None)
+    widths = getattr(getattr(resonances, "unresolved", None), "tabulatedWidths", None)
+    header = getattr(getattr(resonances, "provenance", None), "headerFields", None) or {}
+    region = next((r for r in header.get("regions") or () if r.get("kind") == "unresolved"), None)
+    if widths is None or region is None:
+        return conversions
+    href = f"/reactionSuite/resonances/unresolved/tabulatedWidths[@label='{widths.label or 'eval'}']"
+    if any(target == href for target, _ in conversions):
+        return conversions
+    fission = (any(getattr(r, "ENDF_MT", None) in (18, 19, 20, 21, 38) for r in suite.reactions)
+               or bool(len(getattr(suite, "fissionComponents", ()) or ())))
+    lfw = header["isotopes"][region["isotope_index"]].get("lfw")
+    items = ["LRF1"] if region.get("lrf") == 1 else []
+    if lfw is not None and lfw != int(fission):
+        items.append(f"LFW{lfw}")
+    return conversions + ([(href, ",".join(items))] if items else [])
 
 
 def applyResonanceFlags(suite) -> None:

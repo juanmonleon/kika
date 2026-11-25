@@ -234,8 +234,11 @@ def _mf3Bearing(suite):
     # MT851-870 are lumped covariance reactions (ENDF-6 §33.2): GNDS states
     # them as crossSectionSums (NNDC's U-235 has `lump0`, `lump1`), and ENDF
     # has no MF3 section for them -- they exist in MF33 only.
+    from kika.nuclear_data.model.endf_conversion import isOmitted
+
     both = list(suite.reactions) + [s for s in suite.sums
-                                    if not (s.ENDF_MT is not None and 851 <= int(s.ENDF_MT) <= 870)]
+                                    if not (s.ENDF_MT is not None and 851 <= int(s.ENDF_MT) <= 870)
+                                    and not isOmitted(s, suite)]
     return sorted(both, key=lambda r: (r.ENDF_MT is None, r.ENDF_MT or 0))
 
 

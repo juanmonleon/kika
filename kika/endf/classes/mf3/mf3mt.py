@@ -13,6 +13,7 @@ from ...utils import (
     ENDF_FORMAT_FLOAT,
     ENDF_FORMAT_INT,
     ENDF_FORMAT_INT_ZERO,
+    PAD_BLANK,
 )
 
 
@@ -52,6 +53,8 @@ class MF3MT(MT):
     _energies: List[float] = field(default_factory=list)
     _cross_sections: List[float] = field(default_factory=list)
     _data_format: str = ENDF_FORMAT_FLOAT
+    #: How the interpolation record fills its unused fields (blank or zero).
+    _interp_pad: str = PAD_BLANK
 
     # Line count
     num_lines: int = 0
@@ -202,6 +205,7 @@ class MF3MT(MT):
             self._qm, self._qi, 0, self._lr,
             self._interpolation, self._energies, self._cross_sections,
             mat, mf, mt, line_num, data_format=self._data_format,
+            interp_pad=self._interp_pad,
         )
         lines.extend(tab1_lines)
 
