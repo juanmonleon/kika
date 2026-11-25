@@ -43,6 +43,8 @@ holding a cross section and an output channel with the one product made.
 What stays unmodelled, and is said per occurrence: ``LMF=6`` states (the
 multiplicity lives in MF6) and MF9/MF10 states whose ``IZAP`` is not a nuclide
 (JENDL-5's sub-actinide fission, ``ZAP=-1``); both travel as the file's text.
+A GNDS production whose cross section and multiplicity are both references
+(FUDGE's ``m(E)*X`` for an MT5 product) is written back as its ``LMF=6`` state.
 """
 from __future__ import annotations
 
@@ -493,7 +495,10 @@ def _classify(suite, production, report) -> Optional[_State]:
         izap = zaFromPid(product.pid)
     except ValueError:
         izap = 0
-    if izap < 1000:
+    sigma = production.crossSection.get(EVAL_LABEL) if hasattr(production.crossSection, "get") else None
+    multiplicity = getattr(product.multiplicity, "form", None) if product.multiplicity else None
+    inMF6 = isinstance(sigma, Reference) and isinstance(multiplicity, Reference)
+    if izap < (1 if inMF6 else 1000):
         report.lost(f"{production.label}: product {product.pid!r} is not a nuclide; "
                     f"MF8-10 name nuclides only, so it is not written")
         return None
@@ -508,15 +513,16 @@ def _classify(suite, production, report) -> Optional[_State]:
     qi = float(qi) if qi is not None else 0.0
     qm = getattr(provenance, "qm", None)
     qm = float(qm) if qm is not None and ("mf9" in header or "mf10" in header) else qi + energy
-    sigma = production.crossSection.get(EVAL_LABEL) if hasattr(production.crossSection, "get") else None
-    multiplicity = getattr(product.multiplicity, "form", None) if product.multiplicity else None
     if sigma is None or multiplicity is None:
         report.lost(f"{production.label}: no evaluated cross section or multiplicity, "
                     f"so the state is not written")
         return None
 
     constantOne = isinstance(multiplicity, Constant1d) and float(multiplicity.constant) == 1.0
-    if isinstance(sigma, Reference):
+    if inMF6:
+        # FUDGE's LMF=6: the multiplicity is the reaction product's own, in MF6.
+        lmf, table = LMF_MF6, None
+    elif isinstance(sigma, Reference):
         lmf = LMF_MF3 if (constantOne and "mf9" not in header) else LMF_MF9
         table = None if lmf == LMF_MF3 else _tableWithKeptRegions(multiplicity, kept)
     else:
@@ -531,7 +537,7 @@ def _classify(suite, production, report) -> Optional[_State]:
             report.approximated(f"{production.label}: MF10 written as σ × "
                                 f"{float(multiplicity.constant):g}, the constant multiplicity")
         table = (interp, x, y)
-    kind = {LMF_MF3: "mf8", LMF_MF9: "mf9", LMF_MF10: "mf10"}[lmf]
+    kind = {LMF_MF3: "mf8", LMF_MF6: "mf8", LMF_MF9: "mf9", LMF_MF10: "mf10"}[lmf]
     fields = header.get(kind) or {}
     order = fields.get("order")
     return _State(production=production, mt=int(mt), lmf=lmf, izap=izap, lfs=lfs, qi=qi,

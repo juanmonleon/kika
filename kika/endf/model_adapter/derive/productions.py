@@ -45,7 +45,8 @@ def deriveProduction(production, path: str, context: DerivationContext, report) 
     multiplicity = products[0].multiplicity.form
     if isinstance(sigma, Reference):
         constantOne = isinstance(multiplicity, Constant1d) and float(multiplicity.constant) == 1.0
-        kind, table = ("mf8", None) if constantOne else ("mf9", multiplicity)
+        inMF8 = constantOne or isinstance(multiplicity, Reference)
+        kind, table = ("mf8", None) if inMF8 else ("mf9", multiplicity)
     else:
         kind, table = "mf10", sigma
 
@@ -82,7 +83,9 @@ def _kindOf(production) -> Optional[str]:
     if not isinstance(sigma, Reference):
         return "mf10"
     form = products[0].multiplicity.form
-    return "mf8" if isinstance(form, Constant1d) and float(form.constant) == 1.0 else "mf9"
+    if isinstance(form, Reference) or (isinstance(form, Constant1d) and float(form.constant) == 1.0):
+        return "mf8"
+    return "mf9"
 
 
 register("productions", _isProduction, deriveProduction)
