@@ -21,7 +21,7 @@ from .productions import (ACTIVATION_MF8_KEY, ACTIVATION_MF8_OPAQUE_KEY,
 __all__ = ["decayTapeOnlyData", "tapeOnlyData"]
 
 
-def tapeOnlyData(suite, written: str = "the GNDS file") -> List[str]:
+def tapeOnlyData(suite, written: str = "the GNDS file", tapeData=None) -> List[str]:
     """One sentence per kind of ENDF data that only the suite's provenance holds.
 
     Each sentence names the sections it covers. None of these data changes a cross
@@ -34,6 +34,8 @@ def tapeOnlyData(suite, written: str = "the GNDS file") -> List[str]:
         ENDF provenance gives an empty list.
     written
         What is being written instead of the tape, as the sentences name it.
+    tapeData
+        The :class:`EndfTapeData` written beside it, whose entries are not lost.
 
     Returns
     -------
@@ -41,6 +43,9 @@ def tapeOnlyData(suite, written: str = "the GNDS file") -> List[str]:
         In a fixed order: MF1/455, MF1/458, MF1/460, MF5, MF6, MF8, MF9/MF10 and
         the photon files.
     """
+    def held(path, name):
+        return tapeData is not None and name in tapeData.nodes.get(path, {})
+
     found: Dict[str, list] = defaultdict(list)
     for path, node in provenanceNodes(suite):
         provenance = node.provenance
@@ -109,7 +114,7 @@ def tapeOnlyData(suite, written: str = "the GNDS file") -> List[str]:
                          f"({', '.join(f'MT{mt}' for mt in dict.fromkeys(found['mf7']))})")
     if "mf7mt451" in suiteFields:
         sentences.append("MF7/MT451: NAS and the digits of SFI as the tape writes them")
-    sentences.extend(_levelQmSentences(suite))
+    sentences.extend(_levelQmSentences(suite, held))
     return [f"not in {written}, kept only in the suite's ENDF provenance to write "
             f"the tape back: {sentence}" for sentence in sentences]
 
@@ -152,28 +157,13 @@ def decayTapeOnlyData(pops, written: str = "the GNDS file") -> List[str]:
             f"back: {sentence}" for sentence in sentences]
 
 
-def _levelQmSentences(suite) -> List[str]:
+def _levelQmSentences(suite, held) -> List[str]:
     """MF3's QM of a level reaction where QI plus the level's PoPs energy, FUDGE's rule, is not it."""
-    from kika._records import format_endf_number
-    from kika.nuclear_data.model.endf_conversion import reactionQI
-    from .derive.reactions import _decayingResidual, _levelEnergy
+    from .tape_block import levelQms
 
-    sentences = []
-    for reaction in suite.reactions:
-        provenance = reaction.provenance
-        if (not isinstance(provenance, EndfProvenance) or provenance.qm is None
-                or int(getattr(provenance, "lr", 0) or 0) != 0 or reaction.outputChannel is None):
-            continue
-        residual = _decayingResidual(reaction)
-        level = _levelEnergy(suite, residual) if residual is not None else None
-        qi = reactionQI(reaction, suite)
-        if level is None or qi is None:
-            continue
-        derived = float(qi) + level
-        if format_endf_number(derived) != format_endf_number(float(provenance.qm)):
-            sentences.append(f"MF3/MT{reaction.ENDF_MT}: QM {float(provenance.qm):.7g} eV; QI plus "
-                             f"{residual.pid}'s energy gives {derived:.7g} eV")
-    return sentences
+    return [f"MF3/MT{reaction.ENDF_MT}: QM {qm:.7g} eV; QI plus {residual}'s energy gives "
+            f"{derived:.7g} eV"
+            for path, reaction, qm, derived, residual in levelQms(suite) if not held(path, "qm")]
 
 
 def _mf6Sentences(entries) -> List[str]:

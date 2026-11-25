@@ -272,15 +272,16 @@ def _writeGnds(suite, path: Path, gnds: Optional[str],resonance_extensions=False
         suite.externalFiles.files = originalExternalFiles
         if originalBackLinks is not None:
             suite.covarianceSuite.externalFiles = originalBackLinks
-    return _declareTapeOnly(suite, report, "the GNDS file")
+    from kika.endf.model_adapter.tape_block import collect
+    return _declareTapeOnly(suite, report, "the GNDS file", collect(suite))
 
 
-def _declareTapeOnly(suite, report, written: str):
+def _declareTapeOnly(suite, report, written: str, kept=None):
     """*report* with what a suite read from ENDF holds only to write the tape back."""
     if (report is not None
             and getattr(getattr(suite, "provenance", None), "sourceFormat", None) == "endf"):
         from kika.endf.model_adapter.tape_only import tapeOnlyData
-        for sentence in tapeOnlyData(suite, written):
+        for sentence in tapeOnlyData(suite, written, kept):
             report.lost(sentence, unaffectedScopes=("cross-sections",))
     return report
 

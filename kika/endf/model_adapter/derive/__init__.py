@@ -219,6 +219,8 @@ def deriveEndfProvenance(suite, report=None, *, mat: Optional[int] = None,
             provenance = derive(node, path, context, report)
             if provenance is not None:
                 node.provenance = provenance
+    from ..tape_block import apply
+    apply(suite, report)
 
     # What is still without ENDF bookkeeping is not written, and a tape that is
     # missing it has to say so: the writer only emits a section a provenance

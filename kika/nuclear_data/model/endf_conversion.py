@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
-__all__ = ["ENDF_CONVERSION_INSTITUTION", "EndfConversionFlags", "parseFlags",
+__all__ = ["ENDF_CONVERSION_INSTITUTION", "EndfConversionFlags", "EndfTapeData", "parseFlags",
            "OMIT_FLAG", "QI_FLAGGED_MTS", "isOmitted", "levelSeries", "reactionHref", "reactionQI",
            "MF32MT151_KEY"]
 
@@ -130,5 +130,30 @@ class EndfConversionFlags:
         """The suite's flags, when its ``applicationData`` holds them."""
         for entry in getattr(getattr(suite, "applicationData", None), "entries", ()):
             if isinstance(entry, EndfConversionFlags):
+                return entry
+        return None
+
+
+@dataclass
+class EndfTapeData:
+    """The tape's values GNDS has no node for, kept by kika's GNDS writer for the way back.
+
+    ``nodes`` maps a provenance path (:func:`~kika.endf.model_adapter.derive.provenanceNodes`)
+    to the provenance fields to state there; the other three are read where they are used.
+    """
+
+    nodes: Dict[str, Dict[str, object]] = field(default_factory=dict)
+    mf32: Dict[str, object] = field(default_factory=dict)
+    kinematics: Dict[str, object] = field(default_factory=dict)
+    background: Dict[str, object] = field(default_factory=dict)
+
+    def __bool__(self) -> bool:
+        return bool(self.nodes or self.mf32 or self.kinematics or self.background)
+
+    @staticmethod
+    def of(suite) -> Optional["EndfTapeData"]:
+        """The suite's tape data, when its ``applicationData`` holds them."""
+        for entry in getattr(getattr(suite, "applicationData", None), "entries", ()):
+            if isinstance(entry, EndfTapeData):
                 return entry
         return None
