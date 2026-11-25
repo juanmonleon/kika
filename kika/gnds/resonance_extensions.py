@@ -150,7 +150,9 @@ def read(application,suite,report,read_function):
                 report.unsupportedNode('unsupported KIKA endfTapeData version; the way back to ENDF derives what it held')
             else:
                 from . import tape_data
-                suite.applicationData.entries.append(tape_data.read(block))
+                data=tape_data.read(block)
+                suite.applicationData.entries.append(data)
+                tape_data.applyToModel(suite,data,report)
             institution=[child for child in institution if child.tag!=TAPE]
             if not institution:continue
         if any(child.get('version') not in ({'1','2'} if child.tag=='unresolvedCrossSectionInterpolation' else {'1'}) for child in institution):

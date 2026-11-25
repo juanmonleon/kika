@@ -47,10 +47,31 @@ def collect(suite) -> Optional[EndfTapeData]:
     if getattr(getattr(suite, "provenance", None), "sourceFormat", None) != "endf":
         return None
     data = EndfTapeData()
+    from .tape_only import KEYS, tapeOnlyNodes
+
     for path, _, qm, _, _ in levelQms(suite):
         data.nodes.setdefault(path, {})["qm"] = qm
+    nodes = dict(provenanceNodes(suite))
+    for path, kind, _ in tapeOnlyNodes(suite):
+        fields = nodes[path].provenance.headerFields
+        kept = data.nodes.setdefault(path, {}).setdefault("headerFields", {})
+        kept.update({key: fields[key] for key in KEYS[kind] if key in fields})
     data.mf32 = _mf32(suite)
+    data.kinematics = _kinematics(suite)
     return data or None
+
+
+def _kinematics(suite) -> Dict[str, object]:
+    """Each LRF=7 particle pair's masses, charges, spins, parities, PNT and SHF, by
+    ``"range/reaction label"``: GNDS takes them from PoPs and the reaction."""
+    import dataclasses
+
+    out = {}
+    for index, region in enumerate(getattr(suite.resonances, "resolved", None) or ()):
+        for reaction in getattr(region.formalism, "resonanceReactions", None) or ():
+            if reaction.kinematics is not None:
+                out[f"{index}/{reaction.label}"] = dataclasses.asdict(reaction.kinematics)
+    return out
 
 
 def _mf32(suite) -> Dict[str, object]:

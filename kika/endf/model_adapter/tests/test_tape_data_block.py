@@ -13,10 +13,16 @@ PREFIX = "not in the GNDS file, kept only in the suite's ENDF provenance"
 
 
 def _sections(path, mf):
+    """MF's sections as their records' numbers: a blank field and a 0 state the same."""
+    from kika._records import parse_number
+
+    def record(line):
+        return [parse_number(line[k:k + 11]) or 0 for k in range(0, 66, 11)]
+
     out = {}
     for line in open(path, encoding="latin-1"):
         if line[70:72].strip() == str(mf) and int(line[72:75] or 0):
-            out.setdefault(int(line[72:75]), []).append(line[:66])
+            out.setdefault(int(line[72:75]), []).append(record(line))
     return out
 
 
@@ -48,7 +54,7 @@ def test_a_level_qm_off_its_pops_energy_comes_back(zr90_b81_tape, tmp_path):
     bare = kika.read(_stripped(tmp_path / "out.xml", tmp_path), covariances=False)
     assert EndfTapeData.of(bare) is None
     kika.write(bare, tmp_path / "bare.endf", format="endf", mat=4025)
-    assert _sections(tmp_path / "bare.endf", 3)[651][1][:11] == "-6.128786+6"
+    assert _sections(tmp_path / "bare.endf", 3)[651][1][0] == -6128786.0
 
 
 def test_the_block_reads_back_what_it_wrote():
@@ -66,3 +72,16 @@ def test_the_block_reads_back_what_it_wrote():
     back = tape_data.read(ET.fromstring(ET.tostring(institution))[0])
     assert back.nodes == data.nodes and back.mf32 == data.mf32
     assert back.background["MT1"].tolist() == [1e-5, 862047.8]
+
+
+@pytest.mark.parametrize("tape, sections", [
+    ("micro_u235_fission_energy.endf", [(1, 458)]),
+    ("micro_u235_mf6.endf", [(6, 18)]),
+    ("micro_am241_activation.endf", [(8, 102)]),
+    ("micro_fe56_photons.endf", [(12, 52), (12, 55), (14, 52), (14, 55)]),
+])
+def test_the_sections_the_reader_kept_for_the_tape_come_back(tape, sections, tmp_path):
+    report, back, endf = _roundTrip(DATA / tape, tmp_path)
+    assert not [m for m in report.losses if m.startswith(PREFIX)]
+    for mf, mt in sections:
+        assert _sections(endf, mf).get(mt) == _sections(DATA / tape, mf)[mt], (mf, mt)

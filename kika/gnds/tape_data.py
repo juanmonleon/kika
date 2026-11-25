@@ -79,3 +79,24 @@ def read(block: ET.Element) -> EndfTapeData:
         else:
             raise ValueError(f"unknown or duplicate {TAG} entry {child.tag}")
     return data
+
+
+def applyToModel(suite, data: EndfTapeData, report) -> None:
+    """Restore the entries that belong to the model: the LRF=7 particle pairs."""
+    from kika.nuclear_data.model.resonances.r_matrix import ChannelKinematics, ChannelParticle
+
+    regions = getattr(suite.resonances, "resolved", None) or ()
+    for key, value in data.kinematics.items():
+        index, _, label = key.partition("/")
+        formalism = regions[int(index)].formalism if int(index) < len(regions) else None
+        reaction = next((r for r in getattr(formalism, "resonanceReactions", None) or ()
+                         if r.label == label), None)
+        if reaction is None:
+            report.lost(f"kika's {TAG} states the particle pair of {key}, which this "
+                        f"suite has no resonance reaction for")
+            continue
+        reaction.kinematics = ChannelKinematics(
+            particleA=ChannelParticle(**value["particleA"]),
+            particleB=ChannelParticle(**value["particleB"]),
+            penetrability=value["penetrability"], shift=value["shift"],
+            effective=value["effective"])

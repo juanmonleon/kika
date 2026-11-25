@@ -1650,6 +1650,8 @@ def writeReactionSuite(suite, format: Optional[str] = None,
     from . import processed
 
     lowered = processed.lower(suite)
+    from .encode_resonances import KINEMATICS_KEPT
+    KINEMATICS_KEPT[id(report)] = _keptKinematics(suite, tape)
     try:
         writer = _SuiteWriter(suite, report)
         writer.incompleteProducts = []
@@ -1657,6 +1659,7 @@ def writeReactionSuite(suite, format: Optional[str] = None,
         root = writer.write(chooseFormat(suite, format))
     finally:
         processed.restore(lowered, suite)
+        KINEMATICS_KEPT.pop(id(report), None)
     processed.write(root, lowered, report, _function)
     if saved or tape:
         from .resonance_extensions import write
@@ -1679,6 +1682,14 @@ def _tapeData(suite):
     from kika.nuclear_data.model.endf_conversion import EndfTapeData
 
     return collect(suite) or EndfTapeData.of(suite)
+
+
+def _keptKinematics(suite, tape) -> set:
+    if not tape or not tape.kinematics or suite.resonances is None:
+        return set()
+    return {id(reaction) for index, region in enumerate(suite.resonances.resolved)
+            for reaction in getattr(region.formalism, "resonanceReactions", None) or ()
+            if f"{index}/{reaction.label}" in tape.kinematics}
 
 
 # ---------------------------------------------------------------------------

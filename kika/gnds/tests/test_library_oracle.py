@@ -180,8 +180,6 @@ EXPECTED: List[Expected] = [
              reason="a point collinear with its neighbours dropped where two regions merge, as FUDGE does"),
     Expected("recon", r"MT(1|2|102): npts \d+ != \d+", bound=2.3e-3, tapes="n-038_Sr_090",
              reason="the URR's INT=5 is a declared write loss, so the GNDS side interpolates lin-lin"),
-    Expected("recon", r"MT(1|2|3|102|103): values", bound=2.4e-11, tapes="n-014_Si_028|n-026_Fe_054",
-             reason="LRF=7 channel masses are a declared write loss; the GNDS side takes them from PoPs"),
 ]
 
 

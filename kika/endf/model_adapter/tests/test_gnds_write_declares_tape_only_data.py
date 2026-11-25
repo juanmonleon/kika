@@ -1,4 +1,4 @@
-"""What an ENDF tape keeps only in provenance is declared lost when the suite goes to GNDS."""
+"""What an ENDF tape keeps only in provenance is named, and kika's GNDS keeps it."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -34,17 +34,21 @@ def _writeGnds(suite, tmp_path):
     ("micro_am241_activation.endf", "MF8 (NO=0): the decay data stated with the product "
                                     "states (MT102)"),
 ])
-def test_what_the_reader_kept_for_the_tape_is_declared_once(tape, expected, tmp_path):
+def test_what_the_reader_kept_for_the_tape_is_named_once_and_kikas_gnds_keeps_it(
+        tape, expected, tmp_path):
     suite = kika.read(DATA / tape)
-    report = _writeGnds(suite, tmp_path)
-    declared = _tapeOnlyLosses(report)
-    assert len(declared) == 1, declared
-    assert expected in declared[0]
+    named = tapeOnlyData(suite)
+    assert len(named) == 1, named
+    assert expected in named[0]
+    assert _tapeOnlyLosses(_writeGnds(suite, tmp_path)) == []
 
 
-def test_the_declarations_do_not_block_the_cross_section_scope(tmp_path):
+def test_the_declarations_do_not_block_the_cross_section_scope():
+    from kika._write import _declareTapeOnly
+    from kika.nuclear_data.model import ConversionReport
+
     suite = kika.read(DATA / "micro_u235_mf6.endf")
-    report = _writeGnds(suite, tmp_path)
+    report = _declareTapeOnly(suite, ConversionReport(), "the GNDS file")
     excluded = {entry["message"] for entry in report.scopeExclusions
                 if "cross-sections" in entry["scopes"]}
     assert set(_tapeOnlyLosses(report)) <= excluded
@@ -115,9 +119,10 @@ def test_a_level_qm_off_its_pops_energy_is_declared(zr90_b81_tape):
                                         "MF7/MT451: NAS and the digits of SFI as the tape "
                                         "writes them"]),
 ])
-def test_a_thermal_scattering_suite_declares_its_mf7_bookkeeping(tape, expected, tmp_path):
-    report = _writeGnds(kika.read(DATA / tape), tmp_path)
-    assert [m.split("back: ", 1)[1] for m in _tapeOnlyLosses(report)] == expected
+def test_a_thermal_scattering_suite_names_its_mf7_bookkeeping(tape, expected, tmp_path):
+    suite = kika.read(DATA / tape)
+    assert [m.split("back: ", 1)[1] for m in tapeOnlyData(suite)] == expected
+    assert _tapeOnlyLosses(_writeGnds(suite, tmp_path)) == []
 
 
 def test_a_fission_yield_tape_at_one_energy_declares_nothing(tmp_path):
