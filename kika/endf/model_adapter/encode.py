@@ -267,9 +267,6 @@ def encodeMF3MT(reaction: Reaction, mat: Optional[int] = None,
     section._np = int(energies.size)
     section._nr = len(regions)
     section._interpolation = [tuple(pair) for pair in regions]
-    interpPad = (getattr(provenance, "headerFields", None) or {}).get("interpPad")
-    if interpPad is not None:
-        section._interp_pad = interpPad
     return section, report
 
 

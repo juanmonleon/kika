@@ -28,8 +28,6 @@ from typing import Optional
 
 import numpy as np
 
-from kika.endf.utils import PAD_ZERO
-
 __all__ = ["photonFields"]
 
 
@@ -56,7 +54,7 @@ def _hosts(reaction, reactionPath):
 
 
 def _base(context) -> dict:
-    return {"mat": context.mat, "za": context.za, "awr": context.awr, "pad": {"interp": PAD_ZERO}}
+    return {"mat": context.mat, "za": context.za, "awr": context.awr, "pad": {}}
 
 
 def _cascade(reaction, context, report) -> Optional[dict]:
