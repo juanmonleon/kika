@@ -1256,6 +1256,44 @@ def _resonanceRefusal(suite, mat) -> Optional[str]:
     return None
 
 
+def _modelResonanceRanges(suite) -> List[Tuple[int, float, float]]:
+    """``[(LRU, EL, EH), ...]`` of the suite's resolved and unresolved regions, as MF2 states them."""
+    resonances = getattr(suite, "resonances", None)
+    if resonances is None:
+        return []
+    ranges = [(1, float(r.domainMin), float(r.domainMax)) for r in (resonances.resolved or ())]
+    unresolved = resonances.unresolved
+    if unresolved is not None:
+        ranges.append((2, float(unresolved.domainMin), float(unresolved.domainMax)))
+    return ranges
+
+
+def _tapeOfGndsSource(suite, sourcePath, mat, log):
+    """``(path, endfObj)`` of the ENDF tape written from a GNDS source: its MF3 background and MF2 resonances."""
+    import hashlib
+
+    from kika import write as kikaWrite
+    from kika.endf import read_endf
+    from kika.processing.njoy_pendf_cache import DEFAULT_PENDF_CACHE_DIR
+
+    why = _resonanceRefusal(suite, mat)
+    if why is not None:
+        raise ValueError(
+            f"resonanceRegion='reconstructed' reconstructs a GNDS source from the ENDF tape "
+            f"written from it, and this source's resonances cannot be written to MF2: {why}. "
+            f"Pass resonanceRegion='evaluated' to perturb the background as stated")
+    from kika import __version__
+
+    key = hashlib.sha256(Path(sourcePath).read_bytes() + f"{__version__}/{mat}".encode()).hexdigest()[:16]
+    tape = DEFAULT_PENDF_CACHE_DIR / "from_gnds" / f"{Path(sourcePath).stem}-{key}.endf"
+    if not tape.is_file():
+        tape.parent.mkdir(parents=True, exist_ok=True)
+        kikaWrite(suite, str(tape), format="endf", mat=mat)
+    log.note(f"the resonance region is reconstructed from {tape.name}, the ENDF tape written "
+             f"from this GNDS source", subject="MF2", code="tape_from_gnds", tape=str(tape))
+    return tape, read_endf(str(tape))
+
+
 def _matOf(suite) -> Optional[int]:
     """The ENDF MAT of the suite's target, from the library's own table.
 
@@ -2679,6 +2717,8 @@ class _SampleContext:
     #: needed no reconstruction.
     originalSourcePath: Optional[Path] = None
     pendfPath: Optional[Path] = None
+    #: The ENDF tape the resonance region was reconstructed from (for a GNDS source, the one written from it).
+    resonanceTape: Optional[Path] = None
     angularPositivity: str = "report"
     #: ``"hdf5"`` only: the options, and the NJOY pieces computed once.
     hdf5: Optional[HDF5Options] = None
@@ -2805,7 +2845,7 @@ def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
             tape = files.get("endf-delta") or files["endf-tape"]
             if ctx.pendfPath is not None:
                 njoyEndf, samplePendf = _njoyInputs(
-                    Path(tape), Path(ctx.originalSourcePath), Path(ctx.pendfPath),
+                    Path(tape), Path(ctx.resonanceTape or ctx.originalSourcePath), Path(ctx.pendfPath),
                     sampleDir / "njoy-input")
                 aceProduced = _emitAce(njoyEndf, sampleDir, ctx.ace, log, number,
                                        pendfPath=samplePendf)
@@ -3283,8 +3323,11 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         ``njoy`` on PATH. ``"evaluated"`` perturbs MF3 as the tape states it,
         background and all, and says so in a warning; it exists for tapes that
         cannot be reconstructed, such as ones sliced to a few sections. Any other
-        string is refused. Nothing is reconstructed for a GNDS source, for a tape
-        without such a range, or for a request that moves no cross section.
+        string is refused. A GNDS source with resolved or unresolved regions is
+        treated the same way, through the ENDF tape written from it; one whose
+        resonances cannot be written to MF2 is refused in ``"reconstructed"``
+        mode. Nothing is reconstructed for a source without such a range, or for
+        a request that moves no cross section.
     reconstructionTolerance
         The fractional tolerance of the 0 K reconstruction; 0.001 by default.
     reconstructionEngine
@@ -3423,7 +3466,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         _readSource(source, log, covarianceSource, pendfSource)
     covReport, suiteReport = reports
 
-    originalSourcePath = sourcePath
+    originalSourcePath = resonanceTape = sourcePath
     pendfPath = None
     resonanceRecord: Dict[str, Any] = {"mode": resonanceRegion, "reconstructed": False}
     resonanceNotes: List[str] = []
@@ -3468,9 +3511,13 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         sel.mf == 33 or (sel.mf == 34 and (sel.index is None or 0 in (
             sel.index if isinstance(sel.index, (list, tuple, set)) else [sel.index])))
         for sel in _asSelections(request))
+    ranges = []
     if (movesCrossSections and sourceFormat == "endf" and endfObj is not None
             and needsReconstruction(endfObj)):
         ranges = resonanceRanges(endfObj)
+    elif movesCrossSections and sourceFormat == "gnds":
+        ranges = _modelResonanceRanges(suite)
+    if ranges:
         span = (f"{min(r[1] for r in ranges):.4g}-{max(r[2] for r in ranges):.4g} eV")
         resonanceRecord["ranges"] = [list(r) for r in ranges]
         if resonanceRegion == "reconstructed":
@@ -3481,9 +3528,11 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
                     "read the tape from a path. Pass the path rather than a "
                     "parsed object, or resonanceRegion='evaluated' to perturb "
                     "the background as stated")
+            if sourceFormat == "gnds":
+                resonanceTape, endfObj = _tapeOfGndsSource(
+                    suite, sourcePath, mat if mat is not None else _matOf(suite), log)
             suite, endfObj, sourcePath, pendfPath = _reconstructResonanceRegion(
-                originalSourcePath, endfObj, pendfSource,
-                reconstructionTolerance, log)
+                resonanceTape, endfObj, pendfSource, reconstructionTolerance, log)
             resonanceRecord.update(reconstructed=True, pendf=str(pendfPath),
                                    base=str(sourcePath),
                                    tolerance=reconstructionTolerance,
@@ -3537,7 +3586,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         skipped.append(note)
         log.warning(note, subject="MF34")
     covariances, conversionNotes = _relativiseAbsoluteSections(
-        covariances, request, endfObj, originalSourcePath, grouping=grouping,
+        covariances, request, endfObj, resonanceTape, grouping=grouping,
         onMissing=onMissing, pendfSource=pendfSource,
         skipped=skipped, log=log)
     from kika.sampling.joint_blocks import absoluteSectionsLeftOut
@@ -3682,7 +3731,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         emitTapes=emitTapes, maxOutgoingPoints=maxOutgoingPoints,
         crossSectionSums=crossSectionSums, sumBlocks=sumBlocks,
         lumped=lumped, remainders=remainders,
-        originalSourcePath=originalSourcePath, pendfPath=pendfPath,
+        originalSourcePath=originalSourcePath, pendfPath=pendfPath, resonanceTape=resonanceTape,
         angularPositivity=angularPositivity,
         hdf5=hdf5 if "hdf5" in formats else None,
         hdf5Pieces=_hdf5Pieces(hdf5, suite, originalSourcePath or sourcePath, log)
