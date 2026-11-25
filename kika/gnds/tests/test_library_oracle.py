@@ -18,9 +18,10 @@ full. There is no tolerance outside that list.
 
 Data: the tapes from ``KIKA_LIB_TAPES`` (``endfb81/``), NNDC's GNDS from
 ``KIKA_GNDS_LIB`` or ``gnds/endfb81`` beside ``KIKA_LIB_TAPES``. Without them
-the tests skip. ``KIKA_LIBRARY_TAPES`` restricts the run to a comma-separated
-list of tapes, by file stem (``n-026_Fe_056``) or by nuclide (``Fe-56``,
-``Am-242m1``)::
+the tests skip. ``KIKA_LIBRARY=jeff40`` runs the library ``jeff40/`` instead;
+with no NNDC GNDS for it, only the reconstruction test runs. ``KIKA_LIBRARY_TAPES``
+restricts the run to a comma-separated list of tapes, by file stem
+(``n-026_Fe_056``, ``Fe56_jeff4.0``) or by nuclide (``Fe-56``, ``Am-242m1``)::
 
     KIKA_LIBRARY_TAPES=H-1,Fe-56 pytest -m slow kika/gnds/tests/test_library_oracle.py
 
@@ -56,6 +57,9 @@ pytestmark = [pytest.mark.slow, pytest.mark.tape, pytest.mark.gnds]
 #: Bookkeeping the field comparison skips everywhere: none of it is physics, and
 #: ``crossSection`` is compared number by number in its own test.
 IGNORED_FIELDS = ("report", "provenance", "applicationData", "documentation", "crossSection")
+
+LIBRARY = os.environ.get("KIKA_LIBRARY", "endfb81")
+TAPE_GLOBS = {"endfb81": "n-*.endf", "jeff40": "*_jeff4.0.endf"}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -203,25 +207,29 @@ def _nndcDirectory() -> Optional[Path]:
     if stated:
         return Path(stated)
     tapes = os.environ.get("KIKA_LIB_TAPES")
-    return Path(tapes).parent / "gnds" / "endfb81" if tapes else None
+    return Path(tapes).parent / "gnds" / LIBRARY if tapes else None
 
 
 def _stemOf(token):
     token = token.strip()
-    if token.startswith("n-"):
+    if token.startswith("n-") or "_jeff" in token:
         return token
     match = re.fullmatch(r"([A-Za-z]+)-?(\d+)(m\d*)?", token)
     if match is None:
         raise ValueError(f"KIKA_LIBRARY_TAPES: {token!r} is neither a tape stem nor a nuclide")
     symbol, mass, meta = match.groups()
+    if LIBRARY == "jeff40":
+        return f"{symbol.capitalize()}{int(mass)}{'m' if meta else ''}_jeff4.0"
     return f"_{symbol.capitalize()}_{int(mass):03d}{meta or ''}"
 
 
 def _tapes():
-    library = _root.resolve_library("endfb81")
+    if LIBRARY not in TAPE_GLOBS:
+        raise ValueError(f"KIKA_LIBRARY: {LIBRARY!r} is not one of {sorted(TAPE_GLOBS)}")
+    library = _root.resolve_library(LIBRARY)
     if library is None:
-        return None, "the ENDF/B-VIII.1 tapes (set KIKA_LIB_TAPES)"
-    stems = sorted(p.stem for p in library.glob("n-*.endf"))
+        return None, f"the {LIBRARY} tapes (set KIKA_LIB_TAPES)"
+    stems = sorted(p.stem for p in library.glob(TAPE_GLOBS[LIBRARY]))
     wanted = os.environ.get("KIKA_LIBRARY_TAPES")
     if wanted:
         keys = [_stemOf(t) for t in wanted.split(",") if t.strip()]
@@ -241,10 +249,13 @@ def pytest_generate_tests(metafunc):
 
 
 @pytest.fixture(scope="module")
-def paths(tape):
-    library, _ = _tapes()
+def endf(tape):
+    return _tapes()[0] / f"{tape}.endf"
+
+
+@pytest.fixture(scope="module")
+def paths(tape, endf):
     nndc = _nndcDirectory()
-    endf = library / f"{tape}.endf"
     if nndc is None or not (nndc / f"{tape}.endf.gnds.xml").is_file():
         pytest.skip(f"NNDC's GNDS of {tape} not reachable (set KIKA_GNDS_LIB or KIKA_LIB_TAPES)")
     return endf, nndc
@@ -275,8 +286,8 @@ def _readGnds(path, covariances=False):
 
 
 @pytest.fixture(scope="module")
-def kikaGnds(tape, paths, tmp_path_factory):
-    return _writeKikaGnds(paths[0], tmp_path_factory.mktemp(tape), covariances=True)
+def kikaGnds(tape, endf, tmp_path_factory):
+    return _writeKikaGnds(endf, tmp_path_factory.mktemp(tape), covariances=True)
 
 
 @pytest.fixture(scope="module")
@@ -824,12 +835,12 @@ def reconstructionDifferences(fromTape, fromGnds):
     return out
 
 
-def test_reconstruction_from_kikas_gnds_is_the_tapes(tape, paths, kikaGnds):
+def test_reconstruction_from_kikas_gnds_is_the_tapes(tape, endf, kikaGnds):
     from kika.processing.resonances.grid import ReconstructionConvergenceError
     from kika.processing.resonances.prepare import UnsupportedResonanceError
 
     try:
-        fromTape = _reconstructed(paths[0], True)
+        fromTape = _reconstructed(endf, True)
     except (UnsupportedResonanceError, ReconstructionConvergenceError) as refusal:
         pytest.skip(f"the reconstruction refuses the tape itself: {refusal}")
     _assertExplained(tape, reconstructionDifferences(fromTape, _reconstructed(kikaGnds, False)))
