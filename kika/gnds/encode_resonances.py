@@ -382,7 +382,8 @@ def _rmGroupsForGNDS(formalism, report):
             result.append(source);continue
         if target is None or target.spin is None:
             raise ValueError('serializing legacy RM rows requires modeled target spin')
-        if source.atomicWeightRatio is not None and not _massStatesAwri(target, source.atomicWeightRatio):
+        if (source.atomicWeightRatio is not None and not _massStatesAwri(target, source.atomicWeightRatio)
+                and float(source.atomicWeightRatio) not in AWRI_KEPT.get(id(report), ())):
             report.lost(f'RM {source.label}: per-group atomicWeightRatio has no native GNDS slot; supply physical particle masses for a normalized GNDS evaluation')
         # `spinGroup/@parity` is required (gnds.xsd and FUDGE's reader alike) and
         # LRF=3 states no target parity. FUDGE's ENDF->GNDS assumes a positive
@@ -442,6 +443,8 @@ def _fudgePenetrabilityAndShift(reaction, boundaryCondition):
 
 #: Per report, the resonance reactions whose particle pair kika's endfTapeData keeps.
 KINEMATICS_KEPT = {}
+#: Per report, the l-block AWRIs kika's tape data writes beside the GNDS file.
+AWRI_KEPT = {}
 
 
 def _resonanceReaction(parent: ET.Element, reaction, report: ConversionReport,

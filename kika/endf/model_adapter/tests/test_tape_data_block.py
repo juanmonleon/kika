@@ -96,3 +96,15 @@ def test_mf2_values_gnds_cannot_hold_come_back(name, request, tmp_path):
     report, back, endf = _roundTrip(tape, tmp_path)
     assert not [m for m in report.losses if m.startswith(PREFIX) and "MF2/" in m]
     assert _sections(endf, 2)[151] == _sections(tape, 2)[151]
+
+
+@pytest.mark.tape
+def test_a_per_l_awri_the_block_holds_is_not_declared_lost(dy162_b81_tape, tmp_path):
+    from kika.gnds.encode import writeReactionSuite
+    from kika.nuclear_data.model.endf_conversion import EndfTapeData
+
+    suite = kika.read(str(dy162_b81_tape), covariances=False)
+    awri = "per-group atomicWeightRatio"
+    assert not [m for m in kika.write(suite, tmp_path / "out.xml", format="gnds").losses if awri in m]
+    _, bare = writeReactionSuite(suite, tapeData=EndfTapeData())
+    assert [m for m in bare.losses if awri in m]

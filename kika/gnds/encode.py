@@ -1653,8 +1653,9 @@ def writeReactionSuite(suite, format: Optional[str] = None,
     from . import processed
 
     lowered = processed.lower(suite)
-    from .encode_resonances import KINEMATICS_KEPT
+    from .encode_resonances import AWRI_KEPT, KINEMATICS_KEPT
     KINEMATICS_KEPT[id(report)] = _keptKinematics(suite, tape)
+    AWRI_KEPT[id(report)] = _keptAwri(tape)
     try:
         writer = _SuiteWriter(suite, report)
         writer.incompleteProducts = []
@@ -1663,6 +1664,7 @@ def writeReactionSuite(suite, format: Optional[str] = None,
     finally:
         processed.restore(lowered, suite)
         KINEMATICS_KEPT.pop(id(report), None)
+        AWRI_KEPT.pop(id(report), None)
     processed.write(root, lowered, report, _function)
     if saved or tape:
         from .resonance_extensions import write
@@ -1676,6 +1678,16 @@ def writeReactionSuite(suite, format: Optional[str] = None,
             f"dropped, as FUDGE does: GNDS holds no point beyond the domain, and "
             f"the function on the domain is unchanged")
     return ET.ElementTree(root), report
+
+
+def _keptAwri(tape) -> set:
+    """The l-block AWRIs the tape data's MF2 entry states."""
+    kept = set()
+    for fields in (tape.nodes.values() if tape else ()):
+        entry = (fields.get("headerFields") or {}).get("mf2Tape") or {}
+        for rangeEntry in (entry.get("ranges") or {}).values():
+            kept.update(float(v) for v in (rangeEntry.get("awri") or {}).values())
+    return kept
 
 
 def _keptKinematics(suite, tape) -> set:
