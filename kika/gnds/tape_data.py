@@ -106,15 +106,14 @@ def applyToModel(suite, data: EndfTapeData, report) -> None:
 
 def _restoreRepeats(suite, repeats, report) -> None:
     from kika.endf.model_adapter.derive import provenanceNodes
-    from kika.endf.model_adapter.tape_block import _pieces
-    from kika.nuclear_data.model import EVAL_LABEL
+    from kika.endf.model_adapter.tape_block import _pieces, tables
 
     if not repeats:
         return
-    nodes = dict(provenanceNodes(suite))
+    found = {path + suffix: form for path, node in provenanceNodes(suite)
+             for suffix, form in tables(node)}
     for path, runs in repeats.items():
-        form = getattr(getattr(nodes.get(path), "crossSection", None), "get", lambda _: None)(EVAL_LABEL)
-        pieces = _pieces(form) if form is not None else []
+        pieces = _pieces(found[path]) if path in found else []
         for x, y, times in runs:
             hits = [(piece, np.flatnonzero((piece.xs == x) & (piece.ys == y))) for piece in pieces]
             present = sum(found.size for _, found in hits)

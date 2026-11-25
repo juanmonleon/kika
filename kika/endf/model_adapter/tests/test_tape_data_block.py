@@ -79,6 +79,7 @@ def test_the_block_reads_back_what_it_wrote():
     ("micro_u235_mf6.endf", [(6, 18)]),
     ("micro_am241_activation.endf", [(8, 102)]),
     ("micro_fe56_photons.endf", [(12, 52), (12, 55), (14, 52), (14, 55)]),
+    ("micro_tsl_sch4.endf", [(7, 2), (7, 4)]),
 ])
 def test_the_sections_the_reader_kept_for_the_tape_come_back(tape, sections, tmp_path):
     report, back, endf = _roundTrip(DATA / tape, tmp_path)

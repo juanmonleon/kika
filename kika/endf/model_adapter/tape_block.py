@@ -77,38 +77,62 @@ def _pieces(form) -> list:
     return [form] if isinstance(form, XYs1d) else []
 
 
+def tables(node):
+    """``(suffix, form)`` for the tables of a node whose points the block may keep: its
+    cross section, and an incoherent-elastic Debye-Waller integral."""
+    from kika.nuclear_data.model import EVAL_LABEL
+
+    form = getattr(getattr(node, "crossSection", None), "get", lambda _: None)(EVAL_LABEL)
+    if form is not None:
+        yield "", form
+    ddcs = getattr(node, "doubleDifferentialCrossSection", None)
+    debyeWaller = getattr(ddcs.get(EVAL_LABEL) if ddcs is not None else None,
+                          "DebyeWallerIntegral", None)
+    if debyeWaller is not None:
+        yield ".DebyeWallerIntegral", debyeWaller
+
+
+def _repeats(form) -> list:
+    """``[x, y, times]`` of each point a table states several times over."""
+    import numpy as np
+
+    runs = []
+    for piece in _pieces(form):
+        xs, ys = np.asarray(piece.xs, float), np.asarray(piece.ys, float)
+        same = np.flatnonzero((xs[1:] == xs[:-1]) & (ys[1:] == ys[:-1]))
+        for start in same[np.r_[True, np.diff(same) > 1]] if same.size else ():
+            times = 1
+            while (start + times < xs.size and xs[start + times] == xs[start]
+                   and ys[start + times] == ys[start]):
+                times += 1
+            runs.append([float(xs[start]), float(ys[start]), times])
+    return runs
+
+
 def _background(suite) -> Dict[str, object]:
-    """MF3 points GNDS's tables do not keep, by reaction path.
+    """Table points GNDS does not keep, by node path (and table, :func:`tables`).
 
     ``repeats``: a point a table states several times over, ``[x, y, times]``, which a
     GNDS table holds once. ``absent``: the background regions whose upper edge the
     GNDS writer adds a point at, where the tape has none."""
-    import numpy as np
     from kika.gnds import resonance_background
     from kika.nuclear_data.model import EVAL_LABEL
 
     repeats, absent = {}, {}
     how = resonance_background.plan(suite)
     for path, node in provenanceNodes(suite):
-        form = getattr(getattr(node, "crossSection", None), "get", lambda _: None)(EVAL_LABEL)
-        if form is None:
-            continue
-        runs = []
-        for piece in _pieces(form):
-            xs, ys = np.asarray(piece.xs, float), np.asarray(piece.ys, float)
-            same = np.flatnonzero((xs[1:] == xs[:-1]) & (ys[1:] == ys[:-1]))
-            for start in same[np.r_[True, np.diff(same) > 1]] if same.size else ():
-                times = 1
-                while start + times < xs.size and xs[start + times] == xs[start]                         and ys[start + times] == ys[start]:
-                    times += 1
-                runs.append([float(xs[start]), float(ys[start]), times])
-        if runs:
-            repeats[path] = runs
-        wrapped = resonance_background.wrap(how, getattr(node, "ENDF_MT", None), form, EVAL_LABEL)             if how is not None else None
-        regions = [name for name, flag in (wrapped[1] if wrapped else {}).items()
-                   if resonance_background.DELETE in flag]
-        if regions:
-            absent[path] = regions
+        for suffix, form in tables(node):
+            runs = _repeats(form)
+            if runs:
+                repeats[path + suffix] = runs
+            if suffix or how is None:
+                continue
+            wrapped = resonance_background.wrap(how, getattr(node, "ENDF_MT", None), form,
+                                                EVAL_LABEL)
+            regions = [name for name, flag in (wrapped[1] if wrapped else {}).items()
+                       if resonance_background.DELETE in flag]
+            if regions:
+                absent[path] = regions
     return {key: value for key, value in (("repeats", repeats), ("absent", absent)) if value}
 
 
@@ -131,7 +155,9 @@ def _mf6Awps(suite, nodes) -> Dict[str, Dict[int, float]]:
 
     out = {}
     for path, node in nodes.items():
-        mf6 = (getattr(node.provenance, "headerFields", None) or {}).get("mf6")             if isinstance(node.provenance, EndfProvenance) else None
+        provenance = node.provenance
+        fields = (provenance.headerFields or {}) if isinstance(provenance, EndfProvenance) else {}
+        mf6 = fields.get("mf6")
         if not isinstance(mf6, dict):
             continue
         stated = {int(p["index"]): float(p["awp"]) for p in mf6.get("products", ())
