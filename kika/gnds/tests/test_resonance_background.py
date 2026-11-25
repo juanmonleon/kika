@@ -30,7 +30,7 @@ def test_an_edge_the_tape_does_not_state_is_cut_flagged_and_deleted_on_the_way_b
     import numpy as np
 
     from kika.endf.model_adapter.encode import backgroundTable
-    from kika.gnds.resonance_background import Plan, wrap
+    from kika.nuclear_data.model.resonance_background import Plan, wrap
     from kika.nuclear_data.model import crossSectionAxes
 
     table = XYs1d(xs=np.array([1.0, 4.0, 8.0, 20.0]), ys=np.array([1.0, 2.0, 3.0, 4.0]),

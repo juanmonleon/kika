@@ -89,7 +89,7 @@ def _background(suite) -> Dict[str, object]:
     ``repeats``: a point a table states several times over, ``[x, y, times]``, which a
     GNDS table holds once. ``absent``: the background regions whose upper edge the
     GNDS writer adds a point at, where the tape has none."""
-    from kika.gnds import resonance_background
+    from kika.nuclear_data.model import resonance_background
     from kika.nuclear_data.model import EVAL_LABEL
 
     repeats, absent = {}, {}
