@@ -169,6 +169,8 @@ EXPECTED: List[Expected] = [
              "the URR's INT is a declared write loss of kika's GNDS writer"),
     Expected("field", r".*products\[[^\]]+\]\.label: '[^']*' != '[^']*'",
              "a product label is a name; the photons of a channel are matched by line, not by label"),
+    Expected("cov", r"parameterCovariance\[\d+\]: matrix", bound=1e-15,
+             reason="FUDGE writes the parameter covariance with 15 significant figures, kika every digit"),
     Expected("recon", r"MT8(5[1-9]|6\d|7[01]): values", bound=1e-15,
              reason="an MF33 lumped sum rebuilt from its summands; the order of the additions differs"),
     Expected("recon", r"MT\d+: npts \d+ != \d+", bound=1e-15,

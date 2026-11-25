@@ -285,9 +285,44 @@ def _declareTapeOnly(suite, report, written: str):
     return report
 
 
+def _fudgeParameterLayout(suite, report):
+    """The resolved-range parameter covariance in FUDGE's layout, and its flags, or ``(None, [])``."""
+    from kika.gnds.encode_resonances import resonanceTables
+    from kika.gnds.parameter_layout import fudgeParameterCovariances
+    from kika.nuclear_data.model import ConversionReport
+
+    if suite.resonances is None or not getattr(suite.covarianceSuite, "parameterCovariances", None):
+        return None, []
+    tables = resonanceTables(suite.resonances, ConversionReport())
+    return fudgeParameterCovariances(suite, tables, report)
+
+
+def _withFlags(suite, flags):
+    """Add *flags* to the suite's ENDFconversionFlags for one write; returns the undo."""
+    if not flags:
+        return None
+    from kika.nuclear_data.model.endf_conversion import EndfConversionFlags
+
+    existing = EndfConversionFlags.of(suite)
+    if existing is not None:
+        before = list(existing.conversions)
+        existing.conversions.extend(flags)
+
+        def undo():
+            existing.conversions[:] = before
+        return undo
+    entry = EndfConversionFlags(list(flags))
+    suite.applicationData.entries.append(entry)
+
+    def undo():
+        suite.applicationData.entries.remove(entry)
+    return undo
+
+
 def _writeLinkedPair(suite, path, format, report, writeReactionSuite,
                      writeCovarianceSuite, serialise, sha1, ExternalFile):
     covariancePath = None
+    flags = []
     if suite.covarianceSuite is not None:
         covariancePath = (
             path.parent / COVARIANCE_SUBDIRECTORY
@@ -307,7 +342,16 @@ def _writeLinkedPair(suite, path, format, report, writeReactionSuite,
             entry for entry in suite.covarianceSuite.externalFiles
             if entry.label != "reactions"
         ] + [ExternalFile(label="reactions", path=f"../{path.name}")]
-        tree, report = writeCovarianceSuite(suite.covarianceSuite, format, report)
+        layout, flags = _fudgeParameterLayout(suite, report)
+        if layout is not None:
+            original = suite.covarianceSuite.parameterCovariances
+            suite.covarianceSuite.parameterCovariances = layout
+            try:
+                tree, report = writeCovarianceSuite(suite.covarianceSuite, format, report)
+            finally:
+                suite.covarianceSuite.parameterCovariances = original
+        else:
+            tree, report = writeCovarianceSuite(suite.covarianceSuite, format, report)
         covariancePath.parent.mkdir(parents=True, exist_ok=True)
         payload = serialise(tree)
         covariancePath.write_bytes(payload)
@@ -323,7 +367,12 @@ def _writeLinkedPair(suite, path, format, report, writeReactionSuite,
         ] + [ExternalFile(label="covariances", path=relative,
                           checksum=sha1(payload), algorithm="sha1")]
 
-    tree, report = writeReactionSuite(suite, format, report)
+    added = _withFlags(suite, flags) if covariancePath is not None else None
+    try:
+        tree, report = writeReactionSuite(suite, format, report)
+    finally:
+        if added is not None:
+            added()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(serialise(tree))
 
