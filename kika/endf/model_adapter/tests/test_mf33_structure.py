@@ -113,13 +113,24 @@ def test_u235_keeps_all_group_headers_and_nc_rules(u235_b81_tape,tmp_path):
     suite,_=decodeReactionSuite(endf)
     suite.covarianceSuite,report=decodeCovarianceSuite(endf,checks=False,reactionSuite=suite)
     # MT18's correlations with Li-6, Au-197, U-238 and Pu-239 name another MAT.
-    external=[x for x in report.losses if "external MAT1" in x]
-    assert len(external)==5 and all(x.startswith("MF33/MT18:") for x in external)
-    assert not [x for x in report.losses if "MF33" in x and x not in external]
+    assert not [x for x in report.losses if "MF33" in x]
+    external={s.label:s.columnData.href for s in suite.covarianceSuite
+              if s.columnData is not None and s.columnData.otherEvaluation}
+    assert external=={f"MF33-MT18-{pid}-MT{mt}":f"${pid}#/reactionSuite/reactions/reaction[@label='MT{mt}']/crossSection"
+                      for pid,mt in [("Li6",105),("Au197",102),("U238",18),("U238",102),("Pu239",18)]}
+    assert [(e.label,e.path) for e in suite.covarianceSuite.externalFiles]==[
+        ("Li6","../n-003_Li_006.endf.gnds.xml"),("Au197","../n-079_Au_197.endf.gnds.xml"),
+        ("U238","../n-092_U_238.endf.gnds.xml"),("Pu239","../n-094_Pu_239.endf.gnds.xml")]
     rows,_=_covarianceSections(suite,9228,ConversionReport())
     from kika.endf.parsers.parse_mf33 import parse_mf33_mt
     actual={mt:parse_mf33_mt(str(s).splitlines(),mt) for mf,mt,s in rows if mf==33}
     assert set(actual)==set(endf.mf[33].mt) and len(actual)==87
+    tape={(s.mat1,s.mt1):s.ni_records for s in endf.mf[33].mt[18].subsections if s.mat1}
+    written={(s.mat1,s.mt1):s.ni_records for s in actual[18].subsections if s.mat1}
+    assert list(written)==[(325,105),(7925,102),(9237,18),(9237,102),(9437,18)]
+    for key,records in tape.items():
+        assert [(r.lb,r.row_energies,r.col_energies,r.rect_matrix) for r in written[key]]==[
+            (r.lb,r.row_energies,r.col_energies,r.rect_matrix) for r in records]
     for mt,source in endf.mf[33].mt.items():
         assert (actual[mt]._mtl or 0)==(source._mtl or 0)
         before=[(n.e1,n.e2,n.ci,n.xmti) for sub in source.subsections for n in sub.nc_records]
@@ -179,3 +190,38 @@ def test_checks_distinguish_structural_validation_from_derived_matrix_coverage()
     del mf.mt[851]
     report=check_covariances(endf,mf=(33,))
     assert any(f.location.mt==52 for f in report.by_check("unresolved_reference"))
+
+
+def test_a_block_with_another_material_goes_through_gnds_record_for_record(tmp_path):
+    from kika.endf.model_adapter.derive import DERIVED
+    from kika.gnds.covariances import readCovarianceSuite
+    from kika.gnds.encode import serialise, writeCovarianceSuite
+    from kika.gnds.xpath import Document
+    from kika.nuclear_data.model import ConversionReport, EndfProvenance
+    from kika.endf.model_adapter.covariances import crossMaterialExternalFiles
+    lb6=NISubSubsectionRecord(lb=6,ls=0,ne=3,nt=3+2+2,row_energies=[1.,2.,4.],col_energies=[1.,3.],
+                              rect_matrix=[.01,-.02])
+    original=section(18,ni=[NISubSubsectionRecord(lb=5,ls=1,ne=2,nt=3,energies=[1.,4.],matrix=[.04])])
+    original._subsections.append(Subsection(xmf1=0.,xlfs1=0.,mat1=9237,mt1=18,nc=0,ni=1,ni_records=[lb6]))
+    original._nl=2
+    decoded,report=decodeMF33MT(original)
+    assert not report.losses
+    external=decoded[-1]
+    assert external.label=="MF33-MT18-U238-MT18" and external.columnData.otherEvaluation=="U238"
+    np.testing.assert_array_equal(external.form.columnGrid,[1.,3.])
+    suite=CovarianceSuite(covarianceSections=decoded,target="U235",projectile="n",evaluation="test")
+    report=ConversionReport()
+    crossMaterialExternalFiles(suite,report,{"U238":"elsewhere/U238.xml"})
+    assert [(e.label,e.path) for e in suite.externalFiles]==[("U238","elsewhere/U238.xml")]
+    assert not report.warnings
+    path=tmp_path/"covar.xml"
+    path.write_bytes(serialise(writeCovarianceSuite(suite,"2.0")[0]))
+    read,_=readCovarianceSuite(Document.parse(path))
+    for s in read:
+        s.provenance=EndfProvenance(sourceFormat=DERIVED,za=92235.,awr=233.,mat=9228)
+    for source in (suite,read):
+        written,_=encodeMF33MT(source,18)
+        sub=written.subsections[-1]
+        assert (sub.mat1,sub.mt1)==(9237,18)
+        assert [(r.lb,r.row_energies,r.col_energies,r.rect_matrix) for r in sub.ni_records]==[
+            (6,[1.,2.,4.],[1.,3.],[.01,-.02])]
