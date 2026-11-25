@@ -140,3 +140,20 @@ def test_an_l_whose_channel_states_no_radius_gets_ap_only_under_explicit_apl(exp
     kika.write(suite, str(out), format="endf")
     written = _resolved(out)[1].parameters
     assert {b.apl_or_qx for b in written.l_values} == ({written.ap} if explicit else {0.0})
+
+
+def test_rows_of_one_spin_group_at_one_energy_keep_the_groups_order(tmp_path):
+    gnds = tmp_path / "mn55.gnds.xml"
+    kika.write(kika.read(str(DATA / "micro_mn55_mf2.endf")), str(gnds), format="gnds")
+    suite = kika.read(str(gnds))
+    group = next(g for g in suite.resonances.resolved[0].formalism.spinGroups if len(g.energies) > 1)
+    energies = list(group.energies)
+    widths = [list(row) for row in group.widths]
+    energies[1] = energies[0]
+    widths[1] = [0.5 * w for w in widths[0]]
+    group.energies, group.widths = energies, widths
+    out = tmp_path / "mn55.endf"
+    kika.write(suite, str(out), format="endf")
+    _, written = _resolved(out)
+    tied = [row for row in _rows(written) if row[1] == energies[0]]
+    assert len(tied) == 2 and abs(tied[0][3]) > abs(tied[1][3])

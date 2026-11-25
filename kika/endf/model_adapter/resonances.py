@@ -1141,9 +1141,10 @@ def reichMooreLBlocks(formalism, rangeRadius: float, targetSpin: float,
     ``apl`` is the radius the l's entrance channel states, in fm, even when it
     is *rangeRadius*; else *rangeRadius* under FUDGE's ``explicitAPL``; else
     ``None`` (APL 0). A
-    row is ``(E, AJ, GN, GG, GFA, GFB)``, sorted as tuples within its L, which
-    is the order FUDGE writes. Raises ``ValueError`` naming the first thing LRF=3
-    cannot state.
+    row is ``(E, AJ, GN, GG, GFA, GFB)``, sorted on ``(E, AJ)`` within its L;
+    rows equal in both keep the spin group's table order, where FUDGE's tuple
+    sort reorders them by width (U-233 at 3627.428 eV). Raises ``ValueError``
+    naming the first thing LRF=3 cannot state.
     """
     if formalism.approximation != "ReichMoore":
         raise ValueError(f"approximation {formalism.approximation!r} is not ReichMoore")
@@ -1210,7 +1211,7 @@ def reichMooreLBlocks(formalism, rangeRadius: float, targetSpin: float,
             gf = [widths[k] for k in fission] + [0.0] * (2 - len(fission))
             block["rows"].append((energy, aj, widths[neutron], widths[capture], *gf))
     for block in byL.values():
-        block["rows"].sort()
+        block["rows"].sort(key=lambda row: row[:2])
     return [byL[l] for l in sorted(byL)]
 
 
