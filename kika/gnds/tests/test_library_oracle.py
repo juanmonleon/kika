@@ -105,6 +105,10 @@ EXPECTED: List[Expected] = [
     Expected("res", r"unresolved\.tabulatedWidths\.spinGroups\[i\]\.levelSpacingFunction\.interpolation: "
                     r"<Interpolation\.linlin: 'lin-lin'> != <Interpolation\.loglog: 'log-log'>",
              "the URR's INT is a declared write loss of kika's GNDS writer"),
+    Expected("field", r".*products\[[^\]]+\]\.label: '[^']*' != '[^']*'",
+             "a product label is a name; the photons of a channel are matched by line, not by label"),
+    Expected("recon", r"MT8(5[1-9]|6\d|7[01]): values", bound=1e-15,
+             reason="an MF33 lumped sum rebuilt from its summands; the order of the additions differs"),
     Expected("recon", r"MT\d+: npts \d+ != \d+", bound=1e-15,
              reason="a point collinear with its neighbours dropped where two regions merge, as FUDGE does"),
     Expected("recon", r"MT(1|2|102): npts \d+ != \d+", bound=2.3e-3, tapes="n-038_Sr_090",
