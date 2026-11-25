@@ -53,6 +53,11 @@ class NjoyNotFoundError(RuntimeError):
 DEFAULT_PENDF_CACHE_DIR = Path(tempfile.gettempdir()) / "kika_pendf_cache"
 
 
+def _readTape(path, mfNumbers):
+    from kika.endf import read_endf
+    return read_endf(str(path), mf_numbers=list(mfNumbers))
+
+
 def mf33_needs_pendf(mf33_file, mt: int) -> bool:
     """True if MF33 for ``mt`` needs σ(E) (NC sum-rule or absolute NI LB).
 
@@ -285,8 +290,7 @@ def read_pendf_mf3_sections(pendf_path: str | Path) -> Dict[int, object]:
     RuntimeError
         If the tape has no MF3 sections.
     """
-    from kika.endf import read_endf
-    pendf = read_endf(str(pendf_path), mf_numbers=[3])
+    pendf = _readTape(pendf_path, [3])
     mf3 = pendf.get_file(3)
     if mf3 is None or not getattr(mf3, "sections", None):
         raise RuntimeError(f"PENDF {pendf_path} has no MF3 sections")
@@ -471,8 +475,7 @@ def pointwise_cross_sections(endf, *, tolerance: float = 0.001,
                 f"{why} needs σ(E), and this ENDF object was read without MF"
                 f"{'/'.join(map(str, mfNumbers))} and does not know which file it was "
                 f"read from. Read it with kika.endf.read_endf(path), or set endf.pendf.")
-        from kika.endf import read_endf
-        return read_endf(str(path), mf_numbers=list(mfNumbers))
+        return _readTape(path, mfNumbers)
 
     header = endf
     if _lrp(endf) is None or (_lrp(endf) == 1 and 2 not in mf):

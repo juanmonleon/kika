@@ -17,7 +17,7 @@ from typing import Optional, Tuple
 
 import numpy as np
 
-from kika.gnds.resonance_background import backgroundTable
+from kika.nuclear_data.model.resonance_background import backgroundTable
 from kika.nuclear_data.model import EVAL_LABEL, ConversionReport, Reaction
 
 __all__ = ["encodeMF3MT", "encodeMF1MT451", "usableInterpolationRegions"]

@@ -716,7 +716,7 @@ class _SuiteWriter:
     def __init__(self, suite, report: ConversionReport) -> None:
         self.suite = suite
         self.report = report
-        from .resonance_background import plan
+        from kika.nuclear_data.model.resonance_background import plan
 
         self.backgroundPlan = plan(suite)
         self.conversionFlags: List[Tuple[str, str]] = []
@@ -848,7 +848,7 @@ class _SuiteWriter:
 
     def withResonances(self, form, label: str, mt: Optional[int], owner: str):
         """An ENDF-decoded MF3 table as FUDGE writes it, when the resonances add to it."""
-        from .resonance_background import wrap
+        from kika.nuclear_data.model.resonance_background import wrap
 
         wrapped = wrap(self.backgroundPlan, mt, form, label)
         if wrapped is None:

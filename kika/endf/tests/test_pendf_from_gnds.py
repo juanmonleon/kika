@@ -1,8 +1,6 @@
 """A PENDF from a GNDS evaluation (``process_gnds(...).write_pendf``).
 
-A GNDS file does not carry the ENDF bookkeeping of its resonance ranges (QX,
-LRX, LAD, the particle pairs), so MF2/151 cannot be written back as the
-evaluation stated it. A PENDF does not need it: NJOY RECONR never copies MF2
+A PENDF does not need the evaluation's MF2/151: NJOY RECONR never copies MF2
 into its PENDF, it writes a default MF2/151 with the scattering radius alone
 (one LRU=0 range up to the top of the resolved range, ``reconr.f90`` ``recout``),
 and states with LRP=2 that the resonances are in MF3. kika writes the same
@@ -57,7 +55,7 @@ def test_a_pendf_request_writes_reconrs_sections_and_reports_nothing_lost():
     the resolved MF2) is neither written nor reported lost."""
     suite = kika.read(str(TA182_GNDS), format="gnds", covariances=False)
     full, report_full, _ = encodeTapeSections(suite)
-    assert any("MF2/151" in m for m in report_full.losses)       # the whole tape would lose it
+    assert (2, 151) in {(mf, mt) for mf, mt, _ in full}
     suite.resonances = pendfResonances(suite)
     sections, report, _ = encodeTapeSections(suite, files=PENDF_SECTIONS)
     assert {(mf, mt) for mf, mt, _ in sections} ==         {(1, 451), (2, 151)} | {(mf, mt) for mf, mt, _ in full if mf == 3}
