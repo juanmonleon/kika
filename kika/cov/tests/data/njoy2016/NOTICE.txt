@@ -1,0 +1,9 @@
+Two reference outputs of the NJOY2016 test suite (https://github.com/njoy/NJOY2016,
+tag 2016.78, commit 71a76bc), copied unchanged:
+
+  test04_errorr_mf33.gendf  tests/04/referenceTape23  ERRORR, MF33 (U-235 of ENDF/B-V, MAT 1395)
+  test15_errorr_mf34.gendf  tests/15/referenceTape27  ERRORR, MF34 (U-238, MT251, L=1)
+
+NJOY2016 is Copyright (c) 2016, Los Alamos National Security, LLC. All rights reserved.
+It is distributed under the BSD-3-Clause license; the full text is the LICENSE file of
+that repository.
