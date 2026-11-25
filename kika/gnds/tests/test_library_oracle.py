@@ -44,8 +44,7 @@ from kika.nuclear_data.model.compare import modelDifferences
 from kika.nuclear_data.model.covariances import (CovarianceMatrix, Mixed,
                                                  ShortRangeSelfScalingVariance, Sum)
 
-# the repository's conftest, by path: a bare `from conftest import` takes whichever
-# conftest a full collection put first on sys.path
+# by path: a bare `from conftest import` takes whichever conftest is first on sys.path
 _spec = importlib.util.spec_from_file_location(
     "_kika_root_conftest", Path(__file__).resolve().parents[3] / "conftest.py")
 _root = importlib.util.module_from_spec(_spec)
@@ -84,7 +83,7 @@ EXPECTED: List[Expected] = [
              "NNDC also carries FUDGE's reconstructed resonance cross section as a 'recon' form"),
     Expected("xs", r"Sums MT8(5[1-9]|6\d|7[01]): values", bound=4e-9,
              reason="MF33 lumped sums: each code adds the summands on its own and rounds the result"),
-    Expected("field", r".*Q\.domainMin: # != #",
+    Expected("field", r".*Q\.domainMin: kika's 1e-05 below NNDC's",
              "a constant Q: kika states it from the lowest incident energy, FUDGE from the threshold"),
     Expected("field", r".*multiplicity\.forms\['eval'\]: a constant XYs1d against Constant1d, same value",
              "a constant multiplicity: kika keeps ENDF's table, FUDGE writes constant1d"),
@@ -94,16 +93,12 @@ EXPECTED: List[Expected] = [
              "FUDGE adds the residual ENDF does not tabulate, with an unspecified distribution"),
     Expected("field", r"Sums MT\d+ \| summands: MT \[.*\] != \[.*\]",
              "kika sums over partial sums (MT3, MT4…), FUDGE over the leaves; the xs test compares the values"),
-    Expected("res", r"unresolved\.tabulatedWidths\.resonanceReactions\[i\]\.(label|href): .*",
-             "reaction labels: kika's are MT numbers, FUDGE's the outgoing particles"),
-    Expected("res", r"unresolved\.tabulatedWidths\.spinGroups\[i\]\.levelSpacingFunction\.label: 'eval' != None",
+    Expected("res", r"unresolved\.spinGroups\[i\]\.levelSpacingFunction\.label: 'eval' != None",
              "a form label kika writes and FUDGE omits"),
-    Expected("res", r"unresolved\.tabulatedWidths\.spinGroups\[i\]\.channels: length # != #",
-             "kika keeps the all-zero fission and competitive width columns of LRU=2; FUDGE drops them"),
     Expected("res", r"unresolved\.tabulatedWidths\.PoPs: PoPs != NoneType",
              "kika writes the URR's own PoPs (target spin and mass); FUDGE reads them from the suite's"),
-    Expected("res", r"unresolved\.tabulatedWidths\.spinGroups\[i\]\.levelSpacingFunction\.interpolation: "
-                    r"<Interpolation\.linlin: 'lin-lin'> != <Interpolation\.loglog: 'log-log'>",
+    Expected("res", r"unresolved\.spinGroups\[i\]\.(levelSpacingFunction|channel\[MT\d+\]\.averageFunction)"
+                    r"\.interpolation: <Interpolation\.linlin: 'lin-lin'> != <Interpolation\.loglog: 'log-log'>",
              "the URR's INT is a declared write loss of kika's GNDS writer"),
     Expected("field", r".*products\[[^\]]+\]\.label: '[^']*' != '[^']*'",
              "a product label is a name; the photons of a channel are matched by line, not by label"),
@@ -309,7 +304,7 @@ def _resonanceRows(form):
         spins = group.spins if group.spins else [group.spin] * len(group.energies)
         for energy, widths, spin in zip(group.energies, group.widths, spins):
             rows.append((float(energy), abs(float(spin or 0)))
-                        + tuple(sorted(abs(float(w)) for w in widths if w)))
+                        + tuple(sorted(float(w) for w in widths)))
     parameters = getattr(form, "resonanceParameters", None)
     for group in (parameters.spinGroups if parameters else []):
         for r in group.resonances:
@@ -346,8 +341,39 @@ def resonanceDifferences(mine, theirs):
     if (ua is None) != (ub is None):
         out.append(Difference("res", f"unresolved only in {'kika' if ua is not None else 'NNDC'}"))
     elif ua is not None:
-        for d in modelDifferences(ua, ub, path="unresolved", ignore=IGNORED_FIELDS):
-            out.append(Difference("res", _normalised(d)))
+        out += _unresolvedDifferences(ua, ub, _labelsToMT(mine), _labelsToMT(theirs))
+    return out
+
+
+def _channelRoles(resonanceReactions, channels, labels):
+    """``{reaction MT: channel}`` for the channels whose widths are not all zero."""
+    reactionOf = {r.label: labels.get(re.search(r"\[@label='([^']*)'\]", r.href).group(1), r.href)
+                  for r in resonanceReactions}
+    return {reactionOf.get(c.label, c.label): c for c in channels
+            if c.constantWidth or (c.widths is not None and np.any(np.asarray(c.widths) != 0))}
+
+
+def _unresolvedDifferences(ua, ub, labelsA, labelsB):
+    # resonanceReactions only name the channels' reactions; the channels are paired through them
+    ignore = IGNORED_FIELDS + ("spinGroups", "resonanceReactions")
+    out = [Difference("res", _normalised(d))
+           for d in modelDifferences(ua, ub, path="@unresolved", ignore=ignore)]
+    ta, tb = ua.tabulatedWidths, ub.tabulatedWidths
+    if ta is None or tb is None or len(ta.spinGroups) != len(tb.spinGroups):
+        return out + [Difference("res", "unresolved: spin groups not paired")]
+    for k, (ga, gb) in enumerate(zip(ta.spinGroups, tb.spinGroups)):
+        name = f"unresolved.spinGroups[{k}]"
+        out += [Difference("res", _normalised(d)) for d in
+                modelDifferences(ga, gb, path=f"@{name}", ignore=IGNORED_FIELDS + ("channels",))]
+        ca = _channelRoles(ta.resonanceReactions, ga.channels, labelsA)
+        cb = _channelRoles(tb.resonanceReactions, gb.channels, labelsB)
+        if set(ca) != set(cb):
+            out.append(Difference("res", f"{name}: channels with widths for MT {sorted(ca, key=str)} "
+                                         f"!= {sorted(cb, key=str)}"))
+        for role in sorted(set(ca) & set(cb), key=str):
+            out += [Difference("res", _normalised(d)) for d in
+                    modelDifferences(ca[role], cb[role], path=f"@{name}.channel[MT{role}]",
+                                     ignore=IGNORED_FIELDS + ("label",))]
     return out
 
 
@@ -380,14 +406,7 @@ def _tabulated(node):
 
 
 def _sized(check, where, message, a, b):
-    """One ``modelDifferences`` message as a Difference, sized where it has a size.
-
-    Arrays of the same shape get their largest relative difference; the abscissa
-    or ordinate of two tables of different length gets the largest relative
-    difference of the two tables interpolated on their union grid; a table whose
-    values are all one number against a ``Constant1d`` of that number is named as
-    such, since it states the same function.
-    """
+    """One ``modelDifferences`` message as a Difference, with its relative size where it has one."""
     path, _, rest = message.partition(": ")
     relative = path[1:]
     if rest == "arrays differ":
@@ -399,6 +418,10 @@ def _sized(check, where, message, a, b):
             grid = np.union1d(pa[0], pb[0])
             size = _relative(np.interp(grid, *pa), np.interp(grid, *pb))
             return Difference(check, f"{where}{_normalised(message)}", size)
+    if relative.endswith("Q.domainMin"):
+        x, y = _resolve(a, relative), _resolve(b, relative)
+        if x == 1e-5 and y > x:
+            return Difference(check, f"{where}{_normalisedPath(path)}: kika's 1e-05 below NNDC's")
     if rest in ("XYs1d != Constant1d", "Constant1d != XYs1d"):
         x, y = _resolve(a, relative), _resolve(b, relative)
         table, constant = (x, y) if isinstance(x, XYs1d) else (y, x)
@@ -463,11 +486,7 @@ def _labelsToMT(suite):
 
 
 def fieldDifferences(mine, theirs):
-    """Every field of every reaction, ``id`` aside: it restates the label and products.
-
-    Summands are compared by the MT they point at, since the two codes label reactions
-    differently.
-    """
+    """Every field of every reaction; ``id`` restates the label, summands are compared by MT."""
     out = []
     M, T = _byMT(mine), _byMT(theirs)
     labelsM, labelsT = _labelsToMT(mine), _labelsToMT(theirs)
