@@ -27,8 +27,8 @@ __all__ = ["Mismatch", "COMPARED", "IGNORED_HEADER_FIELDS", "strip", "compare", 
 #: tape.
 COMPARED = ("mat", "za", "awr", "qm", "lr", "interpolationRegions")
 
-#: ``headerFields`` keys the derivation adds for the encoder's sake and the
-#: decoder never writes.
+#: ``headerFields`` keys the derivation adds for the encoder's sake; compared
+#: only where the decoder also writes them (a fission QI beside NNDC's Q).
 IGNORED_HEADER_FIELDS = {"qi"}
 
 
@@ -99,7 +99,7 @@ def compare(original, derived) -> List[Mismatch]:
                 out.append(Mismatch(path, kind, name, a, b))
         fields = dict(getattr(provenance, "headerFields", None) or {})
         derivedFields = {k: v for k, v in (getattr(mine, "headerFields", None) or {}).items()
-                         if k not in IGNORED_HEADER_FIELDS}
+                         if k not in IGNORED_HEADER_FIELDS or k in fields}
         for key in sorted(set(fields) | set(derivedFields), key=str):
             if not _same(fields.get(key), derivedFields.get(key)):
                 out.append(Mismatch(path, kind, f"headerFields.{key}",
