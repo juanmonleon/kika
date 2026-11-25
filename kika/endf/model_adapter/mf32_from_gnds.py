@@ -9,8 +9,8 @@ and LRF=7 with LCOMP=1 or 2, the form chosen by the ``LCOMP=``, ``NDIGIT=``,
 back in MF32's order (by L when ``sortByL``, else by energy) and their rows of
 zeros dropped. The unresolved range's averageParameterCovariances become one LRU=2
 body, its averages read back from the flags FUDGE leaves on each matrix. An
-L-dependent scattering-radius uncertainty and several resolved ranges are not
-written, and say so.
+L-dependent scattering-radius uncertainty is read from the channel radii it
+links. Several resolved ranges are not written, and say so.
 """
 from __future__ import annotations
 
@@ -211,8 +211,8 @@ def _reichMoore(records, resonances, region, groups, matrix, lcomp, sortByL, ndi
     nls = 0 if lcomp in (1, 2) or not sortByL else len(set(ls))
     records.head(spi, radiusToEndf(radius), lad, lcomp, nls, int(dap is not None))
     if dap is not None:
-        records.head(0, 0, 0, 0, 1, 1)
-        records.data([dap])
+        records.head(0, 0, 0, 0, len(dap), 1)
+        records.dataList(dap)
     mpar = len(matrix) // nres
     sortedTable = sorted(zip(ls, table["energies"], table["Js"], table["elastic"],
                              table["capture"], table["f1"], table["f2"]))
@@ -495,6 +495,18 @@ def encodeMF32FromGnds(suite, mat: Optional[int], report: ConversionReport):
     return section, report
 
 
+def _linkedChannel(formalism, href):
+    match = re.search(r"spinGroup\[@label='([^']*)'\]/channels/channel\[@label='([^']*)'\]", href)
+    if match is None:
+        raise ValueError(f"a scattering-radius uncertainty on {href!r}")
+    for group in formalism.spinGroups:
+        if group.label == match.group(1):
+            for channel in group.channels:
+                if channel.label == match.group(2):
+                    return channel
+    raise ValueError(f"no channel at {href!r}")
+
+
 def _resolved(records, suite, covariance, conversions, awr, neutron, spi, mat):
     """The resolved range's body, as FUDGE's ``toENDF6`` writes it; returns LFW."""
     from kika.gnds.encode_resonances import resonanceTables
@@ -515,12 +527,26 @@ def _resolved(records, suite, covariance, conversions, awr, neutron, spi, mat):
     matrix = np.array(form.matrix, dtype=float)
     dap = None
     if links and links[0].href.endswith("/scatteringRadius") and links[0].nParameters == 1:
-        links.pop(0)
-        variance = matrix[0, 0]
-        if form.isRelative:
-            variance *= float(resonances.scatteringRadius.constant) ** 2
-        dap = float(np.sqrt(variance)) / 10.0
-        matrix = matrix[1:, 1:]
+        count = 1
+        while count < len(links) and "/channels/channel[" in links[count].href:
+            count += 1
+
+        def uncertainty(k, radius):
+            variance = matrix[k, k] * (float(radius) ** 2 if form.isRelative else 1.0)
+            return float(np.sqrt(variance)) / 10.0
+
+        dap = [uncertainty(0, resonances.scatteringRadius.constant)]
+        perL = {}
+        for k, link in enumerate(links[1:count], start=1):
+            channel = _linkedChannel(region.formalism, link.href)
+            radius = (channel.hardSphereRadius if link.href.endswith("/hardSphereRadius")
+                      else channel.scatteringRadius)
+            perL.setdefault(channel.L, set()).add(uncertainty(k, radius))
+        if any(len(values) > 1 for values in perL.values()):
+            raise ValueError("an L's channel radii state different uncertainties; MF32 has one per L")
+        dap += [perL[L].pop() if L in perL else 0.0 for L in range(max(perL) + 1)] if perL else []
+        links = links[count:]
+        matrix = matrix[count:, count:]
     sizes = [sum(len(row) for row in rows) for _, _, rows in groups]
     if [s for s in sizes if s] != [link.nParameters for link in links]:
         raise ValueError("the matrix's parameter links are not the resonance tables "
@@ -555,7 +581,10 @@ def _resolved(records, suite, covariance, conversions, awr, neutron, spi, mat):
     naps = 0 if lrf == 7 else int(not calculate)
     records.head(region.domainMin, region.domainMax, 1, lrf, 0, naps)
     if lrf in (1, 2):
-        _breitWigner(records, resonances, region, matrix, lcomp, sortByL, ndigit, awt, spi, dap)
+        if dap is not None and len(dap) > 1:
+            raise ValueError("an L-dependent scattering-radius uncertainty on a Breit-Wigner range")
+        _breitWigner(records, resonances, region, matrix, lcomp, sortByL, ndigit, awt, spi,
+                     None if dap is None else dap[0])
     elif lrf == 3:
         from kika.gnds.encode_resonances import _rmGroupsForGNDS, _withoutEmptyFission
         models = _rmGroupsForGNDS(formalism, ConversionReport())

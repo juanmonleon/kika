@@ -148,18 +148,31 @@ def _consistent(mf2, mf32, matrix, mpar, lcompZero):
     return matrix
 
 
-def _toModel(matrix, tables, rowHref, dap):
+def _toModel(matrix, tables, rowHref, dap, channelRadii=()):
     """*matrix* over *tables*, one link per non-empty table, absolute as in every NNDC file;
-    a scattering-radius uncertainty first, as its own row (FUDGE's ``scatteringRadius`` link)."""
+    a scattering-radius uncertainty first, as its own rows (FUDGE's ``scatteringRadius``
+    link, then a fully correlated block per L over that L's channel radii)."""
     links, values, start = [], [], 0
     if dap:
         links.append(ParameterLink(label="scatteringRadius",
                                    href="/reactionSuite/resonances/scatteringRadius",
                                    nParameters=1, matrixStartIndex=0))
-        grown = np.zeros((len(matrix) + 1, len(matrix) + 1))
-        grown[0, 0] = dap[0] ** 2
-        grown[1:, 1:] = matrix
-        matrix, start = grown, 1
+        block = np.zeros((1 + 2 * len(channelRadii),) * 2)
+        block[0, 0] = dap[0] ** 2
+        for k, (href, _) in enumerate(channelRadii):
+            for j, tag in enumerate(("scatteringRadius", "hardSphereRadius")):
+                links.append(ParameterLink(label=f"{tag}_{k}", href=f"{href}/{tag}",
+                                           nParameters=1, matrixStartIndex=1 + 2 * k + j))
+        index = 1
+        for L in dict.fromkeys(L for _, L in channelRadii):
+            size = 2 * sum(1 for _, other in channelRadii if other == L)
+            block[index:index + size, index:index + size] = dap[1 + L] ** 2
+            index += size
+        start = len(block)
+        grown = np.zeros((len(matrix) + start,) * 2)
+        grown[:start, :start] = block
+        grown[start:, start:] = matrix
+        matrix = grown
     for label, href, rows in tables:
         n = sum(len(row) for row in rows)
         for row in rows:
@@ -168,7 +181,7 @@ def _toModel(matrix, tables, rowHref, dap):
             continue
         links.append(ParameterLink(label=label, href=href, nParameters=n, matrixStartIndex=start))
         start += n
-    if len(values) + bool(dap) != len(matrix):
+    if len(values) + (1 + 2 * len(channelRadii) if dap else 0) != len(matrix):
         raise ValueError(f"{len(matrix)} covariance rows for {len(values)} table cells")
     # FUDGE's current code makes the matrix relative where it can; all 130 NNDC
     # files are absolute, so the version that wrote them did not.
@@ -265,8 +278,6 @@ def _reichMoore(lines, tables):
         for _ in range(-(-mls // 6)):
             dap += lines.floats()
         dap = [10 * d for d in dap[:mls]]
-        if len(dap) > 1:
-            raise ValueError("an L-dependent scattering-radius uncertainty (MLS>1) is not converted")
     if lcomp == 1:
         _, _, _, _, nsrs, nlrs = lines.ints()
         if nsrs != 1 or nlrs:
@@ -441,13 +452,42 @@ def _unresolved(lines, suite):
     return out, flags
 
 
-def fudgeParameterCovariances(suite, tables, report) -> Tuple[Optional[list], List[Tuple[str, str]]]:
+def _dapChannels(suite, dap, rowHref):
+    """``[(model channel, (href, L))]`` for an L-dependent scattering-radius uncertainty.
+
+    GNDS has no per-L radius node, only per-channel radii, so each L's DAP links
+    the radii of its entrance channels, in the written spin groups' order."""
+    from kika.gnds.encode_resonances import _rmGroupsForGNDS, _rmRole, _withoutEmptyFission
+    from kika.nuclear_data.model import ConversionReport
+
+    formalism = suite.resonances.resolved[0].formalism
+    roles = {r.label: _rmRole(r) for r in formalism.resonanceReactions}
+    groups = _rmGroupsForGNDS(formalism, ConversionReport())
+    _, groups = _withoutEmptyFission(formalism, groups, ConversionReport())
+    sources = {(c.L, c.resonanceReaction): c for g in formalism.spinGroups for c in g.channels}
+    found = []
+    for L, uncertainty in enumerate(dap[1:]):
+        if not uncertainty:
+            continue
+        for group in groups:
+            for channel in group.channels:
+                if channel.L == L and roles.get(channel.resonanceReaction) != "capture":
+                    href = (f"{rowHref}/spinGroups/spinGroup[@label='{group.label}']"
+                            f"/channels/channel[@label='{channel.label}']")
+                    found.append((sources[(L, channel.resonanceReaction)], (href, L)))
+    if not found:
+        raise ValueError("an L-dependent scattering-radius uncertainty with no channel to link")
+    return found
+
+
+def fudgeParameterCovariances(suite, tables, report) -> Tuple[Optional[list], List[Tuple[str, str]], list]:
     """*suite*'s parameter covariances in FUDGE's layout, and the flags to write with them.
 
     *tables* is ``(rowHref, [(label, href, rows), ...])`` for the one resolved
-    range, as kika's GNDS writer writes its resonance tables. Returns
-    ``(None, [])`` when there is nothing to convert (no MF32 text: a suite read
-    from GNDS already has FUDGE's layout).
+    range, as kika's GNDS writer writes its resonance tables. The third item is
+    the model channels whose radii the layout links and the reactionSuite must
+    state. Returns ``(None, [], [])`` when there is nothing to convert (no MF32
+    text: a suite read from GNDS already has FUDGE's layout).
     """
     from kika.nuclear_data.model.endf_conversion import MF32MT151_KEY
 
@@ -458,9 +498,9 @@ def fudgeParameterCovariances(suite, tables, report) -> Tuple[Optional[list], Li
         if header.get(MF32MT151_KEY) is not None:
             texts[id(header[MF32MT151_KEY])] = header[MF32MT151_KEY]
     if len(texts) != 1:
-        return None, []
+        return None, [], []
     lines = _Lines(next(iter(texts.values())))
-    converted, flags = [], []
+    converted, flags, radii = [], [], []
     try:
         lines.ints()
         _, _, _, _, ner, _ = lines.ints()
@@ -486,13 +526,16 @@ def fudgeParameterCovariances(suite, tables, report) -> Tuple[Optional[list], Li
                 matrix, rangeFlags, dap = _rMatrixLimited(lines, groups)
             else:
                 raise ValueError(f"LRF={lrf} is not converted")
-            converted.insert(0, _toModel(matrix, groups, rowHref, dap))
+            channelRadii = _dapChannels(suite, dap, rowHref) if len(dap) > 1 else []
+            radii += [channel for channel, _ in channelRadii]
+            converted.insert(0, _toModel(matrix, groups, rowHref, dap,
+                                         [(href, L) for (_, (href, L)) in channelRadii]))
             if rangeFlags:
                 flags.insert(0, (PARAMETER_COVARIANCE_HREF, ",".join(rangeFlags)))
     except (ValueError, IndexError) as why:
         report.lost(f"MF32 is written in kika's own layout, one link per resonance, not "
                     f"FUDGE's: {why}")
-        return None, []
+        return None, [], []
     others = [c for c in covariances if type(c).__name__ not in
               ("ParameterCovariance", "AverageParameterCovariance")]
-    return converted + others, flags
+    return converted + others, flags, list({id(c): c for c in radii}.values())

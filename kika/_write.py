@@ -292,9 +292,31 @@ def _fudgeParameterLayout(suite, report):
     from kika.nuclear_data.model import ConversionReport
 
     if suite.resonances is None or not getattr(suite.covarianceSuite, "parameterCovariances", None):
-        return None, []
+        return None, [], []
     tables = resonanceTables(suite.resonances, ConversionReport())
     return fudgeParameterCovariances(suite, tables, report)
+
+
+def _withChannelRadii(suite, channels):
+    """State the range's radius on *channels* that state none, for one write; returns the undo.
+
+    The radii an L-dependent scattering-radius uncertainty links must exist in
+    the reactionSuite; the value is the one those channels already use."""
+    if not channels:
+        return None
+    radius = suite.resonances.scatteringRadius
+    before = [(c, c.scatteringRadius, c.hardSphereRadius, c.radiusUnit) for c in channels]
+    for channel in channels:
+        if channel.scatteringRadius is None:
+            channel.scatteringRadius, channel.radiusUnit = float(radius.constant), radius.unit or "fm"
+        if channel.hardSphereRadius is None:
+            channel.hardSphereRadius = channel.scatteringRadius
+
+    def undo():
+        for channel, scattering, hardSphere, unit in before:
+            channel.scatteringRadius, channel.hardSphereRadius, channel.radiusUnit = (
+                scattering, hardSphere, unit)
+    return undo
 
 
 def _withFlags(suite, flags):
@@ -322,7 +344,7 @@ def _withFlags(suite, flags):
 def _writeLinkedPair(suite, path, format, report, writeReactionSuite,
                      writeCovarianceSuite, serialise, sha1, ExternalFile):
     covariancePath = None
-    flags = []
+    flags, radii = [], []
     if suite.covarianceSuite is not None:
         covariancePath = (
             path.parent / COVARIANCE_SUBDIRECTORY
@@ -342,7 +364,7 @@ def _writeLinkedPair(suite, path, format, report, writeReactionSuite,
             entry for entry in suite.covarianceSuite.externalFiles
             if entry.label != "reactions"
         ] + [ExternalFile(label="reactions", path=f"../{path.name}")]
-        layout, flags = _fudgeParameterLayout(suite, report)
+        layout, flags, radii = _fudgeParameterLayout(suite, report)
         if layout is not None:
             original = suite.covarianceSuite.parameterCovariances
             suite.covarianceSuite.parameterCovariances = layout
@@ -368,11 +390,14 @@ def _writeLinkedPair(suite, path, format, report, writeReactionSuite,
                           checksum=sha1(payload), algorithm="sha1")]
 
     added = _withFlags(suite, flags) if covariancePath is not None else None
+    stated = _withChannelRadii(suite, radii) if covariancePath is not None else None
     try:
         tree, report = writeReactionSuite(suite, format, report)
     finally:
         if added is not None:
             added()
+        if stated is not None:
+            stated()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(serialise(tree))
 
