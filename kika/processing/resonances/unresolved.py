@@ -295,6 +295,13 @@ def _group_breaks(group):
     return cuts
 
 
+def _stated_awri(mass,neutron):
+    """AWRI from a target mass of AWRI*neutron: of the doubles that give it back, the decimal ENDF wrote."""
+    a=mass/neutron
+    candidates=[c for c in (a,float(np.nextafter(a,0.)),float(np.nextafter(a,np.inf))) if c*neutron==mass]
+    return min(candidates,key=lambda c:len(repr(c))) if candidates else a
+
+
 def prepare_unresolved(region,context,notes):
     from .prepare import PreparedRegion,UnsupportedResonanceError
     from kika.nuclear_data.model.enums import INTERPOLATION_TO_ENDF_INT
@@ -305,8 +312,13 @@ def prepare_unresolved(region,context,notes):
         notes.append('URR LSSF=1: dilute cross sections already in MF3; no additional mean or probability tables')
         return PreparedRegion(low,high,'Unresolved',(),UnresolvedData(True))
     if source.radiusUnit not in (None,'fm'):raise ValueError('URR radii must be normalized to fm')
+    stated_awri=None
     if source.PoPs is not None:
         particles=list(source.PoPs.particles.values())
+        mass=particles[0].mass if len(particles)==1 else None
+        if mass is not None:
+            # ENDF states the URR's AWRI per l-block, and the region's PoPs holds it as a mass
+            stated_awri=_stated_awri(mass.convertedTo('amu').value,context.neutron_mass_amu)
         if len(particles)==1 and particles[0].spin is not None:
             spin=particles[0].spin
             if spin.unit!='hbar':raise ValueError('URR target spin must be in hbar')
@@ -331,7 +343,8 @@ def prepare_unresolved(region,context,notes):
             notes.append(f'URR L={l} J={j:g} is no coupling of L with I={context.target_spin:g}; '
                          f'taken as stated, g_J=(2J+1)/(2(2I+1)), as NJOY and FUDGE do')
         if (l,j) in seen:raise ValueError('duplicate URR L/J group')
-        seen.add((l,j));ctx=context if sg.atomicWeightRatio is None else replace(context,atomic_weight_ratio=sg.atomicWeightRatio)
+        awri=sg.atomicWeightRatio if sg.atomicWeightRatio is not None else stated_awri
+        seen.add((l,j));ctx=context if awri is None or awri==context.atomic_weight_ratio else replace(context,atomic_weight_ratio=awri)
         if l in lcontexts and lcontexts[l]!=ctx:raise UnsupportedResonanceError('URR groups of one L disagree on mass')
         lcontexts[l]=ctx
         channel=prepare_radius(ctx.mass_channel_radius_fm) if policy.channelMode=='mass' else phase if policy.channelMode=='phase' else prepare_radius(policy.channelRadius) if policy.channelMode=='constant' else None
