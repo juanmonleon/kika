@@ -5,6 +5,7 @@ MF32 of Na-23 (LRF=2, LCOMP=2), Am-241 (LRF=2, LCOMP=0) and Mn-55 (LRF=3,
 LCOMP=1) is the tape's, record for record. Cl-35 (LRF=7, LCOMP=2) states the
 tape's covariance; its records differ where no GNDS node holds the tape's
 choice: NJSX, the capture residual's ZB, and how the INTG records split a row.
+Ca-40 (LRF=7, LCOMP=1) goes both ways through kika's own GNDS.
 """
 from __future__ import annotations
 
@@ -66,3 +67,27 @@ def test_kikas_own_gnds_of_na23_gives_the_tapes_mf32(tmp_path):
     gnds = tmp_path / "na23.gnds.xml"
     kika.write(kika.read(str(endf), covariances=True), str(gnds), format="gnds")
     assert _mf32(_written(gnds, tmp_path)) == _mf32(endf)
+
+
+def _decoded(path):
+    (covariance,) = decodeMF32MT(read_endf(str(path), mf_numbers=[32]).mf[32].mt[151])[0]
+    return covariance.form
+
+
+def test_ca40_lrf7_lcomp1_goes_both_ways(tmp_path):
+    endf, _ = _paths("n-020_Ca_040")
+    suite = kika.read(str(endf), covariances=True)
+    (covariance,) = suite.covarianceSuite.parameterCovariances
+    assert covariance.form.matrix.shape == (1140, 1140)
+    direct = tmp_path / "direct.endf"
+    kika.write(suite, str(direct), format="endf")
+    assert _mf32(direct) == _mf32(endf)
+    gnds = tmp_path / "ca40.gnds.xml"
+    kika.write(suite, str(gnds), format="gnds")
+    written = _written(gnds, tmp_path)
+    back, tape = _decoded(written), _decoded(endf)
+    assert np.array_equal(back.matrix, tape.matrix)
+    assert np.array_equal(back.parameterValues, tape.parameterValues)
+    lines, stated = _mf32(written), _mf32(endf)
+    # the tape writes one value 9.99999e-10 as 0.999999-9, which no writer reproduces
+    assert len(lines) == len(stated) and sum(x != y for x, y in zip(lines, stated)) == 1

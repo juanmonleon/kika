@@ -30,9 +30,9 @@ whose arithmetic disagrees is reported and skipped rather than reshaped into
 something that fits.
 
 **What is deliberately not decoded.** LCOMP=1's long-range blocks (§32.2.2.5,
-NLRS>0) and LCOMP=1 for LRF=7 (§32.2.2.4). No evaluation on this machine has
-either, so a decoder for them would be code no test could reach; they are
-reported as unsupported and the rest of the section still converts.
+NLRS>0). No evaluation on this machine has one, so a decoder for them would be
+code no test could reach; they are reported as unsupported and the rest of the
+section still converts.
 """
 from __future__ import annotations
 
@@ -423,6 +423,60 @@ def _decodeLCOMP2RML(body, href: str,
     )
 
 
+def _rmlBlockTables(block) -> Optional[list]:
+    """``[(NCH, NRB, rows)]`` of one §32.2.2.4 block, each row ER then NCH widths; ``None``
+    if a spin group's LIST is not ``NRB`` rows at a stride of ``6 * ceil((NCH + 1) / 6)``."""
+    tables = []
+    for group in block[1:-1]:
+        channels, count = int(group.l1), int(group.l2)
+        width, stride = channels + 1, 6 * ((channels + 6) // 6)
+        raw = group.values
+        if int(group.n1) != stride * count or len(raw) < stride * count:
+            return None
+        rows = np.asarray(raw[:stride * count], dtype=float).reshape(count, stride)[:, :width]
+        tables.append((channels, count, rows))
+    return tables
+
+
+def _decodeLCOMP1RMLBlock(block, href: str, blockIndex: int,
+                          report: ConversionReport) -> Optional[ParameterCovarianceMatrix]:
+    """§32.2.2.4 — one block: per spin group NRB rows of ER and NCH widths, then the triangle.
+
+    Like LCOMP=2's R-Matrix Limited body, the matrix covers every parameter of the
+    block's resonances: NPARB is ``sum (NCH+1) * NRB`` (Ca-40 in ENDF/B-VIII.1).
+    """
+    what = f"MF32 LCOMP=1 LRF=7 block {blockIndex}"
+    tables = _rmlBlockTables(block)
+    if tables is None or len(tables) != int(block[0].l1):
+        report.lost(f"{what}: the spin groups' LISTs do not hold NJSX={int(block[0].l1)} "
+                    f"tables of NRB rows of ER and NCH widths")
+        return None
+    matrixRecord = block[-1]
+    order = sum((channels + 1) * count for channels, count, _ in tables)
+    expected = order * (order + 1) // 2
+    if (int(matrixRecord.n2) != order or int(matrixRecord.n1) != expected
+            or len(matrixRecord.values) < expected):
+        report.lost(f"{what}: NPARB={int(matrixRecord.n2)} and N={int(matrixRecord.n1)} against "
+                    f"sum (NCH+1)*NRB = {order}, a triangle of {expected}")
+        return None
+    links: List[ParameterLink] = []
+    values: List[float] = []
+    for groupIndex, (channels, count, rows) in enumerate(tables):
+        names = ["ER"] + [f"GAM{c + 1}" for c in range(channels)]
+        for resonance, row in enumerate(rows):
+            links.append(ParameterLink(
+                label=f"block{blockIndex}/spinGroup{groupIndex}/resonance{resonance}",
+                href=href, nParameters=channels + 1, matrixStartIndex=len(values),
+                parameterNames=list(names)))
+            values.extend(row)
+    if not links:
+        return None
+    return ParameterCovarianceMatrix(
+        matrix=_triangleToFull(matrixRecord.values[:expected], order), parameters=links,
+        isRelative=False, parameterValues=np.asarray(values, dtype=float),
+    )
+
+
 def _decodeUnresolved(body, href: str,
                       report: ConversionReport) -> Optional[ParameterCovarianceMatrix]:
     """§32.2.4 — average parameters per (L, J), and one **relative** triangle.
@@ -551,12 +605,8 @@ def decodeMF32MT(mf32mt, report: Optional[ConversionReport] = None):
                     for index, block in enumerate(body.short_range)
                 ]
             elif kind == "LCOMP1RMLBody":
-                report.unsupportedNode(
-                    f"{stem}: LCOMP=1 with LRF=7 (§32.2.2.4) is parsed but not "
-                    f"decoded — no evaluation on this machine has one, so a "
-                    f"decoder for it would be untestable"
-                )
-                forms = []
+                forms = [_decodeLCOMP1RMLBlock(block, href, index, report)
+                         for index, block in enumerate(body.blocks)]
             else:
                 report.unsupportedNode(f"{stem}: no decoder for a {kind}")
                 forms = []
@@ -566,6 +616,8 @@ def decodeMF32MT(mf32mt, report: Optional[ConversionReport] = None):
                 if form is None:
                     continue
                 suffix = f"-block{formIndex}" if len(forms) > 1 else ""
+                if kind == "LCOMP1RMLBody":
+                    suffix = f"-block{formIndex}"
                 covariances.append(ParameterCovariance(
                     label=f"{stem}{suffix}",
                     rowData=link,
@@ -807,6 +859,22 @@ def _rewriteLCOMP1Block(block, lrf: int, form) -> None:
     block.body.set_values(list(table.reshape(-1)) + list(upper))
 
 
+def _rewriteLCOMP1RMLBlock(block, form) -> None:
+    """§32.2.2.4: each spin group's rows of ER and widths, then the upper triangle."""
+    values = np.asarray(form.parameterValues, dtype=float)
+    start = 0
+    for group in block[1:-1]:
+        channels, count = int(group.l1), int(group.l2)
+        width, stride = channels + 1, 6 * ((channels + 6) // 6)
+        raw = list(group.body.values)
+        table = np.asarray(raw[:stride * count], dtype=float).reshape(count, stride)
+        table[:, :width] = values[start:start + width * count].reshape(count, width)
+        start += width * count
+        group.body.set_values(list(table.reshape(-1)) + raw[stride * count:])
+    upper = list(form.matrix[np.triu_indices(form.matrix.shape[0])])
+    block[-1].body.set_values(upper + list(block[-1].body.values)[len(upper):])
+
+
 def _rewriteLCOMP2(body, lrf: int, form, what: str,
                    report: ConversionReport) -> None:
     """§32.2.3.1-2: values and uncertainties interleaved, then INTG."""
@@ -939,13 +1007,15 @@ def encodeMF32MT(source, mat: Optional[int] = None,
         body = energyRange.body
         kind = type(body).__name__
         what = f"MF32-iso{iso}-range{rng}" + (
-            f"-block{blockIndex}" if kind == "LCOMP1Body" else "")
+            f"-block{blockIndex}" if kind in ("LCOMP1Body", "LCOMP1RMLBody") else "")
         _assertShape(form, old, what)
         if kind == "LCOMP0Body":
             _rewriteLCOMP0(body, form, what, report)
         elif kind == "LCOMP1Body":
             _rewriteLCOMP1Block(body.short_range[blockIndex], energyRange.lrf,
                                 form)
+        elif kind == "LCOMP1RMLBody":
+            _rewriteLCOMP1RMLBlock(body.blocks[blockIndex], form)
         elif kind == "LCOMP2Body":
             _rewriteLCOMP2(body, energyRange.lrf, form, what, report)
         elif kind == "LCOMP2RMLBody":

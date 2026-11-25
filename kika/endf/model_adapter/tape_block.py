@@ -145,8 +145,8 @@ def _mf6Awps(suite, nodes) -> Dict[str, Dict[int, float]]:
 def _mf32(suite) -> Dict[str, object]:
     """MF32's head fields GNDS's parameter covariance has no place for, by range kind.
 
-    NAPS of each range, NLS of an LCOMP=1 or 2 head, L2 of an LRF=7 particle-pair LIST and
-    the AWRI of each unresolved L block."""
+    NAPS of each range, NLS of an LCOMP=1 or 2 head, L2 of an LRF=7 particle-pair LIST,
+    the AWRI of each unresolved L block and the HEAD's AWR where it is not MF1's."""
     from kika.endf.classes.mf32.mf32mt151 import (LCOMP1Body, LCOMP2Body, LCOMP2RMLBody,
                                                   UnresolvedBody)
     from kika.endf.parsers.parse_mf32 import parse_mf32_mt151
@@ -164,6 +164,9 @@ def _mf32(suite) -> Dict[str, object]:
     if len(section.isotopes) != 1:
         return {}
     out: Dict[str, object] = {}
+    mf1 = getattr(getattr(suite, "provenance", None), "awr", None)
+    if section._awr is not None and mf1 is not None and float(section._awr) != float(mf1):
+        out["awr"] = float(section._awr)
     ranges = section.isotopes[0].energy_ranges
     resolved = [r for r in ranges if r.lru == 1]
     for kind, found in (("resolved", resolved), ("unresolved", [r for r in ranges if r.lru == 2])):

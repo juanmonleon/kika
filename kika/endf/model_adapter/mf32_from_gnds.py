@@ -504,7 +504,7 @@ def encodeMF32FromGnds(suite, mat: Optional[int], report: ConversionReport):
         if kept and lfw is None:
             lfw = _urrFission(resonances.unresolved.tabulatedWidths)
         header = _Records()
-        header.head(za, awr, 0, 0, 1, 0)
+        header.head(za, stated.get("awr", awr), 0, 0, 1, 0)
         header.head(za, 1.0, 0, lfw, int(bool(resolvedOnes)) + int(bool(averages or kept)), 0)
     except (ValueError, KeyError, IndexError, AttributeError) as why:
         report.lost(f"MF32 from the GNDS parameter covariance is not written: {why}")
