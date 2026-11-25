@@ -220,6 +220,20 @@ def test_the_unresolved_averages_survive_the_round_trip(micro_ta182_gnds,
             np.testing.assert_array_equal(y.widths, x.widths)
 
 
+def test_the_unresolved_averages_written_from_arrays_name_their_axis(micro_ta182_gnds,
+                                                                     tmp_path):
+    suite = kika.read(micro_ta182_gnds, covariances=False)
+    for group in suite.resonances.unresolved.tabulatedWidths.spinGroups:
+        group.levelSpacingFunction = None
+        for channel in group.channels:
+            channel.averageFunction = None
+    path, _ = _write(suite, tmp_path)
+    labels = {(node.tag, axis.attrib["label"]) for node in ET.parse(path).iter()
+              if node.tag in ("levelSpacing", "width")
+              for axis in node.iter("axis") if axis.attrib.get("index") == "0"}
+    assert labels == {("levelSpacing", "levelSpacing"), ("width", "average width")}
+
+
 def test_the_breit_wigner_table_keeps_its_l_blocks_and_their_order(
         micro_ta182_gnds, tmp_path):
     before = kika.read(micro_ta182_gnds, covariances=False)

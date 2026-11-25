@@ -119,9 +119,10 @@ def attachLumps(endf, suite, report):
                                 f"linearized to {LINEARIZATION_TOLERANCE:g} for the nominal sum; "
                                 "original members and covariance declarations are unchanged")
         cross=CrossSection(); cross["eval"]=XYs1d(x,y,label="eval",axes=crossSectionAxes())
-        # As in GNDS's lumped sums, Q=0 is bookkeeping, not a transport channel.
+        # The tape states no Q for a lump; FUDGE's rule is the members' largest QM.
+        qm=max(float(mf3.mt[mt].q_mass_difference) for mt in members)
         node=CrossSectionSum(id=ReactionId(label=f"MT{lump}",ENDF_MT=lump),
-            crossSection=cross, outputChannel=OutputChannel(Q=Q(value=0.,unit="eV")),
+            crossSection=cross, outputChannel=OutputChannel(Q=Q(value=qm,unit="eV")),
             summands=Summands(links))
         suite.sums.append(node)
         retained.update(members)

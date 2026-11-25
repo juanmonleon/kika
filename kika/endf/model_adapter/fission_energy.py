@@ -564,7 +564,7 @@ def attachDelayedSpectra(suite, mf5mt, report: Optional[ConversionReport] = None
         if product.distribution is None:
             product.distribution = Distribution()
         product.distribution[EVAL_LABEL] = Uncorrelated(
-            angular=Isotropic2d(), energy=form, productFrame=Frame.lab)
+            angular=Isotropic2d(productFrame=Frame.lab), energy=form, productFrame=Frame.lab)
     if total is not None and links:
         total.summands.summands = links
     message = (f"MF5/MT455: {len(families)} family spectra placed on their "

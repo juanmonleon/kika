@@ -77,7 +77,8 @@ def test_groups_are_native_reaction_sums_and_not_individual_covariances(law):
     explicit=NISubSubsectionRecord(lb=5,ls=1,ne=2,nt=3,energies=[1.,4.],matrix=[.04])
     members={52:section(52,mtl=851),53:section(53,mtl=851),851:section(851,ni=[explicit])}
     tables={mt:SimpleNamespace(energies=[1.,4.],cross_sections=[float(mt),float(mt)],
-                              energy_interpolation=[(2,law)]) for mt in [52,53]}
+                              energy_interpolation=[(2,law)],q_mass_difference=-1e3*mt)
+            for mt in [52,53]}
     endf=SimpleNamespace(mf={33:SimpleNamespace(mt=members),3:SimpleNamespace(mt=tables)})
     suite=ReactionSuite(evaluation="test",projectile="n",target="U235")
     for mt in tables:
@@ -92,6 +93,7 @@ def test_groups_are_native_reaction_sums_and_not_individual_covariances(law):
     lump=suite.sums[851]
     assert len(lump.summands)==2
     np.testing.assert_array_equal(lump.crossSection["eval"].ys,[105.,105.])
+    assert lump.outputChannel.Q.value==-52e3  # the members' largest QM, as FUDGE states it
     written,_=_covarianceSections(suite,9228,ConversionReport())
     actual={mt:s for mf,mt,s in written if mf==33}
     assert set(actual)=={52,53,851}
