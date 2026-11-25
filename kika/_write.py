@@ -260,11 +260,14 @@ def _writeGnds(suite, path: Path, gnds: Optional[str], resonance_extensions=Fals
                                   writeCovarianceSuite, writeReactionSuite)
     from kika.nuclear_data.model import ConversionReport, ExternalFile
 
+    from functools import partial
+    from kika.endf.model_adapter.tape_block import collect
+
     report = ConversionReport()
     format = chooseFormat(suite, gnds)
-    if resonance_extensions:
-        from functools import partial
-        writeReactionSuite=partial(writeReactionSuite,resonance_extensions=True)
+    tapeData = collect(suite)
+    writeReactionSuite = partial(writeReactionSuite, resonance_extensions=resonance_extensions,
+                                 tapeData=tapeData)
 
     # Both links below are rewritten on the caller's own objects, so they are
     # put back before returning. **Writing a file must not edit the model you
@@ -282,15 +285,15 @@ def _writeGnds(suite, path: Path, gnds: Optional[str], resonance_extensions=Fals
         suite.externalFiles.files = originalExternalFiles
         if originalBackLinks is not None:
             suite.covarianceSuite.externalFiles = originalBackLinks
-    return _declareTapeOnly(suite, report, "the GNDS file")
+    return _declareTapeOnly(suite, report, "the GNDS file", tapeData)
 
 
-def _declareTapeOnly(suite, report, written: str):
+def _declareTapeOnly(suite, report, written: str, kept=None):
     """*report* with what a suite read from ENDF holds only to write the tape back."""
     if (report is not None
             and getattr(getattr(suite, "provenance", None), "sourceFormat", None) == "endf"):
         from kika.endf.model_adapter.tape_only import tapeOnlyData
-        for sentence in tapeOnlyData(suite, written):
+        for sentence in tapeOnlyData(suite, written, kept):
             report.lost(sentence, unaffectedScopes=("cross-sections",))
     return report
 

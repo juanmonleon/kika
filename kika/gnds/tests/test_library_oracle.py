@@ -174,8 +174,6 @@ EXPECTED: List[Expected] = [
              reason="an MF33 lumped sum rebuilt from its summands; the order of the additions differs"),
     Expected("recon", r"MT\d+: npts \d+ != \d+", bound=1e-15,
              reason="a point collinear with its neighbours dropped where two regions merge, as FUDGE does"),
-    Expected("recon", r"MT(1|2|3|102|103): values", bound=2.4e-11, tapes="n-014_Si_028|n-026_Fe_054",
-             reason="LRF=7 channel masses are a declared write loss; the GNDS side takes them from PoPs"),
 ]
 
 

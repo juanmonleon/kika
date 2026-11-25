@@ -179,6 +179,8 @@ class _ResonanceReader:
         if widths is None or shared is None or widths.scatteringRadius is not None:
             return
         policy = widths.radiusPolicy
+        if policy is not None and policy.phaseRadius is not None:
+            return
         if shared.isEnergyDependent:
             if policy is not None and policy.phaseRadius is None:
                 widths.radiusPolicy = replace(policy, phaseRadius=shared)

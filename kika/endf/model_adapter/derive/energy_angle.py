@@ -165,7 +165,8 @@ def _zap(pid: str):
 
 
 def _awp(suite, pid: str, report=None) -> Optional[float]:
-    """AWP from PoPs: atomic there, nuclear in ENDF for H and He (light_masses)."""
+    """AWP from PoPs: atomic there, nuclear in ENDF for H and He (light_masses), at the
+    seven significant digits the tapes state it with."""
     from kika.nuclear_data.model.pops import zaFromPid
 
     from ..light_masses import ratioFromAtomic
@@ -178,7 +179,7 @@ def _awp(suite, pid: str, report=None) -> Optional[float]:
     # ENDF's AWP for it is the ground state's (FUDGE's MassTracker keeps the
     # index-0 nuclides only).
     mass = None
-    for candidate in (pid, pid.split("_e")[0]):
+    for candidate in (pid.split("_e")[0], pid):
         mass = getattr(suite.PoPs.particles.get(candidate), "mass", None)
         if mass is not None:
             break
@@ -194,8 +195,14 @@ def _awp(suite, pid: str, report=None) -> Optional[float]:
         if report is not None:
             report.approximated(f"MF6: {pid} has no mass in PoPs; its AWP is from "
                                 f"kika's atomic mass table ({amu} amu)")
-        return ratioFromAtomic(zaFromPid(pid), float(amu))
-    return ratioFromAtomic(zaFromPid(pid), float(mass.value))
+        return _endfFloat(ratioFromAtomic(zaFromPid(pid), float(amu)))
+    return _endfFloat(ratioFromAtomic(zaFromPid(pid), float(mass.value)))
+
+
+def _endfFloat(value: float) -> float:
+    from kika._records import _format_endf_scientific, parse_number
+
+    return float(parse_number(_format_endf_scientific(value)))
 
 
 def _yield(multiplicity):

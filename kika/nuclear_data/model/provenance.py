@@ -20,12 +20,14 @@ behaviour.
 """
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple
 
 __all__ = ["Provenance", "EndfProvenance", "AceProvenance",
            "GndsProvenance", "G4NDLProvenance", "G4NDLInelasticProvenance",
-           "G4NDLCaptureProvenance", "G4NDLFissionProvenance", "Hdf5Provenance"]
+           "G4NDLCaptureProvenance", "G4NDLFissionProvenance", "Hdf5Provenance",
+           "provenanceNodes"]
 
 
 @dataclass
@@ -387,3 +389,62 @@ class Hdf5Provenance(Provenance):
     path: Optional[str] = None
     node: Optional[str] = None
     attributes: Dict[str, object] = field(default_factory=dict)
+
+
+_LEAVES = (str, bytes, int, float, complex, bool, type(None))
+
+
+def provenanceNodes(suite) -> Iterator[Tuple[str, object]]:
+    """Every node under *suite* that has a ``provenance`` slot, with a stable path.
+
+    The path names nodes by what they are (``reactions[MT51]``, ``products[n]``)
+    rather than by position, so the oracle can pair the nodes of two suites
+    built differently. ``provenance`` and ``report`` are not descended into, and
+    arrays are leaves.
+    """
+    seen = set()
+
+    def name(obj, fallback):
+        for attr in ("label", "pid", "id"):
+            value = getattr(obj, attr, None)
+            if isinstance(value, str) and value:
+                return value
+            label = getattr(value, "label", None)
+            if isinstance(label, str) and label:
+                return label
+        return fallback
+
+    def walk(obj, path):
+        if isinstance(obj, _LEAVES) or id(obj) in seen:
+            return
+        if type(obj).__module__.startswith("numpy"):
+            return
+        seen.add(id(obj))
+        if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+            if any(f.name == "provenance" for f in dataclasses.fields(obj)):
+                yield path, obj
+            for f in dataclasses.fields(obj):
+                if f.name in ("provenance", "report"):
+                    continue
+                yield from walk(getattr(obj, f.name), f"{path}.{f.name}")
+        elif isinstance(obj, dict):
+            for key, value in obj.items():
+                yield from walk(value, f"{path}[{key}]")
+        elif isinstance(obj, (list, tuple)):
+            for index, value in enumerate(obj):
+                yield from walk(value, f"{path}[{name(value, index)}]")
+        elif hasattr(obj, "__iter__") and hasattr(obj, "__len__"):
+            try:
+                items = list(obj)
+            except Exception:
+                return
+            for index, value in enumerate(items):
+                yield from walk(value, f"{path}[{name(value, index)}]")
+            # `Sums` iterates its crossSectionSums and holds §21.1's other
+            # child beside them: without this the nu-bars of MT452/455, which
+            # are multiplicitySums, were never visited.
+            extra = getattr(obj, "multiplicitySums", None)
+            if extra is not None:
+                yield from walk(extra, f"{path}.multiplicitySums")
+
+    yield from walk(suite, "suite")

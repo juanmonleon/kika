@@ -1505,7 +1505,9 @@ def _encodeUnresolved(unresolved: UnresolvedRegion, fields: dict):
                                                        energies=grid)
         entry["states"].append((group, state, channels))
 
-    common = dict(spi=fields["spi"], ap=radiusToEndf(widths.scatteringRadius), lssf=int(widths.selfShieldingOnly),
+    # Beside an AP(E) table and no radius of the range's own, AP is 0, as the tapes write it.
+    ap = 0.0 if widths.scatteringRadius is None else radiusToEndf(widths.scatteringRadius)
+    common = dict(spi=fields["spi"], ap=ap, lssf=int(widths.selfShieldingOnly),
                   nls=fields["nls"])
 
     if case == "A":

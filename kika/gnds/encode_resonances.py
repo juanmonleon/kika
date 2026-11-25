@@ -440,11 +440,15 @@ def _fudgePenetrabilityAndShift(reaction, boundaryCondition):
     return penetrability, "brune" if boundaryCondition == "Brune" else "calculate"
 
 
+#: Per report, the resonance reactions whose particle pair kika's endfTapeData keeps.
+KINEMATICS_KEPT = {}
+
+
 def _resonanceReaction(parent: ET.Element, reaction, report: ConversionReport,
                        domain, boundaryCondition=None) -> None:
     element = ET.SubElement(parent, "resonanceReaction")
     kinematics = reaction.kinematics
-    if kinematics is not None:
+    if kinematics is not None and id(reaction) not in KINEMATICS_KEPT.get(id(report), ()):
         report.lost(f"resonanceReaction {reaction.label!r}: channel-local particle properties require PoPs/link normalization; this writer does not serialize them")
         if (kinematics.penetrability, kinematics.shift) != _fudgePenetrabilityAndShift(reaction, boundaryCondition):
             report.lost(f"resonanceReaction {reaction.label!r}: PNT/SHF ({kinematics.penetrability}, "

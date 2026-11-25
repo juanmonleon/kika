@@ -12,6 +12,8 @@ there, which is a different calculation.
 ``unresolvedPotentialScattering`` declares an independent potential policy;
 ``unresolvedNeutronWidthConvention`` explicitly identifies physical neutron
 means instead of reduced GN0. Both are opt-in canonical KIKA conventions.
+``endfTapeData`` (:mod:`kika.gnds.tape_data`) is written by default for a suite
+read from ENDF and is read only on the way back to ENDF.
 """
 from copy import deepcopy
 import hashlib
@@ -24,6 +26,8 @@ LABEL='KIKA::resonance_channel_functions'
 URR='unresolved'
 URRPOT='unresolvedPotential'
 URRWIDTH='unresolvedWidth'
+TAPE='endfTapeData'
+TAPE_VERSION='1'
 
 
 def _fingerprint(formalism):
@@ -82,12 +86,16 @@ def extract(suite):
     return result,saved
 
 
-def write(root,saved,report):
-    if not saved:return
+def write(root,saved,report,tape=None):
+    if not saved and not tape:return
     from .encode import _function
     application=root.find('applicationData')
     if application is None:application=ET.SubElement(root,'applicationData')
     institution=ET.SubElement(application,'institution',label=LABEL)
+    if tape:
+        from . import tape_data
+        tape_data.write(institution,tape)
+    if not saved:return
     channels=[s for s in saved if s[0] not in (URR,URRPOT,URRWIDTH)];urr=[s for s in saved if s[0]==URR]
     widths=[s for s in saved if s[0]==URRWIDTH]
     if widths:
@@ -134,19 +142,31 @@ def read(application,suite,report,read_function):
         if institution.get('label')!=LABEL:
             unknown.append(institution.get('label',institution.tag));continue
         tags=[child.tag for child in institution]
-        if not tags or len(set(tags))!=len(tags) or set(tags)-{'resonanceChannelFunctions','unresolvedCrossSectionInterpolation','unresolvedPotentialScattering','unresolvedNeutronWidthConvention'}:
+        if not tags or len(set(tags))!=len(tags) or set(tags)-{'resonanceChannelFunctions','unresolvedCrossSectionInterpolation','unresolvedPotentialScattering','unresolvedNeutronWidthConvention',TAPE}:
             raise ValueError('unknown KIKA resonance applicationData content')
+        block=institution.find(TAPE)
+        if block is not None:
+            if block.get('version')!=TAPE_VERSION:
+                report.unsupportedNode('unsupported KIKA endfTapeData version; the way back to ENDF derives what it held')
+            else:
+                from . import tape_data
+                data=tape_data.read(block)
+                suite.applicationData.entries.append(data)
+                tape_data.applyToModel(suite,data,report)
+            institution=[child for child in institution if child.tag!=TAPE]
+            if not institution:continue
         if any(child.get('version') not in ({'1','2'} if child.tag=='unresolvedCrossSectionInterpolation' else {'1'}) for child in institution):
             report.unsupportedNode('unsupported KIKA resonance applicationData version');continue
         if any(set(child.attrib)!={'version'} for child in institution if child.tag!='unresolvedPotentialScattering'):
             raise ValueError('unknown KIKA resonance applicationData content')
-        block=institution.find('unresolvedCrossSectionInterpolation')
+        children={child.tag:child for child in institution}
+        block=children.get('unresolvedCrossSectionInterpolation')
         if block is not None:_readUnresolved(block,suite)
-        block=institution.find('unresolvedPotentialScattering')
+        block=children.get('unresolvedPotentialScattering')
         if block is not None:_readUnresolvedPotential(block,suite)
-        block=institution.find('unresolvedNeutronWidthConvention')
+        block=children.get('unresolvedNeutronWidthConvention')
         if block is not None:_readUnresolvedWidths(block,suite)
-        data=institution.find('resonanceChannelFunctions')
+        data=children.get('resonanceChannelFunctions')
         for entry in (data if data is not None else []):
             if entry.tag!='channel':raise ValueError('unknown KIKA resonance applicationData entry')
             if set(entry.attrib)-{'region','group','channel','parameterFingerprint','phaseShiftMode','phaseAbsorptionReaction'}:

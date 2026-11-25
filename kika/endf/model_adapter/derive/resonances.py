@@ -543,7 +543,8 @@ def _unresolvedRange(resonances, context, report):
     where = f"the unresolved range {urr.domainMin:g}-{urr.domainMax:g} eV"
     if widths is None:
         raise ValueError(f"{where} has no tabulatedWidths")
-    if widths.scatteringRadius is None:
+    table = getattr(widths.radiusPolicy, "phaseRadius", None)
+    if widths.scatteringRadius is None and not getattr(table, "isEnergyDependent", False):
         raise ValueError(f"{where} states no constant scattering radius for AP")
     flags = _unresolvedFlags(widths, context)
     lrf = flags.get("LRF", 2)

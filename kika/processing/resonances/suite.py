@@ -202,6 +202,25 @@ def _sum_leaves(key,graph):
     return {key} if key not in graph else set().union(*(_sum_leaves(part,graph) for part in graph[key]))
 
 
+def _tapeBackgrounds(suite,entries,forms):
+    """*forms* with each background the GNDS writer cut at a range edge the tape has no point at
+    joined back, as kika's endfTapeData names them (a GNDS without it is read as written)."""
+    from kika.nuclear_data.model import ResonancesWithBackground
+    from kika.nuclear_data.model.endf_conversion import EndfTapeData
+    data=EndfTapeData.of(suite)
+    absent=data.background.get('absent') if data is not None else None
+    if not absent:return forms
+    from kika.gnds.resonance_background import tapeBackground
+    from kika.nuclear_data.model.provenance import provenanceNodes
+    paths={id(node):path for path,node in provenanceNodes(suite)}
+    out=dict(forms)
+    for key,reaction in entries.items():
+        regions=absent.get(paths.get(id(reaction)))
+        if regions and isinstance(forms[key],ResonancesWithBackground):
+            out[key]=tapeBackground(forms[key],regions)
+    return out
+
+
 def _curves(forms):
     from kika.nuclear_data.model import ResonancesWithBackground,Background
     out={}
@@ -1440,7 +1459,7 @@ def _reconstruct_suite(suite,context=None,*,source_style='eval',label='recon',op
         if any(isinstance(f,ResonancesWithBackground) for f in forms.values()):
             raise UnsupportedResonanceError('resonance backgrounds require modeled resonance regions',category='missing-resonance-regions')
     graph,order=_graph(entries,source_style)
-    curves=_curves(forms)
+    curves=_curves(_tapeBackgrounds(snapshot,entries,forms))
     raised=_raise_thresholds(curves,entries,graph,_target_awr(suite,context),suite)
     mt_keys={}
     for key,r in entries.items():

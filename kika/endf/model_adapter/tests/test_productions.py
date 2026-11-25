@@ -216,7 +216,8 @@ def test_mf9_with_no_mf3_is_kept_as_text(tmp_path):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("path", [CO59, AM241], ids=["co59", "am241"])
-def test_through_gnds_mf9_mf10_return_and_mf8_is_derived(path, tmp_path):
+def test_through_gnds_mf9_mf10_and_mf8_return(path, tmp_path):
+    """kika's GNDS keeps MF8 as the tape states it (Am-241's NO=0 decay data included)."""
     suite = kika.read(str(path), covariances=False)
     xml = tmp_path / "suite.xml"
     kika.write(suite, xml)
@@ -224,7 +225,7 @@ def test_through_gnds_mf9_mf10_return_and_mf8_is_derived(path, tmp_path):
     assert sorted(p.label for p in back.productions) == sorted(p.label for p in suite.productions)
 
     out = tmp_path / "from_gnds.endf"
-    report = kika.write(back, out, format="endf")
+    kika.write(back, out, format="endf")
     source, written = _sections(path), _sections(out)
     for key in source:
         if key[0] in (9, 10):
@@ -233,8 +234,7 @@ def test_through_gnds_mf9_mf10_return_and_mf8_is_derived(path, tmp_path):
         stated = read_endf(str(path)).mf[8].mt[mt].raw_lines
         derived = read_endf(str(out)).mf[8].mt[mt].raw_lines
         assert _states(derived) == _states(stated), mt
-        assert derived[0][55:66].strip() == "1"                  # NO=1
-    assert "derived from the productions with NO=1" in _messages(report)
+        assert derived[0][55:66] == stated[0][55:66], mt
 
 
 def test_the_production_cross_section_is_sigma_times_multiplicity():
