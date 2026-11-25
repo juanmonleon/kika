@@ -244,6 +244,16 @@ class NCAssembler:
 
 def check_nc(ctx, mf, sections, usable, out):
     """Run ordinary numerical checks on propagated self and implied cross blocks."""
+    import gc
+
+    try:
+        _check_nc(ctx, mf, sections, usable, out)
+    finally:
+        # its blocks (O-16: ~15 GiB) sit in reference cycles the collector frees late
+        gc.collect()
+
+
+def _check_nc(ctx, mf, sections, usable, out):
     from .covariances import _check_self_block, _check_cross_block, _joint_psd, _mf33_magnitude
 
     engine = NCAssembler(ctx,mf,sections,usable)
