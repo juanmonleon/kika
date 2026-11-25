@@ -2,9 +2,8 @@
 
 GNDS holds it as (L, J, channel spin) spin groups with no ENDF bookkeeping. The
 tape kika writes from that GNDS carries the source's resonance rows in the
-source's order, with AJ's sign, AP, APL, AWRI and NAPS, and its 0 K resonance
-cross sections equal the source's bit for bit. LAD and NLSC have no node in the
-model and are written 0 and reported.
+source's order, with AJ's sign, AP, APL, AWRI, NAPS and LAD, and its 0 K
+resonance cross sections equal the source's bit for bit.
 """
 from __future__ import annotations
 
@@ -54,8 +53,9 @@ def test_the_range_comes_back_as_the_tape_states_it(name, tmp_path):
     assert (written.parameters.spi, written.parameters.ap) == \
         (source.parameters.spi, source.parameters.ap)
     assert _effectiveApl(written) == _effectiveApl(source)
+    assert [b.apl_or_qx for b in written.parameters.l_values] ==         [b.apl_or_qx for b in source.parameters.l_values]
+    assert written.parameters.lad == source.parameters.lad
     assert _rows(written) == _rows(source)
-    assert any("LAD is written 0" in message for message in report.approximations)
 
 
 def test_mn55_keeps_the_sign_of_aj_for_both_channel_spins(tmp_path):
@@ -100,3 +100,43 @@ def test_spin_groups_of_one_l_that_disagree_on_the_radius_are_refused(tmp_path):
     report = kika.write(suite, str(out), format="endf")
     assert 2 not in read_endf(str(out)).mf
     assert any("disagree on the radius" in message for message in report.losses)
+
+
+def _mn55Gnds(tmp_path):
+    gnds = tmp_path / "mn55.gnds.xml"
+    kika.write(kika.read(str(DATA / "micro_mn55_mf2.endf")), str(gnds), format="gnds")
+    return kika.read(str(gnds))
+
+
+def test_lad_crosses_gnds_as_supports_angular_reconstruction(tmp_path):
+    suite = _mn55Gnds(tmp_path)
+    suite.resonances.resolved[0].formalism.supportsAngularReconstruction = True
+    gnds = tmp_path / "lad.gnds.xml"
+    kika.write(suite, str(gnds), format="gnds")
+    assert 'supportsAngularReconstruction="true"' in gnds.read_text(encoding="utf-8")
+    out = tmp_path / "lad.endf"
+    kika.write(kika.read(str(gnds)), str(out), format="endf")
+    assert _resolved(out)[1].parameters.lad == 1
+
+
+@pytest.mark.parametrize("explicit", [True, False])
+def test_an_l_whose_channel_states_no_radius_gets_ap_only_under_explicit_apl(explicit, tmp_path):
+    """NNDC's GNDS keeps no APL equal to AP; FUDGE's explicitAPL says the tape wrote it."""
+    from kika.gnds.endf_conversion import rMatrixHref
+    from kika.nuclear_data.model.endf_conversion import EndfConversionFlags
+
+    suite = _mn55Gnds(tmp_path)
+    for group in suite.resonances.resolved[0].formalism.spinGroups:
+        for channel in group.channels:
+            channel.scatteringRadius = channel.hardSphereRadius = None
+    flags = EndfConversionFlags.of(suite)
+    href = rMatrixHref(suite, 0)
+    flags.conversions = [(h, f.replace(",explicitAPL", "")) if h == href else (h, f)
+                         for h, f in flags.conversions]
+    if explicit:
+        flags.conversions = [(h, f + ",explicitAPL") if h == href else (h, f)
+                             for h, f in flags.conversions]
+    out = tmp_path / "mn55.endf"
+    kika.write(suite, str(out), format="endf")
+    written = _resolved(out)[1].parameters
+    assert {b.apl_or_qx for b in written.l_values} == ({written.ap} if explicit else {0.0})

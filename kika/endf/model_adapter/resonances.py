@@ -530,6 +530,7 @@ def _decodeReichMoore(parameters, report: ConversionReport,
         approximation="ReichMoore",
         boundaryCondition="EliminateShiftFunction",
         angularLCount=parameters.nlsc,
+        supportsAngularReconstruction=bool(getattr(parameters, "lad", 0)),
         resonanceReactions=reactions,
         spinGroups=spinGroups,
         scatteringRadius=radiusFromEndf(parameters.ap),
@@ -1132,12 +1133,14 @@ def _signedJ(l, j, channelSpin, targetSpin) -> float:
 
 
 def reichMooreLBlocks(formalism, rangeRadius: float, targetSpin: float,
-                      atomicWeightRatio: Optional[float]) -> List[dict]:
+                      atomicWeightRatio: Optional[float], explicitAPL: bool = False) -> List[dict]:
     """A Reich-Moore ``RMatrix`` grouped by (L, J, channel spin), as GNDS holds
     it → LRF=3's l-blocks: ``{"l", "awri", "apl", "rows"}``, one per L in
     ascending order.
 
-    ``apl`` is the l's own radius in fm, ``None`` where it is *rangeRadius*. A
+    ``apl`` is the radius the l's entrance channel states, in fm, even when it
+    is *rangeRadius*; else *rangeRadius* under FUDGE's ``explicitAPL``; else
+    ``None`` (APL 0). A
     row is ``(E, AJ, GN, GG, GFA, GFB)``, sorted as tuples within its L, which
     is the order FUDGE writes. Raises ``ValueError`` naming the first thing LRF=3
     cannot state.
@@ -1186,9 +1189,13 @@ def reichMooreLBlocks(formalism, rangeRadius: float, targetSpin: float,
         l = entrance.L
         if entrance.channelSpin is None:
             raise ValueError(f"spin group {group.label!r} states no entrance channel spin")
-        radius = _channelRadius(entrance)
-        radius = radius if radius is not None else elasticRadius
-        apl = None if radius is None or radius == rangeRadius else radius
+        own = _channelRadius(entrance)
+        if own is not None:
+            apl = own
+        elif elasticRadius is not None and elasticRadius != rangeRadius:
+            apl = elasticRadius
+        else:
+            apl = rangeRadius if explicitAPL else None
         awri = group.atomicWeightRatio if group.atomicWeightRatio is not None else atomicWeightRatio
         if awri is None:
             raise ValueError("no target mass to write AWRI from")
@@ -1276,7 +1283,8 @@ def _encodeReichMooreSpinGroups(resonances, region, fields: dict):
         raise ValueError("MF2/151 LRF=3: the range states no constant radius for AP")
     awri = fields.get("awri")
     blocks = reichMooreLBlocks(formalism, radius, float(fields["spi"]),
-                               awri if awri is not None else formalismAtomicWeightRatio(formalism))
+                               awri if awri is not None else formalismAtomicWeightRatio(formalism),
+                               explicitAPL=bool(fields.get("explicit_apl")))
     lValues = [
         LValueBlock(awri=block["awri"], l=block["l"], num_resonances=len(block["rows"]),
                     apl_or_qx=0.0 if block["apl"] is None else radiusToEndf(block["apl"]),

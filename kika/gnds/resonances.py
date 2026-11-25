@@ -29,9 +29,7 @@ was added for it, and the block-level grid is filled only when every curve
 agrees.
 
 Average-width ``regions1d`` functions retain their regions and interpolation.
-``supportsAngularReconstruction`` (65 files) is
-reported and will stay that way: it is a FUDGE capability hint, not a property
-of the evaluation.
+``supportsAngularReconstruction`` is read into the model: it is ENDF's LAD.
 
 **Two nodes left that list on 2026-08-24 and are read now**, both of them
 §19.3.4's: a ``hardSphereRadius`` on a ``resonanceReaction`` (4 nodes in 3
@@ -346,24 +344,6 @@ class _ResonanceReader:
         pops = element.find("PoPs")
         rMatrixRadius, rMatrixRadiusUnit = self.modelRadius(
             element.find("scatteringRadius"), here)
-        if element.attrib.get("supportsAngularReconstruction") == "true":
-            # A capability hint FUDGE writes for its own reconstructor, not a
-            # property of the evaluation. Recorded so the writer does not have
-            # to guess whether its absence was meaningful.
-            #
-            # **Reported permanently, decided 2026-08-24**, as "won't fix"
-            # rather than as work. 65 files set it, so it is not rare — but a
-            # model node for it would state, in a format-neutral model, what
-            # one reader can do with the numbers. The number it qualifies is
-            # not lost: every resonance parameter it applies to is read.
-            self.report.lost(
-                f"{here}: supportsAngularReconstruction=true, a hint about what "
-                f"a reconstructor can do with these parameters rather than a "
-                f"property of them; kika has no node for it, and will not — it "
-                f"is FUDGE's capability and not the evaluation's (65 files set "
-                f"it)",
-                unaffectedScopes=("cross-sections",),
-            )
         return RMatrix(
             label=label,
             approximation=RMATRIX_APPROXIMATION_SPELLINGS.get(
@@ -380,6 +360,7 @@ class _ResonanceReader:
             # width in the table.
             reducedWidthAmplitudes=_isTrue(element, "reducedWidthAmplitudes"),
             relativisticKinematics=_isTrue(element, "relativisticKinematics"),
+            supportsAngularReconstruction=_isTrue(element, "supportsAngularReconstruction"),
             # GNDS 2.2's NLSC; FUDGE states it only above NLS, else as a conversion flag.
             angularLCount=(int(element.attrib["LValuesNeededForAngularConvergence"])
                            if "LValuesNeededForAngularConvergence" in element.attrib else None),

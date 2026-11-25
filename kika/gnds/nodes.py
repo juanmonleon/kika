@@ -470,33 +470,21 @@ class Defect:
 #: are not here — the point of the distinction is that this list may only get
 #: shorter.
 #:
-#: **Empty since 2026-08-24, and the last entry left by decision rather than by
-#: repair.** That distinction matters enough to write down: the survivor was
-#: ``supportsAngularReconstruction``, and it was ruled
-#: *won't fix* — there is no number under the attribute, it qualifies
-#: parameters that are every one of them read, and a model node for it would
-#: state, inside a format-neutral model, what one particular reader can do with
-#: them. So it did not stop being an asymmetry; it stopped being a **defect**,
-#: and it lives in :data:`ONE_SIDED_ATTRIBUTES` with its count and its reason.
 #: A future entry may only be added here for something that is actually wrong.
 KNOWN_DEFECTS: Tuple[Defect, ...] = ()
 
 #: The asymmetries that are of *attribute*, not of node — kept beside the table
 #: precisely so the commit message cannot suggest the key-set test found them.
 #: It did not and cannot; walking both sides to write the table did. There were
-#: three; ``relativisticKinematics`` and ``reducedWidthAmplitudes`` are read now.
-#: The survivor is **deliberate**, which is why it is here and no longer in
-#: :data:`KNOWN_DEFECTS`. A fourth was found on 2026-08-24 while modelling
+#: three; ``relativisticKinematics`` and ``reducedWidthAmplitudes`` are read now,
+#: and ``supportsAngularReconstruction`` (ENDF's LAD) is read and written. A fourth was found on 2026-08-24 while modelling
 #: §19.3.4's ``externalRMatrix`` and is not here because it was **fixed** in the
 #: same increment: ``boundaryConditionValue`` — ENDF's BND — was filled by the
 #: ENDF adapter, held by the model, and neither read nor written by the GNDS
 #: side, so an ENDF -> GNDS conversion of an LRF=7 tape dropped it in silence.
 #: Zero of the 558 distributed GNDS evaluations state it, which is exactly why
 #: no fixture and no oracle could have noticed.
-ONE_SIDED_ATTRIBUTES = (
-    ("RMatrix", "supportsAngularReconstruction",
-     "read, reported, deliberately never written (65 files; won't fix)"),
-)
+ONE_SIDED_ATTRIBUTES: Tuple[Tuple[str, str, str], ...] = ()
 
 
 class UndeclaredNode(LookupError):

@@ -213,6 +213,7 @@ def _rMatrix(parent: ET.Element, formalism: RMatrix,
          boundaryCondition=boundaryCondition,
          boundaryConditionValue=None if formalism.boundaryConditionValue is None else _number(formalism.boundaryConditionValue),
          calculateChannelRadius=_true(formalism.calculateChannelRadius if formalism.radiusPolicy is None else formalism.radiusPolicy.channelMode == "mass"),
+         supportsAngularReconstruction=_true(formalism.supportsAngularReconstruction),
          relativisticKinematics=_true(formalism.relativisticKinematics),
          reducedWidthAmplitudes=_true(formalism.reducedWidthAmplitudes))
     _nestedPoPs(element, formalism, report, "RMatrix")

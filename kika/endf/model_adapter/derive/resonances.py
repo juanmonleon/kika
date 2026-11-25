@@ -19,13 +19,13 @@ them by L when the tape is written. Per range:
 ``AP``          the region's radius, else the formalism's, else the
                 evaluation's; a radius that depends on energy is refused
                 here (LRF=3), and written as NRO=1 for Breit-Wigner below
-``APL``         the entrance channel's radius where it differs from AP
+``APL``         the radius the entrance channel states, even when it is AP;
+                else AP under FUDGE's ``explicitAPL`` flag, else 0
 ``AWRI``        the formalism's target mass over the neutron's; MF1's AWR,
                 reported, when the formalism states none
 ``NAPS``        ``calculateChannelRadius``
 ``AJ``          J, negative for the lower channel spin
-``LAD``         0, reported: the model has no node for whether MF4 may be
-                computed from the parameters
+``LAD``         ``supportsAngularReconstruction``
 ``NLSC``        ``angularLCount``, else 0, reported
 ``ZAI``/``ABN`` the target's ZA and 1
 ==============  ===========================================================
@@ -290,25 +290,30 @@ def _reichMooreRange(resonances, region, context, report, where) -> dict:
     if radius is None:
         raise ValueError(f"{where} states no constant scattering radius for AP")
     awri = _fallbackAwri(formalism, formalism.spinGroups, context, report, 3, where)
+    from kika.gnds.endf_conversion import rMatrixHref
+
+    href = rMatrixHref(context.suite, resonances.resolved.index(region))
+    explicit = "explicitAPL" in context.conversionFlags.get(href, "").split(",")
     try:
         blocks = reichMooreLBlocks(formalism, radius, spin,
-                                   awri if awri is not None else formalismAtomicWeightRatio(formalism))
+                                   awri if awri is not None else formalismAtomicWeightRatio(formalism),
+                                   explicitAPL=explicit)
     except ValueError as why:
         raise ValueError(f"{where} cannot be LRF=3: {why}") from None
     policy = formalism.radiusPolicy
     calculate = (policy.channelMode == "mass" if policy is not None
                  else bool(formalism.calculateChannelRadius))
     nlsc = formalism.angularLCount
-    report.approximated(
-        f"MF2/151 LRF=3, {where}: LAD is written 0 (the model has no node for "
-        f"whether MF4 may be computed from the parameters)"
-        + ("" if nlsc is not None else
-           " and NLSC 0 (no number of l-values for angular convergence is stated)"),
-        unaffectedScopes=("cross-sections",))
+    if nlsc is None:
+        report.approximated(
+            f"MF2/151 LRF=3, {where}: NLSC is written 0 (no number of l-values for "
+            f"angular convergence is stated)", unaffectedScopes=("cross-sections",))
     return {"kind": "resolved", "lru": 1, "lrf": 3, "nro": 0, "naps": 0 if calculate else 1,
             "el": float(region.domainMin), "eh": float(region.domainMax),
             "spi": spin, "ap": float(radiusToEndf(radius)), "nls": len(blocks),
-            "nlsc": 0 if nlsc is None else int(nlsc), "lad": 0, "abn": 1.0,
+            "nlsc": 0 if nlsc is None else int(nlsc),
+            "lad": int(bool(formalism.supportsAngularReconstruction)), "abn": 1.0,
+            "explicit_apl": explicit,
             "isotope_index": 0, **({} if awri is None else {"awri": awri}),
             "l_blocks": [{"l": b["l"], "lrx": 0, "qx": 0.0, "num_resonances": len(b["rows"])}
                          for b in blocks]}

@@ -337,6 +337,8 @@ class RMatrix:
     calculateChannelRadius: bool = False
     #: Number of orbital L values required for angular convergence (RM NLSC).
     angularLCount: Optional[int] = None
+    #: Whether MF4 may be computed from the parameters (ENDF LAD, GNDS @supportsAngularReconstruction).
+    supportsAngularReconstruction: bool = False
     radiusPolicy: Optional[RadiusPolicy] = None
     #: Default B for channels without a local value (GNDS Given convention).
     boundaryConditionValue: Optional[float] = None
