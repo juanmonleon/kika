@@ -82,11 +82,11 @@ class Difference:
 EXPECTED: List[Expected] = [
     Expected("xs", r"\w+ MT\d+: forms \['eval'\] != \['eval', 'recon'\]",
              "NNDC also carries FUDGE's reconstructed resonance cross section as a 'recon' form"),
-    Expected("xs", r"Sums MT8(5[1-9]|6\d|7[01]): values", bound=4e-9,
+    Expected("xs", r"Sums MT8(5[1-9]|6\d|7[01]): values( \(NNDC's nine digits\))?", bound=4e-9,
              reason="MF33 lumped sums: each code adds the summands on its own and rounds the result"),
-    Expected("xs", r"Sums MT10[3-7]: values", bound=5e-9,
-             reason="a summed MT only MF33 states (B-VIII.1 Fe-56 MT103): kika keeps the sum of the "
-                    "partials as doubles, FUDGE writes it to nine significant digits"),
+    Expected("xs", r"Sums MT103: values \(NNDC's nine digits\)", tapes="n-026_Fe_056",
+             reason="a summed MT only MF33 states: kika keeps the sum of the partials as doubles, "
+                    "FUDGE writes it to nine significant digits"),
     Expected("field", r".*Q\.domainMin: kika's 1e-05 below NNDC's",
              "a constant Q: kika states it from the lowest incident energy, FUDGE from the threshold"),
     Expected("field", r".*multiplicity\.forms\['eval'\]: a constant XYs1d against Constant1d, same value",
@@ -149,9 +149,8 @@ EXPECTED: List[Expected] = [
                       r"\[@label='eval'\]\" != \"\.\./\.\./\.\./\.\./product\[@label='photon'\]/distribution/"
                       r"angularTwoBody\[@label='eval'\]\"",
              "the recoil points at the photon's form, uncorrelated in kika for the reason above"),
-    Expected("field", r"Reactions MT18 \| Q: kika the tape's QM, NNDC EFR\+ENP\+EGP",
-             "fission Q: kika keeps MF3's QM (with a QI= flag where it is not MF1/458's ER), "
-             "FUDGE writes the prompt release EFR+ENP+EGP"),
+    Expected("field", r"Reactions MT18 \| outputChannel\.Q\.value: # != #", bound=5e-15,
+             reason="MF1/458's EFR+ENP+EGP at 1e-5 eV: kika keeps the double, FUDGE writes 15 digits"),
     Expected("field", r".*\.energy\.function1ds\[i\]: all zero in kika, a unit box on \[0, 2e-05\] eV in NNDC",
              "NNDC wrong: the tape's continuum is zero there (Cl-35 MT32 at 16.01184 MeV, on [0, 3e5] eV); "
              "FUDGE replaces it by a box"),
@@ -167,9 +166,6 @@ EXPECTED: List[Expected] = [
              "a form label kika writes and FUDGE omits"),
     Expected("res", r"unresolved\.tabulatedWidths\.PoPs: PoPs != NoneType",
              "kika writes the URR's own PoPs (target spin and mass); FUDGE reads them from the suite's"),
-    Expected("res", r"unresolved\.spinGroups\[i\]\.(levelSpacingFunction|channel\[MT\d+\]\.averageFunction)"
-                    r"\.interpolation: <Interpolation\.linlin: 'lin-lin'> != <Interpolation\.loglog: 'log-log'>",
-             "the URR's INT is a declared write loss of kika's GNDS writer"),
     Expected("field", r".*products\[[^\]]+\]\.label: '[^']*' != '[^']*'",
              "a product label is a name; the photons of a channel are matched by line, not by label"),
     Expected("cov", r"parameterCovariance\[\d+\]: matrix", bound=1e-15,
@@ -178,8 +174,6 @@ EXPECTED: List[Expected] = [
              reason="an MF33 lumped sum rebuilt from its summands; the order of the additions differs"),
     Expected("recon", r"MT\d+: npts \d+ != \d+", bound=1e-15,
              reason="a point collinear with its neighbours dropped where two regions merge, as FUDGE does"),
-    Expected("recon", r"MT(1|2|102): npts \d+ != \d+", bound=2.3e-3, tapes="n-038_Sr_090",
-             reason="the URR's INT=5 is a declared write loss, so the GNDS side interpolates lin-lin"),
 ]
 
 
@@ -330,7 +324,14 @@ def _comparePointwise(check, name, mine, theirs):
         return [Difference(check, f"{name}: npts {mx.size} != {tx.size}", size)]
     if np.array_equal(mx, tx) and np.array_equal(my, ty):
         return []
+    if check == "xs" and np.array_equal(mx, tx) and np.array_equal(_nineDigits(my), ty):
+        return [Difference(check, f"{name}: values (NNDC's nine digits)")]
     return [Difference(check, f"{name}: values", max(_relative(mx, tx), _relative(my, ty)))]
+
+
+def _nineDigits(values):
+    """*values* as FUDGE writes a computed table: nine significant digits."""
+    return np.array([float(f"{v:.8e}") for v in values])
 
 
 def crossSectionDifferences(mine, theirs):
@@ -642,31 +643,8 @@ def fieldDifferences(mine, theirs):
     return out
 
 
-def _fissionQ(tape, kikaGnds, mine, theirs):
-    """Whether kika's MT18 Q is the tape's QM, flagged ``QI=`` off MF1/458's ER, and NNDC's EFR+ENP+EGP."""
-    from kika.endf.read_endf import read_endf
-
-    endf = read_endf(str(tape), mf_numbers=[1, 3])
-    mf3, mf1 = endf.mf[3].mt.get(18), endf.mf[1].mt.get(458)
-    if mf3 is None or mf1 is None:
-        return False
-    part = lambda name: float(getattr(mf1, name)[0])  # noqa: E731
-    prompt = part("efr") + part("enp") + part("egp")
-    flagged = re.search(r"flags=\"QI=[^\"]*\" href=\"[^\"]*MT18'\]/outputChannel/Q\"",
-                        kikaGnds.read_text(encoding="utf-8")) is not None
-    needsFlag = (float(mf3.q_mass_difference), float(mf3.q_reaction)) != (part("er"), part("er"))
-    return (mine.reactionByENDF_MT(18).outputChannel.Q.value == float(mf3.q_mass_difference)
-            and abs(theirs.reactionByENDF_MT(18).outputChannel.Q.value - prompt) <= 1e-12 * prompt
-            and flagged == needsFlag)
-
-
-def test_other_fields_are_nndcs(tape, paths, kikaGnds, suites):
-    differences = fieldDifferences(*suites)
-    fission = "Reactions MT18 | outputChannel.Q.value: # != #"
-    if any(d.key == fission for d in differences) and _fissionQ(paths[0], kikaGnds, *suites):
-        differences = [Difference("field", "Reactions MT18 | Q: kika the tape's QM, NNDC EFR+ENP+EGP")
-                       if d.key == fission else d for d in differences]
-    _assertExplained(tape, differences)
+def test_other_fields_are_nndcs(tape, suites):
+    _assertExplained(tape, fieldDifferences(*suites))
 
 
 def _components(form):

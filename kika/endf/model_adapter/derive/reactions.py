@@ -249,10 +249,10 @@ def _qValues(reaction, mt: int, context: DerivationContext, report):
     # neutrinos, MF1/458's ER at thermal: FUDGE's rule
     # (toENDF6/reactionData/crossSection.py:65-69) and what the libraries
     # write (ENDF/B-VIII.1 U-235: 1.94077e8 eV, where GNDS's Q is 1.812389e8).
-    # Unless a QI flag says the tape did not (U-238); FUDGE ignores the flag.
+    # A QI flag on a fission Q is the tape's MF3 QM = QI (kika's GNDS); FUDGE ignores it.
     released = _nonNeutrinoEnergy(reaction)
-    if released is not None and "QI" not in stated:
-        qi = qm = released
+    if released is not None:
+        qi = qm = float(stated["QI"]) if stated.get("QI") is not None else released
     return q, qi, qm, lr
 
 

@@ -774,10 +774,10 @@ def _unresolvedSpinGroup(parent: ET.Element, group, index: int, blockGrid,
     element = ET.SubElement(parent, "J")
     _set(element, label=str(index), value=formatFraction(group.J))
 
-    if group.crossSectionInterpolation is not None or group.crossSectionEnergies is not None:
-        report.lost(f"URR L={group.L} J={group.J}: cross-section interpolation is distinct from parameter-function interpolation and is not serialized by this GNDS writer")
     grid = group.levelSpacingEnergies if group.levelSpacingEnergies is not None \
         else blockGrid
+    # ENDF's INT goes on the curves, where FUDGE puts it and reads it back from.
+    interpolation = _urrInterpolation(group, grid, report)
     spacing, spacingConstant = group.levelSpacing, None
     if (group.levelSpacingFunction is None and spacing is not None
             and np.asarray(spacing).size == 1
@@ -788,7 +788,8 @@ def _unresolvedSpinGroup(parent: ET.Element, group, index: int, blockGrid,
         spacing, spacingConstant = None, float(np.asarray(spacing)[0])
     _average(element, "levelSpacing", grid, spacing, spacingConstant,
              f"spinGroup L={group.L} J={group.J} levelSpacing", report, domain,
-             unit="eV", label="levelSpacing", form=group.levelSpacingFunction)
+             unit="eV", label="levelSpacing", form=group.levelSpacingFunction,
+             interpolation=interpolation)
 
     widths = ET.SubElement(element, "widths")
     for position, channel in enumerate(group.channels):
@@ -806,13 +807,31 @@ def _unresolvedSpinGroup(parent: ET.Element, group, index: int, blockGrid,
         grid = channel.energies if channel.energies is not None else blockGrid
         _average(node, None, grid, channel.widths, channel.constantWidth,
                  f"spinGroup L={group.L} J={group.J} width {channel.label!r}",
-                 report, domain, unit="eV", label="average width", form=channel.averageFunction)
+                 report, domain, unit="eV", label="average width", form=channel.averageFunction,
+                 interpolation=interpolation)
+
+
+def _urrInterpolation(group, grid, report):
+    """The group's cross-section INT, for its tabulated curves; ``None`` if lin-lin or unstated."""
+    stated = group.crossSectionInterpolation
+    sigmaGrid = group.crossSectionEnergies
+    if sigmaGrid is not None and (grid is None or not np.array_equal(sigmaGrid, grid)):
+        report.lost(f"URR L={group.L} J={group.J}: the cross sections are interpolated on a grid "
+                    f"of their own, which GNDS has no node for")
+    if stated is None or str(stated) == "lin-lin":
+        return None
+    if group.levelSpacingFunction is not None or any(
+            c.averageFunction is not None for c in group.channels):
+        report.lost(f"URR L={group.L} J={group.J}: INT {stated} is not written, as the curves "
+                    f"state their own interpolation")
+        return None
+    return str(stated)
 
 
 def _average(parent: ET.Element, tag: Optional[str], grid, values,
              constant: Optional[float], where: str,
              report: ConversionReport, domain, unit: str = "eV",
-             label: str = "width", form=None) -> None:
+             label: str = "width", form=None, interpolation=None) -> None:
     """One §19.4.1 average: an ``XYs1d`` over its grid, or a ``constant1d``."""
     if form is not None:
         from .encode import _function
@@ -851,6 +870,10 @@ def _average(parent: ET.Element, tag: Optional[str], grid, values,
         return
     node = ET.SubElement(holder, "XYs1d")
     node.attrib["label"] = "eval"
+    # A width of 0 has no logarithm: such a curve is lin-lin, as the ENDF reading takes it.
+    if interpolation is not None and not (interpolation in ("log-log", "log-lin")
+                                          and np.any(np.asarray(values, dtype=float) <= 0)):
+        node.attrib["interpolation"] = interpolation
     _axes(node, label, unit)
     text = ET.SubElement(node, "values")
     text.text = " ".join(_number(v)

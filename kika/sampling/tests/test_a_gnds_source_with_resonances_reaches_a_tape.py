@@ -104,16 +104,13 @@ def test_evaluated_mode_warns_for_a_gnds_source_as_for_the_tape(tmp_path):
 
 
 def test_a_gnds_source_whose_resonances_cannot_reach_mf2_is_refused(tmp_path):
-    import numpy as np
-
-    from kika.nuclear_data.model.resonances import ScatteringRadius
-
+    """Two J of one L with different channel radii: LRF=3 has one radius per l."""
     suite = kika.read(str(_viaGnds("micro_fe56_xs_and_angular.endf", tmp_path)))
-    suite.resonances.scatteringRadius = ScatteringRadius(
-        energies=np.array([1e-5, 1.5e8]), values=np.array([5.444, 5.0]), interpolation=[(2, 2)],
-        unit="fm")
-    path = tmp_path / "energy-dependent-radius.gnds.xml"
+    entrance = next(c for g in suite.resonances.resolved[0].formalism.spinGroups
+                    for c in g.channels if c.label == "neutron" and c.L == 1)
+    entrance.scatteringRadius = 6.0
+    path = tmp_path / "two-radii-of-one-l.gnds.xml"
     kika.write(suite, str(path), format="gnds")
-    with pytest.raises(ValueError, match="no constant scattering radius for AP"):
+    with pytest.raises(ValueError, match="the spin groups of L=1 disagree on the radius"):
         perturbFromModel(str(path), {33: [2]}, 1, seed=5, outputDir=tmp_path / "out",
                          formats=("gnds",))

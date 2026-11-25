@@ -54,7 +54,7 @@ from kika.nuclear_data.model.resonances.radius_policy import RadiusPolicy
 from kika.nuclear_data.model.units import conversion_factor, UnitError
 
 from kika.nuclear_data.model import (BreitWigner, BreitWignerApproximation,
-                                     Channel, ConversionReport, ExternalRMatrix,
+                                     Channel, ConversionReport, ExternalRMatrix, Interpolation,
                                      PhysicalQuantity, Regions1d,
                                      Resonance, ResonanceParameters,
                                      ResonanceReaction, Resonances,
@@ -790,6 +790,9 @@ class _ResonanceReader:
             levelSpacingEnergies=None if spacing is None else spacing[0],
             levelSpacingFunction=None if spacing is None else spacing[2],
         )
+        # ENDF's INT, as FUDGE writes it: the interpolation of the tabulated curves.
+        if spacing is not None and isinstance(spacing[2], XYs1d):
+            group.crossSectionInterpolation = Interpolation(str(spacing[2].interpolation or "lin-lin"))
         for width in J.findall("widths/width"):
             label = width.attrib.get("label", "")
             average = self.readAverage(width, f"{here}/widths/width[@label='{label}']")
