@@ -203,6 +203,7 @@ def _boxer_lines(tmp_path):
 
 def test_values_that_no_control_loads_are_a_count_mismatch(tmp_path):
     path, lines = _boxer_lines(tmp_path)
+    clean = read_boxer(path)
     head = max(i for i, ln in enumerate(lines) if ln.startswith("3") and ln[50:54] == " 102")
     lines[head] = lines[head][:54] + f"{2:4d}" + lines[head][58:]
     lines[head + 1] += " 9.9900000E-01"
@@ -211,7 +212,7 @@ def test_values_that_no_control_loads_are_a_count_mismatch(tmp_path):
     cov = read_boxer(path, diagnostics=events)
     (event,) = [e for e in events if e.kind == "count_mismatch"]
     assert (event.where["mt1"], event.evidence["declared"], event.evidence["found"]) == (102, 2, 1)
-    assert _same(cov, read_boxer(_written(tmp_path / "..", "boxer")))
+    assert _same(cov, clean)
 
 
 def test_controls_that_fill_too_few_cells_are_a_count_mismatch(tmp_path):

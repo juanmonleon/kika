@@ -1852,7 +1852,7 @@ def read_tendl_matrix(file_path: str, energy_unit: str = 'eV',
     """
     Read a TENDL covariance listing (``*-njoy-cov-187g.all.300.K.matrix``).
 
-    TENDL publishes, next to each evaluation, a text listing of its covariances
+    For many of its nuclides TENDL publishes a text listing of the covariances
     processed with NJOY. For each reaction it gives a table of groups (upper
     boundary in eV, cross section, relative and absolute standard deviation);
     for each pair of reactions, a table with both cross sections and both
@@ -1867,7 +1867,9 @@ def read_tendl_matrix(file_path: str, energy_unit: str = 'eV',
     zero. A correlation printed as ``*****`` is NaN. The grid keeps the order
     of the file (descending); the listing gives upper bounds only, and the
     lowest boundary is the one of the kika group structure whose upper bounds
-    match (the 187-group listings are the LANL 187-group structure).
+    match (the 187-group listings are the LANL 187-group structure). The
+    listing gives MAT numbers and no ZA: a MAT outside kika's table stays the
+    isotope of its blocks.
 
     Parameters
     ----------
@@ -1959,6 +1961,11 @@ def read_tendl_matrix(file_path: str, energy_unit: str = 'eV',
     covmat = CrossSectionCovariance(num_groups=len(grid_desc),
                                     energy_grid=_ev_grid_in(edges, energy_unit),
                                     energy_unit=energy_unit)
+    for mat in sorted({m for m, _ in tables} | {b[2] for b in blocks}):
+        if mat not in ENDF_MAT_TO_ZAID:
+            _note(diagnostics, "declared", f"MAT {mat} is not in kika's MAT table and the "
+                  "listing gives no ZA: its blocks keep the MAT as their isotope",
+                  {"mat": mat}, mat_kept=mat)
     for (mat, mt), table in tables.items():
         covmat.cross_sections[(int(_map_mat(str(mat))), mt)] = table["xs"]
     for mat, mt, mat1, mt1, rho, rsd_row, rsd_col, where in blocks:
