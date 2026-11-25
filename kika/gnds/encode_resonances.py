@@ -874,14 +874,35 @@ def _average(parent: ET.Element, tag: Optional[str], grid, values,
             f"does not belong to"
         )
         return
+    pieces = _lawPieces(np.asarray(grid), np.asarray(values), interpolation)
+    if len(pieces) > 1:
+        node = ET.SubElement(holder, "regions1d")
+        node.attrib["label"] = "eval"
+        _axes(node, label, unit)
+        regions = ET.SubElement(node, "function1ds")
+        for index, (xs, ys, law) in enumerate(pieces):
+            piece = _set(ET.SubElement(regions, "XYs1d"), index=str(index), interpolation=law)
+            _pairs(piece, xs, ys)
+        return
     node = ET.SubElement(holder, "XYs1d")
     node.attrib["label"] = "eval"
-    # A width of 0 has no logarithm: such a curve is lin-lin, as the ENDF reading takes it.
-    if interpolation is not None and not (interpolation in ("log-log", "log-lin")
-                                          and np.any(np.asarray(values, dtype=float) <= 0)):
-        node.attrib["interpolation"] = interpolation
+    if pieces[0][2] is not None:
+        node.attrib["interpolation"] = pieces[0][2]
     _axes(node, label, unit)
-    text = ET.SubElement(node, "values")
-    text.text = " ".join(_number(v)
-                         for pair in zip(np.asarray(grid), np.asarray(values))
-                         for v in pair)
+    _pairs(node, grid, values)
+
+
+def _pairs(node: ET.Element, xs, ys) -> None:
+    ET.SubElement(node, "values").text = " ".join(
+        _number(v) for pair in zip(np.asarray(xs), np.asarray(ys)) for v in pair)
+
+
+def _lawPieces(grid, values, interpolation) -> list:
+    """``(xs, ys, interpolation)`` runs of one law: an interval with a zero end cannot be
+    logarithmic and is lin-lin, as the reconstruction reads the tape's table."""
+    if interpolation not in ("log-log", "log-lin") or len(values) < 2:
+        return [(grid, values, interpolation)]
+    zero = (values[:-1] <= 0) | (values[1:] <= 0)
+    laws = [None if z else interpolation for z in zero]
+    cuts = [0] + [k for k in range(1, len(laws)) if laws[k] != laws[k - 1]] + [len(laws)]
+    return [(grid[a:b + 1], values[a:b + 1], laws[a]) for a, b in zip(cuts[:-1], cuts[1:])]
