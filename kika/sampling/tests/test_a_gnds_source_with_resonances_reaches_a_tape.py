@@ -61,3 +61,59 @@ def test_its_cross_sections_move_as_the_tapes_do(tmp_path):
     tapes = [read_endf(str(run.samples[0]["files"]["endf-tape"]), mf_numbers=[3]) for run in runs]
     for mt in (1, 2, 102):
         assert str(tapes[0].mf[3].mt[mt]) == str(tapes[1].mf[3].mt[mt]), mt
+
+
+def _bothRoutes(tmp_path, mode):
+    source = str(DATA / "micro_fe56_xs_and_angular.endf")
+    gnds = _viaGnds("micro_fe56_xs_and_angular.endf", tmp_path)
+    return [perturbFromModel(path, {33: [2]}, 1, seed=5, outputDir=tmp_path / f"{name}-{mode}",
+                             formats=("endf-tape",), resonanceRegion=mode)
+            for name, path in (("tape", source), ("gnds", str(gnds)))]
+
+
+def _metadata(run):
+    import json
+
+    tape = Path(run.samples[0]["files"]["endf-tape"])
+    return json.loads((tape.parents[1] / "run_metadata.json").read_text(encoding="utf-8"))
+
+
+def test_a_gnds_source_is_reconstructed_as_the_tape_is(tmp_path):
+    """Same perturbed MF3, but for the energy GNDS does not repeat (862047.8 eV, a value on the line)."""
+    import numpy as np
+
+    runs = _bothRoutes(tmp_path, "reconstructed")
+    assert [_metadata(run)["resonanceRegion"]["reconstructed"] for run in runs] == [True, True]
+    tapes = [read_endf(str(run.samples[0]["files"]["endf-tape"]), mf_numbers=[3]) for run in runs]
+    for mt in (1, 2, 102):
+        (xa, ya), (xb, yb) = [(np.asarray(t.mf[3].mt[mt].energies, float),
+                               np.asarray(t.mf[3].mt[mt].cross_sections, float)) for t in tapes]
+        assert set(xa) ^ set(xb) <= {862047.8}, mt
+        common = np.isin(xa, xb)
+        assert np.array_equal(ya[common], yb[np.isin(xb, xa)]), mt
+
+
+def test_evaluated_mode_warns_for_a_gnds_source_as_for_the_tape(tmp_path):
+    runs = _bothRoutes(tmp_path, "evaluated")
+    for run in runs:
+        assert any(n.startswith("resonanceRegion='evaluated' on a tape with a resonance region")
+                   for n in run.notes)
+        log = (Path(run.samples[0]["files"]["endf-tape"]).parents[1] / "run.log.jsonl").read_text(
+            encoding="utf-8")
+        assert '"resonance_background_only"' in log
+
+
+def test_a_gnds_source_whose_resonances_cannot_reach_mf2_is_refused(tmp_path):
+    import numpy as np
+
+    from kika.nuclear_data.model.resonances import ScatteringRadius
+
+    suite = kika.read(str(_viaGnds("micro_fe56_xs_and_angular.endf", tmp_path)))
+    suite.resonances.scatteringRadius = ScatteringRadius(
+        energies=np.array([1e-5, 1.5e8]), values=np.array([5.444, 5.0]), interpolation=[(2, 2)],
+        unit="fm")
+    path = tmp_path / "energy-dependent-radius.gnds.xml"
+    kika.write(suite, str(path), format="gnds")
+    with pytest.raises(ValueError, match="no constant scattering radius for AP"):
+        perturbFromModel(str(path), {33: [2]}, 1, seed=5, outputDir=tmp_path / "out",
+                         formats=("gnds",))
