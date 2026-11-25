@@ -82,9 +82,10 @@ def read(block: ET.Element) -> EndfTapeData:
 
 
 def applyToModel(suite, data: EndfTapeData, report) -> None:
-    """Restore the entries that belong to the model: the LRF=7 particle pairs and the
-    points an MF3 table states several times over."""
+    """Restore the entries that belong to the model: the LRF=7 particle pairs, the
+    points an MF3 table states several times over and an LRF=3 range's AWRI by l."""
     _restoreRepeats(suite, data.background.get("repeats") or {}, report)
+    _restoreAwriByL(suite, data)
     from kika.nuclear_data.model.resonances.r_matrix import ChannelKinematics, ChannelParticle
 
     regions = getattr(suite.resonances, "resolved", None) or ()
@@ -102,6 +103,22 @@ def applyToModel(suite, data: EndfTapeData, report) -> None:
             particleB=ChannelParticle(**value["particleB"]),
             penetrability=value["penetrability"], shift=value["shift"],
             effective=value["effective"])
+
+
+def _restoreAwriByL(suite, data) -> None:
+    """Each R-matrix spin group's AWRI, where the tape states one per l (Dy-162, Dy-164)."""
+    regions = getattr(suite.resonances, "resolved", None) or ()
+    for fields in data.nodes.values():
+        ranges = ((fields.get("headerFields") or {}).get("mf2Tape") or {}).get("ranges") or {}
+        for index, entry in ranges.items():
+            awri = entry.get("awri") or {}
+            formalism = regions[int(index)].formalism if awri and int(index) < len(regions) else None
+            elastic = {r.label for r in getattr(formalism, "resonanceReactions", None) or ()
+                       if r.reactionMT == 2}
+            for group in getattr(formalism, "spinGroups", None) or ():
+                L = next((c.L for c in group.channels if c.resonanceReaction in elastic), None)
+                if L in awri:
+                    group.atomicWeightRatio = float(awri[L])
 
 
 def _restoreRepeats(suite, repeats, report) -> None:
