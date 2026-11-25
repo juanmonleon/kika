@@ -149,9 +149,8 @@ EXPECTED: List[Expected] = [
                       r"\[@label='eval'\]\" != \"\.\./\.\./\.\./\.\./product\[@label='photon'\]/distribution/"
                       r"angularTwoBody\[@label='eval'\]\"",
              "the recoil points at the photon's form, uncorrelated in kika for the reason above"),
-    Expected("field", r"Reactions MT18 \| Q: kika the tape's QM, NNDC EFR\+ENP\+EGP",
-             "fission Q: kika keeps MF3's QM (with a QI= flag where it is not MF1/458's ER), "
-             "FUDGE writes the prompt release EFR+ENP+EGP"),
+    Expected("field", r"Reactions MT18 \| outputChannel\.Q\.value: # != #", bound=5e-15,
+             reason="MF1/458's EFR+ENP+EGP at 1e-5 eV: kika keeps the double, FUDGE writes 15 digits"),
     Expected("field", r".*\.energy\.function1ds\[i\]: all zero in kika, a unit box on \[0, 2e-05\] eV in NNDC",
              "NNDC wrong: the tape's continuum is zero there (Cl-35 MT32 at 16.01184 MeV, on [0, 3e5] eV); "
              "FUDGE replaces it by a box"),
@@ -646,31 +645,8 @@ def fieldDifferences(mine, theirs):
     return out
 
 
-def _fissionQ(tape, kikaGnds, mine, theirs):
-    """Whether kika's MT18 Q is the tape's QM, flagged ``QI=`` off MF1/458's ER, and NNDC's EFR+ENP+EGP."""
-    from kika.endf.read_endf import read_endf
-
-    endf = read_endf(str(tape), mf_numbers=[1, 3])
-    mf3, mf1 = endf.mf[3].mt.get(18), endf.mf[1].mt.get(458)
-    if mf3 is None or mf1 is None:
-        return False
-    part = lambda name: float(getattr(mf1, name)[0])  # noqa: E731
-    prompt = part("efr") + part("enp") + part("egp")
-    flagged = re.search(r"flags=\"QI=[^\"]*\" href=\"[^\"]*MT18'\]/outputChannel/Q\"",
-                        kikaGnds.read_text(encoding="utf-8")) is not None
-    needsFlag = (float(mf3.q_mass_difference), float(mf3.q_reaction)) != (part("er"), part("er"))
-    return (mine.reactionByENDF_MT(18).outputChannel.Q.value == float(mf3.q_mass_difference)
-            and abs(theirs.reactionByENDF_MT(18).outputChannel.Q.value - prompt) <= 1e-12 * prompt
-            and flagged == needsFlag)
-
-
-def test_other_fields_are_nndcs(tape, paths, kikaGnds, suites):
-    differences = fieldDifferences(*suites)
-    fission = "Reactions MT18 | outputChannel.Q.value: # != #"
-    if any(d.key == fission for d in differences) and _fissionQ(paths[0], kikaGnds, *suites):
-        differences = [Difference("field", "Reactions MT18 | Q: kika the tape's QM, NNDC EFR+ENP+EGP")
-                       if d.key == fission else d for d in differences]
-    _assertExplained(tape, differences)
+def test_other_fields_are_nndcs(tape, suites):
+    _assertExplained(tape, fieldDifferences(*suites))
 
 
 def _components(form):
