@@ -100,7 +100,7 @@ def _upper(matrix):
     return out
 
 
-def _breitWigner(records, resonances, region, matrix, lcomp, sortByL, ndigit, awt, spi):
+def _breitWigner(records, resonances, region, matrix, lcomp, sortByL, ndigit, awt, spi, dap):
     from kika.gnds.encode_resonances import _breitWignerRows
     from .resonances import resolvedRangeRadius
     from kika.nuclear_data.model.resonances import radiusToEndf
@@ -115,7 +115,9 @@ def _breitWigner(records, resonances, region, matrix, lcomp, sortByL, ndigit, aw
     radius = resolvedRangeRadius(resonances, region)
     if radius is None:
         raise ValueError("the Breit-Wigner range states no constant radius for AP")
-    records.head(spi, radiusToEndf(radius), 0, lcomp, nls, 0)
+    records.head(spi, radiusToEndf(radius), 0, lcomp, nls, int(dap is not None))
+    if dap is not None:
+        records.head(0, dap, 0, 0, 0, 0)
     width = len(matrix) // len(table)
     drop = {k for i in range(len(table)) for k in (i * width + 1, i * width + 2, i * width + 3)}
     keep = np.array(sorted(set(range(len(matrix))) - drop))
@@ -170,7 +172,7 @@ def _breitWigner(records, resonances, region, matrix, lcomp, sortByL, ndigit, aw
 
 
 def _reichMoore(records, resonances, region, groups, matrix, lcomp, sortByL, ndigit, awt, spi,
-                ignoreChannelSpin):
+                ignoreChannelSpin, dap):
     from .resonances import resolvedRangeRadius
     from kika.gnds.encode_resonances import _rmRole
     from kika.nuclear_data.model.resonances import radiusToEndf
@@ -203,7 +205,10 @@ def _reichMoore(records, resonances, region, groups, matrix, lcomp, sortByL, ndi
     lad = int(lcomp == 2 and bool(getattr(formalism, "supportsAngularReconstruction", False)))
     # FUDGE's code keeps NLS for LCOMP=1 here; the tapes (Mn-55) write it only for LCOMP=0.
     nls = 0 if lcomp in (1, 2) or not sortByL else len(set(ls))
-    records.head(spi, radiusToEndf(radius), lad, lcomp, nls, 0)
+    records.head(spi, radiusToEndf(radius), lad, lcomp, nls, int(dap is not None))
+    if dap is not None:
+        records.head(0, 0, 0, 0, 1, 1)
+        records.data([dap])
     mpar = len(matrix) // nres
     sortedTable = sorted(zip(ls, table["energies"], table["Js"], table["elastic"],
                              table["capture"], table["f1"], table["f2"]))
@@ -369,11 +374,20 @@ def encodeMF32FromGnds(suite, mat: Optional[int], report: ConversionReport):
         if tabled is None:
             raise ValueError("no resonance tables")
         _, groups = tabled
-        sizes = [sum(len(row) for row in rows) for _, _, rows in groups]
-        if [s for s in sizes if s] != [link.nParameters for link in form.parameters]:
-            raise ValueError("the matrix's parameter links are not the resonance tables "
-                             "(a scattering-radius uncertainty, or another layout)")
+        links = list(form.parameters)
         matrix = np.array(form.matrix, dtype=float)
+        dap = None
+        if links and links[0].href.endswith("/scatteringRadius") and links[0].nParameters == 1:
+            links.pop(0)
+            variance = matrix[0, 0]
+            if form.isRelative:
+                variance *= float(resonances.scatteringRadius.constant) ** 2
+            dap = float(np.sqrt(variance)) / 10.0
+            matrix = matrix[1:, 1:]
+        sizes = [sum(len(row) for row in rows) for _, _, rows in groups]
+        if [s for s in sizes if s] != [link.nParameters for link in links]:
+            raise ValueError("the matrix's parameter links are not the resonance tables "
+                             "(an L-dependent scattering-radius uncertainty, or another layout)")
         if form.isRelative:
             values = np.array([v for _, _, rows in groups for row in rows for v in row], dtype=float)
             matrix *= np.outer(values, values)
@@ -415,7 +429,7 @@ def encodeMF32FromGnds(suite, mat: Optional[int], report: ConversionReport):
         records.head(za, 1.0, 0, lfw, 1, 0)
         records.head(region.domainMin, region.domainMax, 1, lrf, 0, naps)
         if lrf in (1, 2):
-            _breitWigner(records, resonances, region, matrix, lcomp, sortByL, ndigit, awt, spi)
+            _breitWigner(records, resonances, region, matrix, lcomp, sortByL, ndigit, awt, spi, dap)
         elif lrf == 3:
             from kika.gnds.encode_resonances import _rmGroupsForGNDS, _withoutEmptyFission
             models = _rmGroupsForGNDS(formalism, ConversionReport())
@@ -423,10 +437,11 @@ def encodeMF32FromGnds(suite, mat: Optional[int], report: ConversionReport):
             ignore = "ignoreChannelSpin" in (conversions.flagsFor(rMatrixHref(suite, 0))
                                              if conversions else {})
             _reichMoore(records, resonances, region, models, matrix, lcomp, sortByL, ndigit,
-                        awt, spi, ignore)
+                        awt, spi, ignore, dap)
         else:
-            _rMatrixLimited(records, suite, region, groups, matrix, form.parameters, lcomp,
-                            ndigit, mat)
+            if dap is not None:
+                raise ValueError("a scattering-radius uncertainty on an LRF=7 range")
+            _rMatrixLimited(records, suite, region, groups, matrix, links, lcomp, ndigit, mat)
     except (ValueError, KeyError, IndexError, AttributeError) as why:
         report.lost(f"MF32 from the GNDS parameter covariance is not written: {why}")
         return None, report

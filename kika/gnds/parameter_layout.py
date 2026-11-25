@@ -147,9 +147,18 @@ def _consistent(mf2, mf32, matrix, mpar, lcompZero):
     return matrix
 
 
-def _toModel(matrix, tables, rowHref):
-    """*matrix* over *tables*, one link per non-empty table, absolute as in every NNDC file."""
+def _toModel(matrix, tables, rowHref, dap):
+    """*matrix* over *tables*, one link per non-empty table, absolute as in every NNDC file;
+    a scattering-radius uncertainty first, as its own row (FUDGE's ``scatteringRadius`` link)."""
     links, values, start = [], [], 0
+    if dap:
+        links.append(ParameterLink(label="scatteringRadius",
+                                   href="/reactionSuite/resonances/scatteringRadius",
+                                   nParameters=1, matrixStartIndex=0))
+        grown = np.zeros((len(matrix) + 1, len(matrix) + 1))
+        grown[0, 0] = dap[0] ** 2
+        grown[1:, 1:] = matrix
+        matrix, start = grown, 1
     for label, href, rows in tables:
         n = sum(len(row) for row in rows)
         for row in rows:
@@ -158,7 +167,7 @@ def _toModel(matrix, tables, rowHref):
             continue
         links.append(ParameterLink(label=label, href=href, nParameters=n, matrixStartIndex=start))
         start += n
-    if len(values) != len(matrix):
+    if len(values) + bool(dap) != len(matrix):
         raise ValueError(f"{len(matrix)} covariance rows for {len(values)} table cells")
     # FUDGE's current code makes the matrix relative where it can; all 130 NNDC
     # files are absolute, so the version that wrote them did not.
@@ -172,8 +181,7 @@ def _breitWigner(lines, lrf, tables):
     mf2 = [(row[0], row[4], row[5]) for row in rows]
     flags = []
     _, _, _, lcomp, nls, isr = lines.ints()
-    if isr:
-        raise ValueError("a scattering-radius uncertainty (ISR=1) is not converted")
+    dap = [10 * lines.floats()[1]] if isr else []
     if lcomp == 0:
         flags.append("LCOMP=0")
         resonances, covars = [], []
@@ -242,7 +250,7 @@ def _breitWigner(lines, lrf, tables):
     if unsorted or lcomp == 0:
         flags.append("sortByL")
     matrix = _consistent(mf2, mf32, grown, width, lcomp == 0)
-    return matrix, flags
+    return matrix, flags, dap
 
 
 def _reichMoore(lines, tables):
@@ -250,8 +258,14 @@ def _reichMoore(lines, tables):
     mf2 = [(row[0], row[2], row[1]) for _, _, rows in tables for row in rows]
     flags = ["LRF3"]
     _, _, _, lcomp, nls, isr = lines.ints()
+    dap = []
     if isr:
-        raise ValueError("a scattering-radius uncertainty (ISR=1) is not converted")
+        _, _, _, _, mls, _ = lines.ints()
+        for _ in range(-(-mls // 6)):
+            dap += lines.floats()
+        dap = [10 * d for d in dap[:mls]]
+        if len(dap) > 1:
+            raise ValueError("an L-dependent scattering-radius uncertainty (MLS>1) is not converted")
     if lcomp == 1:
         _, _, _, _, nsrs, nlrs = lines.ints()
         if nsrs != 1 or nlrs:
@@ -290,7 +304,7 @@ def _reichMoore(lines, tables):
     matrix = _consistent(mf2, mf32, matrix, mpar, lcomp == 0)
     for i in range(len(mf2)):
         _swapRows(matrix, mpar * i + 1, mpar * i + 2, 1)
-    return matrix, flags
+    return matrix, flags, dap
 
 
 def _rMatrixLimited(lines, tables):
@@ -342,7 +356,7 @@ def _rMatrixLimited(lines, tables):
     else:
         raise ValueError(f"LRF=7 with LCOMP={lcomp} is not converted")
     matrix = _consistent(mf2, mf32, matrix, None, False)
-    return matrix, flags
+    return matrix, flags, []
 
 
 def fudgeParameterCovariances(suite, tables, report) -> Tuple[Optional[list], List[Tuple[str, str]]]:
@@ -372,14 +386,14 @@ def fudgeParameterCovariances(suite, tables, report) -> Tuple[Optional[list], Li
             raise ValueError(f"MF32 with NER={ner}, LRU={lru}, NRO={nro} is not converted")
         rowHref, groups = tables
         if lrf in (1, 2):
-            matrix, flags = _breitWigner(lines, lrf, groups)
+            matrix, flags, dap = _breitWigner(lines, lrf, groups)
         elif lrf == 3:
-            matrix, flags = _reichMoore(lines, groups)
+            matrix, flags, dap = _reichMoore(lines, groups)
         elif lrf == 7:
-            matrix, flags = _rMatrixLimited(lines, groups)
+            matrix, flags, dap = _rMatrixLimited(lines, groups)
         else:
             raise ValueError(f"LRF={lrf} is not converted")
-        converted = _toModel(matrix, groups, rowHref)
+        converted = _toModel(matrix, groups, rowHref, dap)
     except (ValueError, IndexError) as why:
         report.lost(f"MF32 is written in kika's own layout, one link per resonance, not "
                     f"FUDGE's: {why}")
