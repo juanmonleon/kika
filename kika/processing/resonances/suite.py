@@ -210,8 +210,8 @@ def _tapeBackgrounds(suite,entries,forms):
     data=EndfTapeData.of(suite)
     absent=data.background.get('absent') if data is not None else None
     if not absent:return forms
-    from kika.endf.model_adapter.derive import provenanceNodes
-    from kika.endf.model_adapter.encode import tapeBackground
+    from kika.gnds.resonance_background import tapeBackground
+    from kika.nuclear_data.model.provenance import provenanceNodes
     paths={id(node):path for path,node in provenanceNodes(suite)}
     out=dict(forms)
     for key,reaction in entries.items():

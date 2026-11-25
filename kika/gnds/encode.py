@@ -1628,7 +1628,7 @@ class _SuiteWriter:
 
 def writeReactionSuite(suite, format: Optional[str] = None,
                        report: Optional[ConversionReport] = None, *,
-                       resonance_extensions: bool = False
+                       resonance_extensions: bool = False, tapeData=None
                        ) -> Tuple[ET.ElementTree, ConversionReport]:
     """§14.1.1 ``reactionSuite`` → an ``ElementTree``, plus what was not written.
 
@@ -1640,9 +1640,12 @@ def writeReactionSuite(suite, format: Optional[str] = None,
     the URR's cross-section INT in a versioned KIKA institution under
     applicationData. This requires a KIKA-
     aware consumer and reports that requirement; it is not standard §19 data.
+    ``tapeData`` (an ``EndfTapeData``) goes in the same institution; without it the
+    suite's own, when it was read from a GNDS file kika wrote, is written again.
     """
     report = report if report is not None else ConversionReport()
-    tape = _tapeData(suite)
+    from kika.nuclear_data.model.endf_conversion import EndfTapeData
+    tape = tapeData if tapeData is not None else EndfTapeData.of(suite)
     saved=[]
     if resonance_extensions:
         from .resonance_extensions import extract
@@ -1673,15 +1676,6 @@ def writeReactionSuite(suite, format: Optional[str] = None,
             f"dropped, as FUDGE does: GNDS holds no point beyond the domain, and "
             f"the function on the domain is unchanged")
     return ET.ElementTree(root), report
-
-
-def _tapeData(suite):
-    """What the tape states and GNDS cannot: collected from a suite read from ENDF,
-    carried over from one read from a GNDS file kika wrote."""
-    from kika.endf.model_adapter.tape_block import collect
-    from kika.nuclear_data.model.endf_conversion import EndfTapeData
-
-    return collect(suite) or EndfTapeData.of(suite)
 
 
 def _keptKinematics(suite, tape) -> set:

@@ -105,17 +105,16 @@ def applyToModel(suite, data: EndfTapeData, report) -> None:
 
 
 def _restoreRepeats(suite, repeats, report) -> None:
-    from kika.endf.model_adapter.derive import provenanceNodes
-    from kika.endf.model_adapter.tape_block import _pieces, tables
+    from kika.nuclear_data.model.provenance import provenanceNodes
 
     if not repeats:
         return
     found = {path + suffix: form for path, node in provenanceNodes(suite)
              for suffix, form in tables(node)}
     for path, runs in repeats.items():
-        pieces = _pieces(found[path]) if path in found else []
+        candidates = pieces(found[path]) if path in found else []
         for x, y, times in runs:
-            hits = [(piece, np.flatnonzero((piece.xs == x) & (piece.ys == y))) for piece in pieces]
+            hits = [(piece, np.flatnonzero((piece.xs == x) & (piece.ys == y))) for piece in candidates]
             present = sum(found.size for _, found in hits)
             first = next(((piece, found[0]) for piece, found in hits if found.size), None)
             if first is None:
@@ -126,3 +125,31 @@ def _restoreRepeats(suite, repeats, report) -> None:
             if present < times:
                 piece.xs = np.insert(piece.xs, at, [x] * (times - present))
                 piece.ys = np.insert(piece.ys, at, [y] * (times - present))
+
+
+def pieces(form) -> list:
+    """The XYs1d tables of a cross-section form, background regions included."""
+    from kika.nuclear_data.model import Regions1d, ResonancesWithBackground, XYs1d
+
+    if isinstance(form, ResonancesWithBackground):
+        background = form.background
+        return [piece for region in ("resolvedRegion", "unresolvedRegion", "fastRegion")
+                for piece in pieces(getattr(background, region, None))]
+    if isinstance(form, Regions1d):
+        return [piece for child in form.function1ds for piece in pieces(child)]
+    return [form] if isinstance(form, XYs1d) else []
+
+
+def tables(node):
+    """``(suffix, form)`` for the tables of a node whose points the block may keep: its
+    cross section, and an incoherent-elastic Debye-Waller integral."""
+    from kika.nuclear_data.model import EVAL_LABEL
+
+    form = getattr(getattr(node, "crossSection", None), "get", lambda _: None)(EVAL_LABEL)
+    if form is not None:
+        yield "", form
+    ddcs = getattr(node, "doubleDifferentialCrossSection", None)
+    debyeWaller = getattr(ddcs.get(EVAL_LABEL) if ddcs is not None else None,
+                          "DebyeWallerIntegral", None)
+    if debyeWaller is not None:
+        yield ".DebyeWallerIntegral", debyeWaller

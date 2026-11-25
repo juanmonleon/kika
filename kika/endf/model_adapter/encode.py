@@ -17,6 +17,7 @@ from typing import Optional, Tuple
 
 import numpy as np
 
+from kika.gnds.resonance_background import backgroundTable
 from kika.nuclear_data.model import EVAL_LABEL, ConversionReport, Reaction
 
 __all__ = ["encodeMF3MT", "encodeMF1MT451", "usableInterpolationRegions"]
@@ -73,69 +74,6 @@ _MF1_EVALUATION_INFO = (
     ("_ref", "reference"), ("_ddate", "dist_date"),
     ("_rdate", "revision_date"),
 )
-
-
-def backgroundTable(form, name: str, report=None, joins=None):
-    """§16.1.1's background, as the one MF3 table ENDF states (NNDC GNDS).
-
-    MF3 *is* the background: ENDF adds the resonances to it at processing time
-    and GNDS says so with ``resonancesWithBackground``. FUDGE writes the three
-    regions joined (``toENDF6/reactionData/crossSection.py:114-151``), and so
-    does this: the resolved, unresolved and fast terms in order, a point shared
-    at a boundary written once, and a boundary between two regions of the same
-    interpolation law removed -- FUDGE's merge, which gives back the single
-    region the evaluation states across the resonance-range edge.
-    """
-    from kika.nuclear_data.model import Regions1d
-
-    background = getattr(form, "background", None)
-    pieces = []
-    join = None
-    for region in ("resolvedRegion", "unresolvedRegion", "fastRegion"):
-        term = getattr(background, region, None)
-        if term is None:
-            continue
-        terms = list(term.function1ds if isinstance(term, Regions1d) else [term])
-        if join is not None and pieces:
-            # FUDGE's toENDF6: a mergeWithNextRegion edge was cut by the GNDS writer, and
-            # deletePoint says the cut's point is not the tape's.
-            pieces[-1] = _joined(pieces[-1], terms.pop(0), "deletePoint" in join)
-        pieces.extend(terms)
-        join = (joins or {}).get(region)
-        if join is not None and "mergeWithNextRegion" not in join:
-            join = None
-    if not pieces:
-        raise TypeError(f"the resonancesWithBackground of {name} has no background to write")
-    joined = Regions1d(function1ds=pieces, axes=pieces[0].axes)
-    energies, values, pairs = joined.toEndfRegions()
-    merged = []
-    for nbt, code in pairs:
-        if merged and merged[-1][1] == code:
-            merged[-1] = (int(nbt), int(code))
-        else:
-            merged.append((int(nbt), int(code)))
-    return Regions1d.fromEndfRegions(energies, values, merged, axes=pieces[0].axes)
-
-
-def tapeBackground(form, regions):
-    """*form* with its background as the one table the tape states: the point the GNDS
-    writer added at the upper edge of each of *regions* taken out."""
-    from kika.nuclear_data.model import Background, ResonancesWithBackground
-
-    joins = {region: "mergeWithNextRegion,deletePoint" for region in regions}
-    return ResonancesWithBackground(
-        background=Background(fastRegion=backgroundTable(form, form.label, None, joins)),
-        resonanceRegionHref=form.resonanceRegionHref, label=form.label)
-
-
-def _joined(left, right, deletePoint: bool):
-    """Two background pieces as one table, the shared point once or (deletePoint) not at all."""
-    from kika.nuclear_data.model import XYs1d
-
-    skip = 1 if deletePoint else 0
-    xs = np.concatenate([np.asarray(left.xs)[:-1], np.asarray(right.xs)[skip:]])
-    ys = np.concatenate([np.asarray(left.ys)[:-1], np.asarray(right.ys)[skip:]])
-    return XYs1d(xs=xs, ys=ys, interpolation=left.interpolation, axes=left.axes)
 
 
 def mergedInterpolationRegions(regions):

@@ -11,6 +11,8 @@ from typing import Dict, List, Optional, Tuple
 from kika.nuclear_data.model.endf_conversion import EndfTapeData
 from kika.nuclear_data.model.provenance import EndfProvenance
 
+from kika.gnds.tape_data import pieces, tables
+
 from .derive import DERIVED, provenanceNodes
 
 __all__ = ["collect", "apply", "levelQms"]
@@ -64,40 +66,12 @@ def collect(suite) -> Optional[EndfTapeData]:
     return data or None
 
 
-def _pieces(form) -> list:
-    """The XYs1d tables of a cross-section form, background regions included."""
-    from kika.nuclear_data.model import Regions1d, ResonancesWithBackground, XYs1d
-
-    if isinstance(form, ResonancesWithBackground):
-        background = form.background
-        return [piece for region in ("resolvedRegion", "unresolvedRegion", "fastRegion")
-                for piece in _pieces(getattr(background, region, None))]
-    if isinstance(form, Regions1d):
-        return [piece for child in form.function1ds for piece in _pieces(child)]
-    return [form] if isinstance(form, XYs1d) else []
-
-
-def tables(node):
-    """``(suffix, form)`` for the tables of a node whose points the block may keep: its
-    cross section, and an incoherent-elastic Debye-Waller integral."""
-    from kika.nuclear_data.model import EVAL_LABEL
-
-    form = getattr(getattr(node, "crossSection", None), "get", lambda _: None)(EVAL_LABEL)
-    if form is not None:
-        yield "", form
-    ddcs = getattr(node, "doubleDifferentialCrossSection", None)
-    debyeWaller = getattr(ddcs.get(EVAL_LABEL) if ddcs is not None else None,
-                          "DebyeWallerIntegral", None)
-    if debyeWaller is not None:
-        yield ".DebyeWallerIntegral", debyeWaller
-
-
 def _repeats(form) -> list:
     """``[x, y, times]`` of each point a table states several times over."""
     import numpy as np
 
     runs = []
-    for piece in _pieces(form):
+    for piece in pieces(form):
         xs, ys = np.asarray(piece.xs, float), np.asarray(piece.ys, float)
         same = np.flatnonzero((xs[1:] == xs[:-1]) & (ys[1:] == ys[:-1]))
         for start in same[np.r_[True, np.diff(same) > 1]] if same.size else ():
