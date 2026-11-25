@@ -174,6 +174,10 @@ class NCAssembler:
         self._central_cache[key] = y
         return y
 
+    def forget(self):
+        self._primitives.clear()
+        self._blocks.clear()
+
     def primitive(self, a, b, grid, active_a, active_b):
         key = (a, b, grid.tobytes(), active_a.tobytes(), active_b.tobytes())
         if key not in self._primitives:
@@ -248,6 +252,7 @@ def check_nc(ctx, mf, sections, usable, out):
 
     engine = NCAssembler(ctx,mf,sections,usable)
     checked_joint = {}
+    cached_for = None
     for mt in sorted(sections):
         if not any(n.lty==0 for s in sections[mt].subsections for n in s.nc_records):
             continue
@@ -255,6 +260,9 @@ def check_nc(ctx, mf, sections, usable, out):
         try:
             nodes = sorted(engine.connected(mt))
             grid = engine.grid(nodes)
+            if cached_for != (tuple(nodes), grid.tobytes()):
+                engine.forget()
+                cached_for = (tuple(nodes), grid.tobytes())
             matrix = engine.block(mt,mt,grid)
             _check_self_block(matrix,grid,loc,out,[],None)
             _mf33_magnitude(ctx,mt,matrix,grid,False,loc,out)
