@@ -48,6 +48,7 @@ from kika.nuclear_data.model import (
     ParameterCovarianceMatrix,
     ParameterLink,
 )
+from kika.nuclear_data.model.endf_conversion import MF32MT151_KEY
 
 __all__ = ["decodeMF32MT", "encodeMF32MT", "MF32MT151_KEY",
            "resonanceParametersHref", "unresolvedParametersHref"]
@@ -608,10 +609,6 @@ def decodeMF32MT(mf32mt, report: Optional[ConversionReport] = None):
 # long-range blocks, LCOMP=1 for LRF=7, a section whose arithmetic disagreed)
 # never reached the model, so the model cannot have changed it: it goes back
 # out as the bytes it came in as. The decode already reported each of them.
-
-#: Where the decoder of the suite keeps an MF32 section's text, on the
-#: provenance every :class:`ParameterCovariance` of that section shares.
-MF32MT151_KEY = "mf32mt151"
 
 _LABEL = re.compile(r"^MF32-iso(\d+)-range(\d+)(?:-block(\d+))?$")
 
