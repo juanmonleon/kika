@@ -9,6 +9,7 @@ Each reader takes an optional ``diagnostics`` list. Given one, the reader
 appends a :class:`ReadEvent` for what the file declares and for everything it
 drops, tolerates or cannot tell, and returns the same object as without it.
 """
+import re
 import struct
 import warnings
 from dataclasses import dataclass, field
@@ -47,7 +48,8 @@ class ReadEvent:
         One of :data:`READ_EVENT_KINDS`: ``declared`` (a header as written),
         ``unit_assumed`` (the file does not say relative or absolute; the flag
         set), ``reaction_not_stated``, ``dropped_block`` (``reason``: ``zero``,
-        ``unknown_mt`` or ``unfinished``), ``dropped_values``,
+        ``unknown_mt`` or ``unfinished``), ``dropped_values`` (in a TENDL
+        listing, ``reason``: ``overflow`` or ``stddev_differs``),
         ``count_mismatch``, ``count_defaulted`` (a blank or zero count or
         boundary the reader supplied), ``record_longer``,
         ``index_out_of_range``, ``row_order``, ``repeated_block`` (a pair of
@@ -509,28 +511,35 @@ def _is_coverx_text_header(line: str) -> bool:
     return len(tokens) == 5 and all(t.lstrip("-").isdigit() for t in tokens)
 
 
-def _complete_upper_bounds(upper_ev: List[float], file_path, diagnostics: Optional[list]) -> List[float]:
-    """SCALE's text grid (upper bounds only), with the lowest boundary of the kika structure it matches."""
-    from kika import energy_grids
+def _complete_upper_bounds(upper_ev: List[float], file_path, diagnostics: Optional[list],
+                           rtol: float = 1e-6, what: str = "COVERX text grid") -> List[float]:
+    """A grid of upper bounds only, with the lowest boundary of the kika structure it matches."""
+    from kika.energy_grids import grids
 
     upper = np.sort(np.asarray(upper_ev, dtype=float))
-    for name in energy_grids.__all__:
-        preset = getattr(energy_grids, name)
-        if not isinstance(preset, list) or len(preset) != upper.size + 1:
+    matches = {}
+    for name, preset in vars(grids).items():
+        if not name.isupper() or not isinstance(preset, list) or len(preset) != upper.size + 1:
             continue
         edges = np.sort(np.asarray(preset, dtype=float))
         edges_ev = edges * (1.0e6 if edges[-1] < 1.0e3 else 1.0)
-        if np.allclose(edges_ev[1:], upper, rtol=1e-6, atol=0.0):
-            emin = float(edges_ev[0])
-            _note(diagnostics, "count_defaulted",
-                  f"the grid gives the {upper.size} upper bounds only; the lowest boundary, "
-                  f"{emin:g} eV, is the one of {name}, whose upper bounds these are",
-                  structure=name, emin_ev=emin)
-            descending = upper_ev[0] > upper_ev[-1]
-            return list(upper_ev) + [emin] if descending else [emin] + list(upper_ev)
-    raise InvalidDataFormatError(
-        f"the COVERX text grid gives {upper.size} upper bounds and no lowest boundary, and "
-        f"no group structure in kika.energy_grids has these upper bounds: {file_path}")
+        if np.allclose(edges_ev[1:], upper, rtol=rtol, atol=0.0):
+            matches[name] = float(edges_ev[0])
+    if len(set(matches.values())) > 1:
+        raise InvalidDataFormatError(
+            f"the {what} gives {upper.size} upper bounds and no lowest boundary, and the "
+            f"structures with these upper bounds disagree on it ({matches}): {file_path}")
+    if not matches:
+        raise InvalidDataFormatError(
+            f"the {what} gives {upper.size} upper bounds and no lowest boundary, and "
+            f"no group structure in kika.energy_grids has these upper bounds: {file_path}")
+    name, emin = sorted(matches.items())[0]
+    _note(diagnostics, "count_defaulted",
+          f"the grid gives the {upper.size} upper bounds only; the lowest boundary, "
+          f"{emin:g} eV, is the one of {name}, whose upper bounds these are",
+          structure=name, emin_ev=emin)
+    descending = upper_ev[0] > upper_ev[-1]
+    return list(upper_ev) + [emin] if descending else [emin] + list(upper_ev)
 
 
 #: NTYPE (ORNL/TM-7181, appendix A): 1 covariance, 2 relative covariance, 3 correlation.
@@ -1777,6 +1786,209 @@ def write_boxer(
 
 # ---------------------------------------------------------------------------
 # Public API — COVFIL / GENDF (NJOY format)
+_TENDL_MATMT = re.compile(r"mat-mt=\(\s*(\d+),\s*(\d+)\)")
+
+
+def _tendl_table(lines: List[str], cursor: int, columns: int, where: Dict[str, Any],
+                 diagnostics: Optional[list]) -> Tuple[np.ndarray, int]:
+    """The group table after a ``material`` header: one row per group, ``columns`` numbers each."""
+    rows = []
+    while cursor < len(lines):
+        tokens = lines[cursor].split()
+        if len(tokens) != columns or not tokens[0].isdigit():
+            break
+        try:
+            rows.append([float(t) for t in tokens])
+        except ValueError:
+            break
+        cursor += 1
+    table = np.array(rows, dtype=float).reshape(-1, columns)
+    if table.size and not np.array_equal(table[:, 0], np.arange(1, len(table) + 1)):
+        _note(diagnostics, "row_order", "the group numbers of the table are not 1, 2, 3, ...",
+              where, groups=table[:, 0].astype(int).tolist())
+    return table, cursor
+
+
+def _tendl_correlation(lines: List[str], cursor: int, ngroup: int, where: Dict[str, Any],
+                       diagnostics: Optional[list]) -> Tuple[np.ndarray, int]:
+    """The panels after ``<<< correlation matrix >>>``, in thousandths; ``*****`` becomes NaN."""
+    rho = np.zeros((ngroup, ngroup))
+    overflow = []
+    out_of_range = 0
+    cursor += 2  # the marker and the 'column material ... vs row material ...' line
+    while cursor < len(lines) and lines[cursor].split()[:1] == ["row"]:
+        cols = [int(t) - 1 for t in lines[cursor].split()[1:]]
+        cursor += 2  # the 'row' header and the 'column-----' rule
+        while cursor < len(lines):
+            line = lines[cursor]
+            head = line[:6].strip()
+            if not head.isdigit():
+                break
+            g = int(head) - 1
+            for k, c in enumerate(cols):
+                field_ = line[6 + 5 * k: 11 + 5 * k]
+                if not (0 <= g < ngroup and 0 <= c < ngroup):
+                    out_of_range += 1
+                    continue
+                if "*" in field_:
+                    rho[g, c] = np.nan
+                    overflow.append((g + 1, c + 1))
+                else:
+                    rho[g, c] = int(field_) / 1000.0
+            cursor += 1
+    if overflow:
+        _note(diagnostics, "dropped_values",
+              f"{len(overflow)} correlations are printed as ***** (the value does not fit "
+              "the field) and are kept as NaN", where, reason="overflow", cells=overflow)
+    if out_of_range:
+        _note(diagnostics, "index_out_of_range",
+              f"{out_of_range} correlations sit at a group outside 1..{ngroup} and are dropped",
+              where, count=out_of_range, ngroup=ngroup)
+    return rho, cursor
+
+
+def read_tendl_matrix(file_path: str, energy_unit: str = 'eV',
+                      diagnostics: Optional[list] = None) -> CrossSectionCovariance:
+    """
+    Read a TENDL covariance listing (``*-njoy-cov-187g.all.300.K.matrix``).
+
+    TENDL publishes, next to each evaluation, a text listing of its covariances
+    processed with NJOY. For each reaction it gives a table of groups (upper
+    boundary in eV, cross section, relative and absolute standard deviation);
+    for each pair of reactions, a table with both cross sections and both
+    relative standard deviations. Each table is followed by the correlation
+    matrix in thousandths, in panels of 25 groups, with only the groups whose
+    standard deviation is not zero printed. The lines of a panel are the groups
+    of the first reaction of the pair and its columns those of the second.
+
+    Each block comes back as a relative covariance (``is_relative`` True):
+    the correlation times the relative standard deviations of the two
+    reactions, taken from their own tables. Groups that are not printed are
+    zero. A correlation printed as ``*****`` is NaN. The grid keeps the order
+    of the file (descending); the listing gives upper bounds only, and the
+    lowest boundary is the one of the kika group structure whose upper bounds
+    match (the 187-group listings are the LANL 187-group structure).
+
+    Parameters
+    ----------
+    file_path : str
+        Path to the listing.
+    energy_unit : str, optional
+        Unit of the returned grid: ``'eV'`` (default) or ``'MeV'``.
+    diagnostics : list, optional
+        If given, :class:`ReadEvent` entries are appended to it: the tables as
+        declared, the standard deviations and correlations as written, and
+        everything the reader drops or supplies. The result does not depend on it.
+
+    Returns
+    -------
+    CrossSectionCovariance
+
+    Raises
+    ------
+    InvalidDataFormatError
+        If a correlation matrix has no table before it, or the grid matches no
+        kika group structure.
+    EmptyParsingError
+        If the file holds no table.
+    """
+    with open(file_path, 'r', encoding='ascii', errors='replace') as f:
+        lines = f.read().splitlines()
+
+    grid_desc: Optional[List[float]] = None
+    tables: Dict[Tuple[int, int], Dict[str, np.ndarray]] = {}
+    blocks = []
+    cursor, n_self, n_cross = 0, 0, 0
+    while cursor < len(lines):
+        line = lines[cursor]
+        stripped = line.strip()
+        is_self = stripped.startswith("material mat-mt=")
+        is_cross = stripped.startswith("1st material mat-mt=")
+        if not (is_self or is_cross):
+            if stripped:
+                _note(diagnostics, "skipped_line", f"line {cursor + 1} is not part of a table "
+                      "or a correlation matrix and is skipped", {"line": cursor + 1},
+                      text=stripped[:80])
+            cursor += 1
+            continue
+        pairs = [(int(m), int(t)) for m, t in _TENDL_MATMT.findall(line)]
+        (mat, mt), (mat1, mt1) = pairs[0], pairs[-1]
+        where = {"mat": mat, "mt": mt, "mat1": mat1, "mt1": mt1, "record": len(blocks)}
+        table, cursor = _tendl_table(lines, cursor + 2, 5 if is_self else 6, where, diagnostics)
+        if grid_desc is None:
+            grid_desc = table[:, 1].tolist()
+        elif table.shape[0] != len(grid_desc) or not np.allclose(table[:, 1], grid_desc,
+                                                                  rtol=1e-6, atol=0.0):
+            _note(diagnostics, "count_mismatch",
+                  f"the table has {table.shape[0]} groups whose energies are not those of the "
+                  f"first table ({len(grid_desc)} groups); its block is dropped",
+                  where, declared=len(grid_desc), found=table.shape[0])
+            while cursor < len(lines) and not lines[cursor].strip().startswith(
+                    ("material mat-mt=", "1st material mat-mt=")):
+                cursor += 1
+            continue
+        if is_self:
+            n_self += 1
+            key = (mat, mt)
+            if key in tables:
+                _note(diagnostics, "repeated_block", f"MAT{mat}/MT{mt} has a second table; "
+                      "the reader keeps the last", where)
+            tables[key] = {"xs": table[:, 2], "rsd": table[:, 3]}
+            rsd_row = rsd_col = table[:, 3]
+            _note(diagnostics, "raw_stddev", f"MAT{mat}/MT{mt}: the relative standard "
+                  "deviations as written", where, stddev=table[:, 3].copy(), relative=True,
+                  order="file")
+        else:
+            n_cross += 1
+            rsd_row, rsd_col = table[:, 4], table[:, 5]
+        if cursor >= len(lines) or "correlation matrix" not in lines[cursor]:
+            raise InvalidDataFormatError(
+                f"the table of MAT{mat}/MT{mt} x MAT{mat1}/MT{mt1} is not followed by its "
+                f"correlation matrix (line {cursor + 1}): {file_path}")
+        rho, cursor = _tendl_correlation(lines, cursor, len(grid_desc), where, diagnostics)
+        _note(diagnostics, "raw_correlation", f"MAT{mat}/MT{mt} x MAT{mat1}/MT{mt1}: the "
+              "correlations as written (thousandths divided by 1000)", where,
+              correlation=rho.copy(), order="file", resolution=1e-3)
+        blocks.append((mat, mt, mat1, mt1, rho, rsd_row, rsd_col, where))
+
+    if grid_desc is None:
+        raise EmptyParsingError(f"No table was found in the TENDL listing: {file_path}")
+
+    edges = _complete_upper_bounds(grid_desc, file_path, diagnostics, rtol=1e-4,
+                                   what="TENDL listing")
+    covmat = CrossSectionCovariance(num_groups=len(grid_desc),
+                                    energy_grid=_ev_grid_in(edges, energy_unit),
+                                    energy_unit=energy_unit)
+    for (mat, mt), table in tables.items():
+        covmat.cross_sections[(int(_map_mat(str(mat))), mt)] = table["xs"]
+    for mat, mt, mat1, mt1, rho, rsd_row, rsd_col, where in blocks:
+        own = [tables.get((mat, mt)), tables.get((mat1, mt1))]
+        for side, (given, table) in enumerate(zip((rsd_row, rsd_col), own)):
+            if table is not None and not np.allclose(given, table["rsd"], rtol=1e-4, atol=0.0):
+                _note(diagnostics, "dropped_values",
+                      f"the {'1st' if side == 0 else '2nd'} relative standard deviations of "
+                      "this pair differ from the reaction's own table, which the reader uses",
+                      where, reason="stddev_differs", given=np.array(given),
+                      own=np.array(table["rsd"]))
+        rsd_row = own[0]["rsd"] if own[0] is not None else rsd_row
+        rsd_col = own[1]["rsd"] if own[1] is not None else rsd_col
+        matrix = rho * np.outer(rsd_row, rsd_col)
+        if np.any(matrix != 0):  # NaN counts as not zero
+            covmat.add_matrix(int(_map_mat(str(mat))), mt, int(_map_mat(str(mat1))), mt1,
+                              matrix, is_relative=True)
+        else:
+            _note(diagnostics, "dropped_block", "the matrix is all zero and is skipped",
+                  where, reason="zero")
+    if diagnostics is not None:
+        _note(diagnostics, "declared",
+              f"{n_self} reaction tables and {n_cross} pair tables in {len(grid_desc)} groups",
+              format="tendl_matrix", reactions=n_self, pairs=n_cross, ngroup=len(grid_desc))
+        _note_repeated_blocks(covmat, diagnostics)
+    if covmat.num_matrices == 0:
+        raise EmptyParsingError(f"No valid data was extracted from the TENDL listing: {file_path}")
+    return covmat
+
+
 # ---------------------------------------------------------------------------
 
 def _read_n_values(lines: List[str], cursor: int, n: int) -> Tuple[List[float], int]:

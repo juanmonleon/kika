@@ -194,3 +194,55 @@ def test_two_counts_of_one_row_that_disagree_are_a_count_mismatch(tmp_path):
     read_covfil(path, diagnostics=events)
     (event,) = [e for e in events if e.kind == "count_mismatch"]
     assert (event.where["row"], event.evidence) == (1, {"declared": 9, "found": 8})
+
+
+def _boxer_lines(tmp_path):
+    path = _written(tmp_path, "boxer")
+    return path, path.read_text().split("\n")
+
+
+def test_values_that_no_control_loads_are_a_count_mismatch(tmp_path):
+    path, lines = _boxer_lines(tmp_path)
+    head = max(i for i, ln in enumerate(lines) if ln.startswith("3") and ln[50:54] == " 102")
+    lines[head] = lines[head][:54] + f"{2:4d}" + lines[head][58:]
+    lines[head + 1] += " 9.9900000E-01"
+    path.write_text("\n".join(lines))
+    events = []
+    cov = read_boxer(path, diagnostics=events)
+    (event,) = [e for e in events if e.kind == "count_mismatch"]
+    assert (event.where["mt1"], event.evidence["declared"], event.evidence["found"]) == (102, 2, 1)
+    assert _same(cov, read_boxer(_written(tmp_path / "..", "boxer")))
+
+
+def test_controls_that_fill_too_few_cells_are_a_count_mismatch(tmp_path):
+    path, lines = _boxer_lines(tmp_path)
+    head = max(i for i, ln in enumerate(lines) if ln.startswith("3") and ln[50:54] == " 102")
+    assert lines[head + 2] == "-412"
+    lines[head + 2] = "-411"
+    path.write_text("\n".join(lines))
+    events = []
+    read_boxer(path, diagnostics=events)
+    (event,) = [e for e in events if e.kind == "count_mismatch"]
+    assert (event.where["mt1"], event.evidence["declared"], event.evidence["found"]) == (102, 16, 15)
+
+
+def test_a_blank_ng_of_a_pair_is_a_count_defaulted(tmp_path):
+    path = _edited(MF33, tmp_path / "ng.gendf", 51, "        102          0          9139533102",
+                   "        102          0           139533102")
+    events = []
+    cov = read_covfil(path, diagnostics=events)
+    (event,) = [e for e in events if e.kind == "count_defaulted"]
+    assert (event.where["mt1"], event.evidence["used"]) == (102, 9)
+    assert _same(cov, read_covfil(MF33))
+
+
+def test_cross_sections_that_are_all_zero_are_dropped_values(tmp_path):
+    cov = _covariance()
+    cov.cross_sections[(FE56, 102)] = np.zeros(4)
+    path = tmp_path / "zero.bin"
+    write_coverx(cov, path, fmt="binary")
+    events = []
+    read = read_coverx(path, diagnostics=events)
+    (event,) = [e for e in events if e.kind == "dropped_values"]
+    assert (event.where["mt"], event.evidence["values"]) == (102, "cross_sections")
+    assert (FE56, 102) not in read.cross_sections
