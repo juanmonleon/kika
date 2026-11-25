@@ -1782,6 +1782,13 @@ def _note_pair_count(diagnostics: Optional[list], lines: List[str], cursor: int,
               "rest is read as if it were a new section", where, declared=declared, line=cursor + 1)
 
 
+def _covfil_zaid(mat: int, za: float) -> int:
+    """The ZAID of the tape's own material: kika's table for a known MAT, else the ZA of the file."""
+    if mat in ENDF_MAT_TO_ZAID:
+        return ENDF_MAT_TO_ZAID[mat]
+    return int(round(za)) if za > 0 else mat
+
+
 def _parse_covfil_mf1(lines: List[str], cursor: int) -> Tuple[float, float, float, int, List[float], int]:
     """
     Parse MF1 MT451 energy-grid section of a COVFIL file.
@@ -1827,7 +1834,7 @@ def _parse_covfil_mf1(lines: List[str], cursor: int) -> Tuple[float, float, floa
 
 
 def _parse_covfil_mf3(
-    lines: List[str], cursor: int, ngrp: int
+    lines: List[str], cursor: int, ngrp: int, own_zaid: Optional[int] = None
 ) -> Tuple[Dict[Tuple[int, int], np.ndarray], int]:
     """
     Parse all MF3 cross-section sections until FEND (MF=0).
@@ -1859,13 +1866,14 @@ def _parse_covfil_mf3(
         # Read cross-section values
         values, cursor = _read_n_values(lines, cursor, n_vals)
 
-        zaid = int(_map_mat(str(mat)))
+        zaid = own_zaid if own_zaid is not None else int(_map_mat(str(mat)))
         xs_dict[(zaid, mt)] = np.array(values)
     return xs_dict, cursor
 
 
 def _parse_covfil_mf33(
-    lines: List[str], cursor: int, ngrp: int, mat: int, diagnostics: Optional[list] = None
+    lines: List[str], cursor: int, ngrp: int, mat: int, diagnostics: Optional[list] = None,
+    zaid: Optional[int] = None,
 ) -> Tuple[List[Tuple[int, int, int, int, np.ndarray]], int]:
     """
     Parse all MF33 covariance sections until FEND.
@@ -1875,7 +1883,8 @@ def _parse_covfil_mf33(
     blocks : list of (iso_row, mt_row, iso_col, mt_col, matrix)
     new_cursor : int
     """
-    zaid = int(_map_mat(str(mat)))
+    if zaid is None:
+        zaid = int(_map_mat(str(mat)))
     blocks: List[Tuple[int, int, int, int, np.ndarray]] = []
 
     while cursor < len(lines):
@@ -1921,7 +1930,11 @@ def _parse_covfil_mf33(
             cursor += 1
             rows_seen: List[int] = []
 
-            iso_col = int(_map_mat(str(mat1))) if mat1 != 0 else zaid
+            iso_col = int(_map_mat(str(mat1))) if mat1 not in (0, mat) else zaid
+            if mat1 not in (0, mat) and mat1 not in ENDF_MAT_TO_ZAID:
+                _note(diagnostics, "declared",
+                      f"MAT1={mat1} is not in kika's MAT table: the block keeps the MAT as its isotope",
+                      where, mat1_kept=mat1)
 
             sub_mat = np.zeros((ng, ng))
 
@@ -1974,18 +1987,24 @@ def _parse_covfil_mf33(
 
 def _parse_covfil_mf34(
     lines: List[str], cursor: int, ngrp: int, mat: int, energy_grid: List[float],
-    diagnostics: Optional[list] = None
-) -> Tuple[List[Tuple[int, int, int, int, int, int, np.ndarray]], int]:
+    diagnostics: Optional[list] = None, zaid: Optional[int] = None,
+) -> Tuple[List[Tuple[int, int, int, int, int, int, np.ndarray, bool]], int]:
     """
     Parse all MF34 covariance sections until FEND.
 
+    A section under MT251 is ERRORR's: its HEAD carries (ZA, AWR, 0, irelco, L, L1),
+    so its pairs are read up to the SEND and ``irelco`` says whether they are
+    relative. Any other section carries NMT1 in C4, as ENDF-6 and
+    :func:`write_covfil` write it, and its blocks are relative.
+
     Returns
     -------
-    blocks : list of (iso_row, mt_row, l_row, iso_col, mt_col, l_col, matrix)
+    blocks : list of (iso_row, mt_row, l_row, iso_col, mt_col, l_col, matrix, is_relative)
     new_cursor : int
     """
-    zaid = int(_map_mat(str(mat)))
-    blocks: List[Tuple[int, int, int, int, int, int, np.ndarray]] = []
+    if zaid is None:
+        zaid = int(_map_mat(str(mat)))
+    blocks: List[Tuple[int, int, int, int, int, int, np.ndarray, bool]] = []
 
     while cursor < len(lines):
         rmat, mf, mt = parse_endf_id(lines[cursor])
@@ -2007,13 +2026,24 @@ def _parse_covfil_mf34(
               f"MF34 MT{mt}: HEAD (ZA, AWR, C3, C4, C5, C6); ERRORR writes C4=irelco, C5=L, C6=L1",
               {"mat": rmat, "mf": 34, "mt": mt}, format="covfil",
               head=[head[k] for k in ("C1", "C2", "C3", "C4", "C5", "C6")])
-        if mt == 251:
+        errorr = mt == 251
+        relative = True
+        if errorr:
+            relative = nmt1 != 0
             _note(diagnostics, "reaction_not_stated",
                   "ERRORR writes MF34 under MT251: the reaction whose Legendre coefficients these "
                   "are is not in the file", {"mat": rmat, "mf": 34, "mt": mt})
+        else:
+            _note(diagnostics, "unit_assumed",
+                  "an MF34 section not written by ERRORR does not say whether it is relative; "
+                  "its blocks are flagged relative", {"mat": rmat, "mf": 34, "mt": mt},
+                  is_relative=True)
 
         # Loop over reaction pairs (including L/L1 combinations)
-        for _ in range(nmt1):
+        pairs = 0
+        while (cursor < len(lines) and parse_endf_id(lines[cursor])[2] != 0 if errorr
+               else pairs < nmt1):
+            pairs += 1
             # CONT: (0, 0, MT1, L, L1, NG)
             cont = parse_line(lines[cursor])
             mt1 = int(cont['C3'] or 0)
@@ -2055,11 +2085,12 @@ def _parse_covfil_mf34(
                         break
 
             if np.any(sub_mat):  # only an exactly-zero block is skipped
-                blocks.append((zaid, mt_row, l_row, zaid, mt1, l_col, sub_mat))
+                blocks.append((zaid, mt_row, l_row, zaid, mt1, l_col, sub_mat, relative))
             else:
                 _note(diagnostics, "dropped_block", "the matrix is all zero and is skipped",
                       where, reason="zero")
-        _note_pair_count(diagnostics, lines, cursor, nmt1, {"mat": rmat, "mf": 34, "mt": mt_row})
+        if not errorr:
+            _note_pair_count(diagnostics, lines, cursor, nmt1, {"mat": rmat, "mf": 34, "mt": mt_row})
 
     return blocks, cursor
 
@@ -2075,9 +2106,13 @@ def read_covfil(file_path: str, energy_unit: str = 'eV',
     MF3 cross sections are stored in ``CrossSectionCovariance.cross_sections`` (MF33 case only).
 
     The file is one material and holds its group boundaries in eV; the grid is
-    kept in the order of the file (no reordering). Every matrix is flagged
-    ``is_relative=True``: NJOY writes relative covariances, and the reader does
-    not check it. A block that is exactly zero is skipped. In an MF34 file the
+    kept in the order of the file (no reordering). The material's isotope is
+    its ZAID from kika's MAT table, or the ZA of the file when the MAT is not in
+    it. An MF33 matrix is flagged ``is_relative=True`` (ERRORR's default; its
+    ``irelco`` is not written). An MF34 section under MT251, as ERRORR writes
+    it, takes the flag from ``irelco`` in its HEAD and keeps 251 as the
+    reaction, since the file does not name it; any other MF34 section is
+    flagged relative. A block that is exactly zero is skipped. In an MF34 file the
     rows and columns of a block index the groups of the file's grid, and the
     block belongs to the Legendre orders ``l_row`` and ``l_col`` of its
     section; the frame is ``"unknown"`` (the file does not say). The grouped
@@ -2133,12 +2168,14 @@ def read_covfil(file_path: str, energy_unit: str = 'eV',
               {"mat": mat, "mf": 1, "mt": 451}, declared=ngrp + 1, found=len(energy_grid))
     energy_grid = _ev_grid_in(energy_grid, energy_unit)
 
+    own_zaid = _covfil_zaid(mat, za)
+
     # --- MF3: cross sections (optional) ---
     xs_dict: Dict[Tuple[int, int], np.ndarray] = {}
     if cursor < len(lines):
         peek_mat, peek_mf, peek_mt = parse_endf_id(lines[cursor])
         if peek_mf == 3:
-            xs_dict, cursor = _parse_covfil_mf3(lines, cursor, ngrp)
+            xs_dict, cursor = _parse_covfil_mf3(lines, cursor, ngrp, own_zaid)
 
     # --- Determine covariance type: MF33 or MF34 ---
     if cursor < len(lines):
@@ -2149,7 +2186,7 @@ def read_covfil(file_path: str, energy_unit: str = 'eV',
         )
 
     if peek_mf == 33:
-        blocks, cursor = _parse_covfil_mf33(lines, cursor, ngrp, mat, diagnostics)
+        blocks, cursor = _parse_covfil_mf33(lines, cursor, ngrp, mat, diagnostics, own_zaid)
         covmat = CrossSectionCovariance(num_groups=ngrp, energy_unit=energy_unit)
         covmat.energy_grid = energy_grid
         covmat.metadata['awr'] = awr
@@ -2169,16 +2206,17 @@ def read_covfil(file_path: str, energy_unit: str = 'eV',
         return covmat
 
     elif peek_mf == 34:
-        blocks34, cursor = _parse_covfil_mf34(lines, cursor, ngrp, mat, energy_grid, diagnostics)
+        blocks34, cursor = _parse_covfil_mf34(lines, cursor, ngrp, mat, energy_grid, diagnostics,
+                                              own_zaid)
         mf34 = LegendreCovariance(energy_unit=energy_unit)
         mf34.metadata['awr'] = awr
         mf34.metadata['temperature'] = temperature
-        for iso_row, mt_row, l_row, iso_col, mt_col, l_col, matrix in blocks34:
+        for iso_row, mt_row, l_row, iso_col, mt_col, l_col, matrix, relative in blocks34:
             mf34.add_matrix(
                 isotope_row=iso_row, reaction_row=mt_row, l_row=l_row,
                 isotope_col=iso_col, reaction_col=mt_col, l_col=l_col,
                 matrix=matrix, energy_grid=energy_grid,
-                is_relative=True, frame="unknown",
+                is_relative=relative, frame="unknown",
             )
         _note_repeated_blocks(mf34, diagnostics)
         if mf34.num_matrices == 0:
