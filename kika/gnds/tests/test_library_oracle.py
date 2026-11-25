@@ -167,9 +167,6 @@ EXPECTED: List[Expected] = [
              "a form label kika writes and FUDGE omits"),
     Expected("res", r"unresolved\.tabulatedWidths\.PoPs: PoPs != NoneType",
              "kika writes the URR's own PoPs (target spin and mass); FUDGE reads them from the suite's"),
-    Expected("res", r"unresolved\.spinGroups\[i\]\.(levelSpacingFunction|channel\[MT\d+\]\.averageFunction)"
-                    r"\.interpolation: <Interpolation\.linlin: 'lin-lin'> != <Interpolation\.loglog: 'log-log'>",
-             "the URR's INT is a declared write loss of kika's GNDS writer"),
     Expected("field", r".*products\[[^\]]+\]\.label: '[^']*' != '[^']*'",
              "a product label is a name; the photons of a channel are matched by line, not by label"),
     Expected("cov", r"parameterCovariance\[\d+\]: matrix", bound=1e-15,
@@ -178,8 +175,6 @@ EXPECTED: List[Expected] = [
              reason="an MF33 lumped sum rebuilt from its summands; the order of the additions differs"),
     Expected("recon", r"MT\d+: npts \d+ != \d+", bound=1e-15,
              reason="a point collinear with its neighbours dropped where two regions merge, as FUDGE does"),
-    Expected("recon", r"MT(1|2|102): npts \d+ != \d+", bound=2.3e-3, tapes="n-038_Sr_090",
-             reason="the URR's INT=5 is a declared write loss, so the GNDS side interpolates lin-lin"),
     Expected("recon", r"MT(1|2|3|102|103): values", bound=2.4e-11, tapes="n-014_Si_028|n-026_Fe_054",
              reason="LRF=7 channel masses are a declared write loss; the GNDS side takes them from PoPs"),
 ]
