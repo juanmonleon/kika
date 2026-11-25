@@ -152,11 +152,14 @@ def _rangeSpin(formalism, context, where) -> float:
 
 
 def _fallbackAwri(formalism, groups, context, report, lrf, where) -> Optional[float]:
-    """MF1's AWR for the blocks the model gives no mass, or ``None`` when it gives all one."""
+    """AWRI: target mass over the suite's neutron, else MF1's AWR; ``None`` if every block has one."""
     from ..resonances import formalismAtomicWeightRatio
 
-    if formalismAtomicWeightRatio(formalism) is not None             or all(g.atomicWeightRatio is not None for g in groups):
+    if all(g.atomicWeightRatio is not None for g in groups):
         return None
+    stated = formalismAtomicWeightRatio(formalism, _fileNeutronMass(context))
+    if stated is not None:
+        return stated
     if context.awr is None:
         raise ValueError(f"{where}: no target mass to write AWRI from")
     report.approximated(
@@ -245,7 +248,7 @@ def _reichMooreRange(resonances, region, context, report, where) -> dict:
     awri = _fallbackAwri(formalism, formalism.spinGroups, context, report, 3, where)
     try:
         blocks = reichMooreLBlocks(formalism, radius, spin,
-                                   formalismAtomicWeightRatio(formalism) or awri)
+                                   awri if awri is not None else formalismAtomicWeightRatio(formalism))
     except ValueError as why:
         raise ValueError(f"{where} cannot be LRF=3: {why}") from None
     policy = formalism.radiusPolicy

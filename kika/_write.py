@@ -177,13 +177,15 @@ def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
     if format == "ace":
         from kika.ace.model_adapter.encode import writeAceSuite
 
-        return writeAceSuite(suite, Path(os.fspath(path)), temperature=temperatures, **options)
+        return _declareTapeOnly(suite, writeAceSuite(
+            suite, Path(os.fspath(path)), temperature=temperatures, **options), "the ACE table")
     if (temperatures is not None or options) and format != "hdf5":
         raise ValueError("temperatures= and the processing options are for format='hdf5'")
     if format == "hdf5":
         from kika.hdf5.writer import writeSuite
 
-        return writeSuite(suite, Path(os.fspath(path)), temperatures=temperatures, **options)
+        return _declareTapeOnly(suite, writeSuite(
+            suite, Path(os.fspath(path)), temperatures=temperatures, **options), "the HDF5 library")
     from kika.nuclear_data.model import FissionFragmentData, PoPs
     if isinstance(suite, FissionFragmentData):
         # Fission product yields alone: FUDGE's neutron-induced
@@ -206,8 +208,9 @@ def write(suite, path, format: str = "gnds", gnds: Optional[str] = None,
         # Imported here for the reason `_writeGnds` gives.
         from kika.g4ndl.encode import writeSuite
 
-        return writeSuite(suite, Path(os.fspath(path)), compressed=compressed,
-                          angularLabel=label or "eval")
+        return _declareTapeOnly(suite, writeSuite(
+            suite, Path(os.fspath(path)), compressed=compressed, angularLabel=label or "eval"),
+            "the G4NDL files")
     if format == "endf":
         # Imported here, not at module scope, for the reason `_writeGnds` gives
         # and one more: the assembler reaches `kika.endf.model_adapter`, and
@@ -231,6 +234,10 @@ def _writePoPs(pops, path: Path, format: str, mat=None, tapeId=None):
     from kika.gnds.encode import serialise
 
     tree, report = writePoPsDocument(pops)
+    if getattr(getattr(pops, "provenance", None), "sourceFormat", None) == "endf":
+        from kika.endf.model_adapter.tape_only import decayTapeOnlyData
+        for sentence in decayTapeOnlyData(pops):
+            report.lost(sentence)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(serialise(tree))
     return report
@@ -265,9 +272,15 @@ def _writeGnds(suite, path: Path, gnds: Optional[str],resonance_extensions=False
         suite.externalFiles.files = originalExternalFiles
         if originalBackLinks is not None:
             suite.covarianceSuite.externalFiles = originalBackLinks
-    if getattr(getattr(suite, "provenance", None), "sourceFormat", None) == "endf":
+    return _declareTapeOnly(suite, report, "the GNDS file")
+
+
+def _declareTapeOnly(suite, report, written: str):
+    """*report* with what a suite read from ENDF holds only to write the tape back."""
+    if (report is not None
+            and getattr(getattr(suite, "provenance", None), "sourceFormat", None) == "endf"):
         from kika.endf.model_adapter.tape_only import tapeOnlyData
-        for sentence in tapeOnlyData(suite):
+        for sentence in tapeOnlyData(suite, written):
             report.lost(sentence, unaffectedScopes=("cross-sections",))
     return report
 

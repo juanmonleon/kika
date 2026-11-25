@@ -1145,8 +1145,9 @@ def decodeCovarianceSuite(endf, report: Optional[ConversionReport] = None,
     if mf33 is not None:
         retained = set()
         if reactionSuite is not None:
-            from .mf33_structure import attachLumps
+            from .mf33_structure import attachCovarianceSums, attachLumps
             retained = attachLumps(endf, reactionSuite, report)
+            attachCovarianceSums(endf, reactionSuite, report)
         from kika.endf.classes.mf33 import mixesAbsoluteAndRelative
         mixed = [mt for mt in sorted(getattr(mf33, "mt", {}))
                  if any(mixesAbsoluteAndRelative(sub.ni_records)
