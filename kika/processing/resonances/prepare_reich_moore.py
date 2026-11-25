@@ -138,9 +138,13 @@ def prepare_rm(region,resonances,context,notes):
             group=RMGroup(l,radius,phase,tuple(levels),context=ctx,spin=j,channel_spin=s)
             covered[key]=group;prepared.append(group)
     if not radii_by_l:raise ValueError('RM requires at least one declared neutron L')
+    # The sum over sectors must not depend on how the file splits an L into spin
+    # groups: ENDF's order (by L, sectors as their first resonance appears).
+    prepared=sorted((g for g in prepared if g.levels),key=lambda g:(g.l,g.levels[0].energy))
+    covered={(g.l,g.spin,g.channel_spin) for g in prepared}
     # Complete exactly the declared orbital sectors. NLSC is angular metadata,
     # not permission to invent additional cross-section L values.
-    for l,(phase,radius,ctx) in radii_by_l.items():
+    for l,(phase,radius,ctx) in sorted(radii_by_l.items(),key=lambda item:item[0]):
         for s in {abs(ctx.target_spin-.5),ctx.target_spin+.5}:
             first=abs(l-s)
             for index in range(round(l+s-first)+1):

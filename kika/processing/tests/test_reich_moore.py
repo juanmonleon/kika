@@ -256,7 +256,7 @@ def test_legacy_rm_named_channels_and_gnds_projection_preserve_rows():
     model,provenance,report=decodeMF2MT151(section);f=model.resolved[0].formalism
     f.PoPs.particles['Fe56'].parity=1
     report=ConversionReport();projected=_rmGroupsForGNDS(f,report)
-    assert {(g.spin,g.channels[0].channelSpin) for g in projected}=={(1.5,.5),(1.5,1.5)}
+    assert {(g.spin,c.channelSpin) for g in projected for c in g.channels if c.resonanceReaction=='elastic'}=={(1.5,.5),(1.5,1.5)}
     assert all([c.columnIndex for c in g.channels]==[1,2,3,4] for g in projected)
     assert all(g.parity==-1 and not g.spins for g in projected)
     normalized=deepcopy(model);normalized.resolved[0].formalism.spinGroups=projected
