@@ -21,6 +21,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from kika._text import read_text
 from kika.ace import read_ace
 from kika.ace.classes.dosimetry import DosimetryAce, split_production_mt
 from kika.endf import ProcessingOutputError, ProcessingPlan, dosimetry_ace, process_endf
@@ -144,11 +145,11 @@ IRDFF2 = _irdff2()
 
 
 def _irdffMaterial(mat, out):
-    lines = (IRDFF2 / "endf" / "IRDFF-II.endf").read_text().splitlines(keepends=True)
+    lines = read_text(IRDFF2 / "endf" / "IRDFF-II.endf").splitlines(keepends=True)
     body = [l for l in lines[1:] if l[66:70].strip() == str(mat)]
     path = out / f"irdff2-{mat}.endf"
     end = " " * 66 + "   0 0  0    0\n" + " " * 66 + "  -1 0  0    0\n"
-    path.write_text(lines[0] + "".join(body) + end)
+    path.write_text(lines[0] + "".join(body) + end, encoding="utf-8")
     return path
 
 
