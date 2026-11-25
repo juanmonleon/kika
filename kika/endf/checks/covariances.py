@@ -1383,8 +1383,8 @@ def _nc_references(sections, sec, sub, loc, out) -> None:
                         "nc_chained", DEFECT,
                         f"NC LTY=0 derives this covariance from MT{mti}, which is itself "
                         f"derived (LTY=0) over {chained[0].e1:.6g}-{chained[0].e2:.6g} eV, "
-                        f"overlapping {nc.e1:.6g}-{nc.e2:.6g} eV; ENDF-6 §33.3.1 does not "
-                        "allow a constituent derived in the same range", nloc,
+                        f"overlapping {nc.e1:.6g}-{nc.e2:.6g} eV; ENDF-6 §33.2.2.1 derives only "
+                        "from cross sections whose covariance there is NI-type", nloc,
                         {"xmti": mti, "range": [nc.e1, nc.e2],
                          "constituent_range": [chained[0].e1, chained[0].e2]}))
                 elif _derives(sections, mti, mt):
