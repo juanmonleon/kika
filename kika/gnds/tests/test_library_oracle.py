@@ -202,6 +202,12 @@ EXPECTED: List[Expected] = [
              "kika writes the URR's own PoPs (target spin and mass); FUDGE reads them from the suite's"),
     Expected("field", r".*products\[[^\]]+\]\.label: '[^']*' != '[^']*'",
              "a product label is a name; the photons of a channel are matched by line, not by label"),
+    Expected("cov", r"section .*: (relative|absolute) matrix, NNDC's is kika's to 15 digits",
+             "a computed covariance (LB=2's f_k f_l): kika keeps the double, FUDGE writes 15 digits"),
+    Expected("cov", r"section \(\(0, 34, 51, \(0\.0,\)\), \(0, 34, (2|51), \(1\.0,\)\)\): only in (NNDC|kika)",
+             tapes="n-092_U_238",
+             reason="NNDC wrong: its L0-L1 block of MT51 links MT51's distribution and labels the column "
+                    "ENDF_MFMT 34,2"),
     Expected("cov", r"parameterCovariance\[\d+\]: matrix", bound=1e-15,
              reason="FUDGE writes the parameter covariance with 15 significant figures, kika every digit"),
     Expected("recon", r"MT8(5[1-9]|6\d|7[01]): values", bound=1e-15,
@@ -789,6 +795,14 @@ def _sectionKey(section):
     return row, end(section.columnData) if section.columnData is not None else row
 
 
+def _fifteenDigits(mine, theirs):
+    """*theirs* is *mine* written with 15 significant digits."""
+    if np.abs(mine - theirs).max() > 1e-14 * (np.abs(theirs).max() or 1.0):
+        return False
+    differ = mine != theirs
+    return all(float(f"{x:.15g}") == y for x, y in zip(mine[differ], theirs[differ]))
+
+
 def _formDifferences(name, a, b, targetsA, targetsB):
     out = []
     ca, cb = _components(a), _components(b)
@@ -802,7 +816,10 @@ def _formDifferences(name, a, b, targetsA, targetsB):
         grids = [g for c in ga + gb for g in (c.rowGrid, c.columnGrid) if g is not None]
         grid = np.unique(np.concatenate([np.asarray(g, float) for g in grids]))
         da, db = _dense(ga, grid), _dense(gb, grid)
-        if not np.array_equal(da, db):
+        if not np.array_equal(da, db) and _fifteenDigits(da, db):
+            out.append(Difference("cov", f"{name}: {'relative' if relative else 'absolute'} "
+                                         f"matrix, NNDC's is kika's to 15 digits"))
+        elif not np.array_equal(da, db):
             scale = np.abs(db).max() or 1.0
             out.append(Difference("cov", f"{name}: {'relative' if relative else 'absolute'} "
                                          f"matrix", float(np.abs(da - db).max() / scale)))
