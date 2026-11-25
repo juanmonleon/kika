@@ -377,12 +377,16 @@ def _urrRadius(resonances, widths):
     return radiusToEndf(float(radius))
 
 
-def _unresolved(records, suite, averages, conversions, awr, spi):
-    """FUDGE's ``averageParametersToENDF6``: the sections become one LRU=2 body, its
-    AWRI the target's (not the URR's own, which some tapes copy into MF32)."""
+def _unresolved(records, suite, averages, conversions, awr, neutron, spi):
+    """The sections become one LRU=2 body, laid out as FUDGE's ``averageParametersToENDF6``.
+
+    AWRI is the unresolved range's own mass, as the resolved body's is (FUDGE writes
+    the target's, which 15 of B-VIII.1's 44 such tapes do not state)."""
     from kika.gnds.parameter_layout import _urrLayout
+    from .resonances import formalismAtomicWeightRatio
 
     region = suite.resonances.unresolved
+    awri = formalismAtomicWeightRatio(region.tabulatedWidths, neutron) or awr
     layout = _urrLayout(region.tabulatedWidths)
     diagonal = {}
     for section in averages:
@@ -402,7 +406,8 @@ def _unresolved(records, suite, averages, conversions, awr, spi):
     records.head(spi, _urrRadius(suite.resonances, region.tabulatedWidths), 0, 0, len(byL), 0)
     rows, values, mpars = [], [], set()
     for (lpos, L), groups in byL.items():
-        records.head(awr, 0, L, 0, 6 * len(groups), len(groups))
+        stated = groups[0][2].atomicWeightRatio
+        records.head(awri if stated is None else stated, 0, L, 0, 6 * len(groups), len(groups))
         for jpos, J, group in groups:
             average = {"D": 0.0, "GNO": 0.0, "GG": 0.0, "GF": 0.0, "GX": 0.0}
             mpar = 0
@@ -471,7 +476,7 @@ def encodeMF32FromGnds(suite, mat: Optional[int], report: ConversionReport):
         if averages:
             if resonances.unresolved is None:
                 raise ValueError("unresolved averages are varied but there is no unresolved range")
-            _unresolved(records, suite, averages, conversions, awr, spi)
+            _unresolved(records, suite, averages, conversions, awr, neutron, spi)
             if lfw is None:
                 lfw = _urrFission(resonances.unresolved.tabulatedWidths)
         header = _Records()

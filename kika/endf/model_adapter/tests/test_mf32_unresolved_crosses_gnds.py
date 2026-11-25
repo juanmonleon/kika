@@ -1,4 +1,4 @@
-"""MF32's unresolved-range covariance crosses kika's GNDS and comes back as FUDGE writes it."""
+"""MF32's unresolved-range covariance crosses kika's GNDS and comes back as the tape states it."""
 from __future__ import annotations
 
 import pytest
@@ -29,9 +29,4 @@ def test_th232_unresolved_covariance_comes_back_through_gnds(th232_b81_tape, tmp
 
     written = tmp_path / "th232.endf"
     kika.write(suite, str(written), format="endf")
-    tape, back = _unresolvedBody(_mf32(th232_b81_tape)), _unresolvedBody(_mf32(written))
-    assert len(back) == len(tape)
-    # FUDGE heads each L block with the target's AWR; this tape repeats MF2's URR AWRI there.
-    differing = [i for i, (a, b) in enumerate(zip(tape, back)) if a != b]
-    assert len(differing) == 3
-    assert all(tape[i][11:] == back[i][11:] for i in differing)
+    assert _unresolvedBody(_mf32(written)) == _unresolvedBody(_mf32(th232_b81_tape))
