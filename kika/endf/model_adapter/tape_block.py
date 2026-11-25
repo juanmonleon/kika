@@ -52,6 +52,8 @@ def collect(suite) -> Optional[EndfTapeData]:
     for path, _, qm, _, _ in levelQms(suite):
         data.nodes.setdefault(path, {})["qm"] = qm
     nodes = dict(provenanceNodes(suite))
+    for path, awps in _mf6Awps(suite, nodes).items():
+        data.nodes.setdefault(path, {})["mf6Awp"] = awps
     for path, kind, _ in tapeOnlyNodes(suite):
         fields = nodes[path].provenance.headerFields
         kept = data.nodes.setdefault(path, {}).setdefault("headerFields", {})
@@ -120,6 +122,23 @@ def _kinematics(suite) -> Dict[str, object]:
         for reaction in getattr(region.formalism, "resonanceReactions", None) or ():
             if reaction.kinematics is not None:
                 out[f"{index}/{reaction.label}"] = dataclasses.asdict(reaction.kinematics)
+    return out
+
+
+def _mf6Awps(suite, nodes) -> Dict[str, Dict[int, float]]:
+    """MF6's AWP by reaction path and subsection, where the PoPs mass does not give it."""
+    from .derive.energy_angle import _awp
+
+    out = {}
+    for path, node in nodes.items():
+        mf6 = (getattr(node.provenance, "headerFields", None) or {}).get("mf6")             if isinstance(node.provenance, EndfProvenance) else None
+        if not isinstance(mf6, dict):
+            continue
+        stated = {int(p["index"]): float(p["awp"]) for p in mf6.get("products", ())
+                  if p.get("pid") and p.get("awp") is not None
+                  and _awp(suite, p["pid"]) != float(p["awp"])}
+        if stated:
+            out[path] = stated
     return out
 
 
@@ -198,5 +217,8 @@ def apply(suite, report) -> None:
         for name, value in fields.items():
             if name == "headerFields":
                 provenance.headerFields.update(value)
+            elif name == "mf6Awp":
+                for product in (provenance.headerFields.get("mf6") or {}).get("products", ()):
+                    product["awp"] = value.get(int(product["index"]), product["awp"])
             else:
                 setattr(provenance, name, value)

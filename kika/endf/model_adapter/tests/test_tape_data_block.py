@@ -48,7 +48,7 @@ def test_a_level_qm_off_its_pops_energy_comes_back(zr90_b81_tape, tmp_path):
     """B-VIII.1 Zr-90 MT651: QM -6128816 eV, where QI plus Y89_e1's PoPs energy gives -6128786."""
     report, back, endf = _roundTrip(zr90_b81_tape, tmp_path)
     assert not [m for m in report.losses if m.startswith(PREFIX) and "MF3/" in m]
-    assert EndfTapeData.of(back).nodes["suite.reactions[MT651]"] == {"qm": -6128816.0}
+    assert EndfTapeData.of(back).nodes["suite.reactions[MT651]"]["qm"] == -6128816.0
     assert _sections(endf, 3)[651] == _sections(zr90_b81_tape, 3)[651]
 
     bare = kika.read(_stripped(tmp_path / "out.xml", tmp_path), covariances=False)
