@@ -7,7 +7,7 @@ met a §25.2 ``mixed`` the same way and answered differently:
 section carries two or three — and ``LegendreCovariance.from_covariance_suite``
 did ``continue``, dropping the section and handing back a carrier that looks
 complete. The silent one was on the MF34 path, which is the thesis path.
-The MF33 entry now sums a ``mixed`` and asks for σ(E) only when absolute and
+The MF33 entry sums a ``mixed`` and asks for σ(E) only when absolute and
 relative parts meet.
 
 **Two ways in, on purpose.** The MF33 case runs on a published file: F-19 is the

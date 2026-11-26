@@ -652,11 +652,7 @@ def _lct(products, e6) -> int:
 
 
 def _recordsByProduct(records, byLabel):
-    """The MF6 records keyed by the label of the product each now describes, and their order.
-
-    Attaching a level's cascade renames its residual to the level (``Si28`` to
-    ``Si28_e1``); the record keeps the label it was read with, so it is found by ZA.
-    """
+    """MF6 records by product label; a residual renamed to its level is matched by ZA."""
     renamed = {}
     for r in records:
         if r["label"] in byLabel or "massCode" not in r:
