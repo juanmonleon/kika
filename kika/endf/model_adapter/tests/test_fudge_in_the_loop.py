@@ -432,7 +432,7 @@ def test_fudge_writes_endf_from_the_tsl_gnds_kika_writes(tslGnds, tmp_path, requ
     assert back.provenance.mat == suite.provenance.mat
 
 
-def test_kika_writes_endf_from_the_tsl_gnds_fudge_writes(tslGnds, tmp_path):
+def test_kika_writes_endf_from_the_tsl_gnds_fudge_writes(tslGnds, tmp_path, request):
     """kika takes the MAT from FUDGE's note and writes the tape's forms back.
 
     The note's ZA is FUDGE's principal atom (1001 for s-CH4); the header's
@@ -441,6 +441,11 @@ def test_kika_writes_endf_from_the_tsl_gnds_fudge_writes(tslGnds, tmp_path):
     import kika
     from kika.endf.writers.assemble import writeEndfTape
 
+    if request.node.callspec.params["tslGnds"] == "sch4":
+        request.applymarker(pytest.mark.xfail(strict=True, reason=(
+            "the micro-tape states W'(T) at 22 K twice; a GNDS XYs1d must ascend, so "
+            "FUDGE's file holds it once and has no block of kika's tape data to carry "
+            "the repeat (kika's own GNDS does, see test_thermal_scattering)")))
     suite, _, _, _, _, theirs = tslGnds
     tape = tmp_path / "kika_from_fudge.endf"
     writeEndfTape(kika.read(theirs, covariances=False), tape)
