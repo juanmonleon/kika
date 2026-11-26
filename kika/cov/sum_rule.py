@@ -13,7 +13,7 @@ import numpy as np
 
 from .group_arithmetic import MixedKindsNeedCrossSections, project_piecewise_constant, table_bin_average
 
-__all__ = ["sum_rule_covariance", "combine_sum_and_explicit"]
+__all__ = ["sum_rule_covariance", "sum_rule_cross_covariance", "combine_sum_and_explicit"]
 
 #: ``(matrix, grid, is_relative)``, the shape every block travels in here.
 Bundle = Tuple[np.ndarray, List[float], bool]
@@ -186,6 +186,83 @@ def sum_rule_covariance(
     diag = np.diag(final)
     _log("info", f"MT{derived_mt}: NC LTY=0 resolved — {m} bins, sqrt(diag) range "
                  f"[{np.sqrt(float(max(diag.min(), 0.0))):.4g}, {np.sqrt(float(diag.max())):.4g}]")
+    return final, list(union_grid), True
+
+
+def sum_rule_cross_covariance(
+    derived_mt: int,
+    terms: Sequence[Tuple[float, int]],
+    other_mt: int,
+    block: Callable[[int, int], Optional[Bundle]],
+    xs: Optional[Mapping[int, object]] = None,
+    logger=None,
+) -> Optional[Bundle]:
+    """Cross block ``Cov(d, MT1)`` of ``σ_d = Σ_i c_i σ_i`` with another reaction, relative, on the blocks' union grid.
+
+    ``Cov_abs(d, MT1) = Σ_i c_i Cov_abs(MT_i, MT1)`` follows from the linear
+    relation of ENDF-6 §33.2.2.1. §33.3.2 (a.3) allows an NC LTY=0 only in a
+    self block, so a cross block stated that way is off-format and read with
+    this rule. *block(a, b)* gives ``Cov(a, b)``
+    (rows a, columns b) on one grid, ``None`` when the file states none, which
+    counts as zero. σ(E), the σ̄ floor and the fallback without *xs* are those
+    of :func:`sum_rule_covariance`.
+    """
+    def _log(level, message):
+        if logger is not None:
+            getattr(logger, level)(message)
+
+    pieces = []
+    for coefficient, mt_i in terms:
+        bundle = block(int(mt_i), int(other_mt))
+        if bundle is None:
+            continue
+        mat, grid, is_rel = bundle
+        mat = np.asarray(mat, dtype=float)
+        if grid is None or mat.ndim != 2 or mat.shape != (len(grid) - 1, len(grid) - 1):
+            continue
+        pieces.append((float(coefficient), int(mt_i), mat, list(grid), bool(is_rel)))
+    if not pieces:
+        _log("warning", f"MT{derived_mt}→MT{other_mt}: no contributor has a block with MT{other_mt}")
+        return None
+
+    union_grid = sorted({e for *_, grid, _ in pieces for e in grid})
+    if len(union_grid) < 2:
+        return None
+    m = len(union_grid) - 1
+
+    have_xs = xs is not None
+    bins: Dict[int, np.ndarray] = {}
+    if have_xs:
+        for mt in {p[1] for p in pieces} | {int(other_mt)}:
+            if mt in xs:
+                bins[mt] = table_bin_average(xs[mt], union_grid)
+        if derived_mt in xs:
+            xs_d = table_bin_average(xs[derived_mt], union_grid)
+        else:
+            xs_d = np.zeros(m)
+            for c, mt_i, *_ in pieces:
+                if mt_i in bins:
+                    xs_d = xs_d + c * bins[mt_i]
+    elif any(p[4] for p in pieces):
+        _log("warning", f"MT{derived_mt}→MT{other_mt}: NC LTY=0 cross block summed from relative "
+                        f"covariances without σ(E); the result is approximate.")
+
+    cov_abs = np.zeros((m, m))
+    for c, mt_i, mat, grid, is_rel in pieces:
+        proj = mat if grid == union_grid else project_piecewise_constant(mat, grid, union_grid)
+        if is_rel and have_xs and mt_i in bins and int(other_mt) in bins:
+            proj = proj * np.outer(bins[mt_i], bins[int(other_mt)])
+        cov_abs = cov_abs + c * proj
+
+    if have_xs and int(other_mt) in bins:
+        def safe(s):
+            floor = max(1.0e-3 * (float(np.max(s)) if s.size else 0.0), 1.0e-9)
+            return np.where(s > floor, s, 0.0)
+        denom = np.outer(safe(xs_d), safe(bins[int(other_mt)]))
+        with np.errstate(divide='ignore', invalid='ignore'):
+            final = np.where(denom > 0, cov_abs / np.where(denom > 0, denom, 1.0), 0.0)
+    else:
+        final = cov_abs
     return final, list(union_grid), True
 
 

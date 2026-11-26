@@ -462,13 +462,41 @@ class _SuiteSumResolver:
                     index[(src, tgt)] = bundle
         return index
 
+    def _pair(self, a, b, resolving):
+        """``Cov(a, b)`` as the file states it, transposed when only ``Cov(b, a)`` is stated."""
+        if a == b:
+            return self._self_block(a, set(resolving))
+        section = self.rows.get(a, {}).get(b)
+        bundle = None if section is None else self._explicit(a, b, section)
+        if bundle is not None:
+            return bundle
+        section = self.rows.get(b, {}).get(a)
+        bundle = None if section is None else self._explicit(b, a, section)
+        if bundle is None:
+            return None
+        matrix, grid, is_rel = bundle
+        return np.asarray(matrix).T, grid, is_rel
+
+    def _cross_sum(self, mt, mt1, stated):
+        from kika.cov.sum_rule import sum_rule_cross_covariance
+
+        terms = [(float(s.coefficient), _summand_mt(s)) for s in stated.summands]
+        return sum_rule_cross_covariance(mt, terms, mt1, lambda a, b: self._pair(a, b, {mt}),
+                                         xs=self.sum_xs, logger=self.logger)
+
     def block(self, mt, mt1):
         """One ``(matrix, grid, is_relative)`` block, or ``None`` when it resolves to nothing."""
         from kika.cov.sum_rule import combine_sum_and_explicit
 
         section = self.rows[mt][mt1]
-        has_sum = any(getattr(c, "summands", None) is not None for c in self._components(section))
-        resolved = self._sum(mt, {mt}) if has_sum else None
+        stated = next((c for c in self._components(section)
+                       if getattr(c, "summands", None) is not None), None)
+        if stated is None:
+            resolved = None
+        elif mt1 != mt:
+            resolved = self._cross_sum(mt, mt1, stated)
+        else:
+            resolved = self._sum(mt, {mt})
         return combine_sum_and_explicit(resolved, self._explicit(mt, mt1, section),
                                         label=f"MT{mt}→MT{mt1}", logger=self.logger)
 

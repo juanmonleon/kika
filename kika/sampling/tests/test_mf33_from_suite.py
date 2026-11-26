@@ -214,3 +214,61 @@ def test_a_suite_written_to_gnds_by_kika_assembles_as_it_did(tmp_path):
     after, _, presentAfter, _ = build_mf33_covariance_from_suite(back, None, xs)
     assert presentAfter == present
     _same(before, after)
+
+
+_C2_102 = np.arange(1.0, 10.0).reshape(3, 3) * 1e-5
+
+
+def _cross_nc_suite():
+    """MT1 = MT2 + MT102, stated as a sum in its own block and in its blocks with MT2 and MT102.
+
+    Only Cov(2, 102) is stated, and it is not symmetric: Cov(1, 2) needs its transpose.
+    """
+    from kika.nuclear_data.model import CovarianceSection, DataLink, Sum, Summand
+
+    grid = [1.0e-5, 1.0e3, 1.0e6, 2.0e7]
+    rel = lambda values: _matrix(values, grid)
+    link = lambda mt: DataLink(href=f"/reactionSuite/reactions/reaction[@label='MT{mt}']", ENDF_MFMT=f"33,{mt}")
+    total = lambda: Sum(summands=[Summand(href="MF33-MT2", coefficient=1.0, ENDF_MFMT="33,2"),
+                                  Summand(href="MF33-MT102", coefficient=1.0, ENDF_MFMT="33,102")],
+                        label="eval", domainMin=1.0e-5, domainMax=2.0e7, domainUnit="eV")
+    sections = [
+        CovarianceSection(label="MF33-MT1", rowData=link(1), form=total()),
+        CovarianceSection(label="MF33-MT1-MT2", rowData=link(1), columnData=link(2), form=total()),
+        CovarianceSection(label="MF33-MT1-MT102", rowData=link(1), columnData=link(102), form=total()),
+        CovarianceSection(label="MF33-MT2", rowData=link(2), form=rel(np.diag([4e-4, 9e-4, 1e-3]))),
+        CovarianceSection(label="MF33-MT2-MT102", rowData=link(2), columnData=link(102),
+                          form=rel(_C2_102)),
+        CovarianceSection(label="MF33-MT102", rowData=link(102), form=rel(np.diag([1e-2, 4e-3, 2.5e-3]))),
+    ]
+    return types.SimpleNamespace(covarianceSections=sections, target="Fe56")
+
+
+def test_a_sum_stated_in_a_cross_block_is_the_sum_of_its_parts_blocks():
+    """Cov(1, j) = Cov(2, j) + Cov(102, j) in absolute terms, the same on the tape and on the model."""
+    from kika.endf.model_adapter.covariances import _faithfulSection
+    from kika.nuclear_data.model.conversion import ConversionReport
+
+    suite = _cross_nc_suite()
+    e = np.geomspace(1e-5, 2e7, 50)
+    xs = {2: types.SimpleNamespace(energies=e, values=np.full(e.size, 3.0)),
+          102: types.SimpleNamespace(energies=e, values=np.full(e.size, 1.0)),
+          1: types.SimpleNamespace(energies=e, values=np.full(e.size, 4.0))}
+
+    fromSuite, grid, present, blocks = build_mf33_covariance_from_suite(suite, [1, 2, 102], xs)
+    assert not blocks.declined
+    rows = {}
+    for s in suite.covarianceSections:
+        rows.setdefault(s.rowData.ENDF_MT, []).append(s)
+    sections = {mt: _faithfulSection(ss, 33, mt, 26056.0, 55.45, 2631, ConversionReport())
+                for mt, ss in rows.items()}
+    fromTape, _, _ = build_mf33_covariance(types.SimpleNamespace(sections=sections), [1, 2, 102], xs)
+    _same(fromTape, fromSuite)
+
+    cov = fromSuite.covariance_matrix
+    n = len(grid) - 1
+    c22, c102 = np.diag([4e-4, 9e-4, 1e-3]), np.diag([1e-2, 4e-3, 2.5e-3])
+    with_102 = (_C2_102 * 3.0 * 1.0 + c102 * 1.0 * 1.0) / (4.0 * 1.0)
+    with_2 = (c22 * 3.0 * 3.0 + _C2_102.T * 1.0 * 3.0) / (4.0 * 3.0)
+    np.testing.assert_allclose(cov[0:n, 2 * n:3 * n], with_102, rtol=1e-12)   # block order 1, 2, 102
+    np.testing.assert_allclose(cov[0:n, n:2 * n], with_2, rtol=1e-12)

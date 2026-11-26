@@ -17,7 +17,7 @@ from ....cov.group_arithmetic import (
     sum_block_components,
     table_bin_average,
 )
-from ....cov.sum_rule import combine_sum_and_explicit, sum_rule_covariance
+from ....cov.sum_rule import combine_sum_and_explicit, sum_rule_covariance, sum_rule_cross_covariance
 
 # Initialize logger for this module
 logger = get_endf_logger(__name__)
@@ -584,6 +584,33 @@ class MF33MT(MT):
             ni_bundle, label=f"MT{self.number}→MT{self.number}", logger=logger,
         )
 
+    def _cross_sum(self, nc, mt1: int, sibling_sections, mf3_sections):
+        """``Cov(self, MT1)`` of a cross subsection stated as NC LTY=0: Σ_i c_i Cov(MT_i, MT1)."""
+        terms = [(float(c), int(round(x))) for c, x in zip(nc.ci, nc.xmti)]
+
+        def block(a, b):
+            if a == b:
+                section = sibling_sections.get(a)
+                return None if section is None else section._self_covariance_matrix(
+                    sibling_sections=sibling_sections, _resolving={self.number},
+                    mf3_sections=mf3_sections)
+            for src, tgt, flip in ((a, b, False), (b, a, True)):
+                section = sibling_sections.get(src)
+                sub = None if section is None else section.get_subsection(tgt)
+                if sub is None or not sub.ni_records:
+                    continue
+                bundle = section._process_ni_records_to_matrix(
+                    sub.ni_records, mt_label=f"MT{src}→MT{tgt}",
+                    xs_row=_xs_section(mf3_sections, src, sub.ni_records),
+                    xs_col=_xs_section(mf3_sections, tgt, sub.ni_records))
+                if bundle is not None:
+                    matrix, grid, is_rel = bundle
+                    return (np.asarray(matrix).T if flip else matrix), grid, is_rel
+            return None
+
+        return sum_rule_cross_covariance(self.number, terms, mt1, block,
+                                         xs=mf3_sections, logger=logger)
+
     def resolve_nc_lty0(
         self,
         sibling_sections: Dict[int, 'MF33MT'],
@@ -766,6 +793,15 @@ class MF33MT(MT):
             nc_is_rel: Optional[bool] = None
             if subsection.nc_records:
                 for nc in subsection.nc_records:
+                    if nc.lty == 0 and sibling_sections is not None and mt1 != self.number:
+                        if iso_col != isotope:
+                            logger.warning(f"MT{self.number}: NC LTY=0 in a block with another material "
+                                           f"(MAT1={mat1}, MT1={mt1}) is not resolved; the block is left out")
+                            break
+                        crossed = self._cross_sum(nc, mt1, sibling_sections, mf3_sections)
+                        if crossed is not None:
+                            nc_matrix, nc_grid, nc_is_rel = crossed
+                        break  # one LTY=0 per subsection
                     if nc.lty == 0 and sibling_sections is not None:
                         resolving = (_resolving or set()) | {self.number}
                         nc_result = self.resolve_nc_lty0(
