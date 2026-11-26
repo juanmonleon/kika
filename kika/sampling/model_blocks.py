@@ -24,6 +24,7 @@ the same reason and imports nothing itself.
 """
 from __future__ import annotations
 
+import re
 import warnings
 from typing import Any, Dict, Hashable, List, Optional, Sequence, Tuple
 
@@ -280,7 +281,7 @@ def _za_of(suite, section) -> int:
     if isinstance(target, str) and target:
         from kika._constants import SYMBOL_TO_ATOMIC_NUMBER
 
-        name = target.split("_e")[0]
+        name = re.sub(r"_[em]\d+$", "", target)
         if name.startswith("ZA") and name[2:].isdigit():
             return int(name[2:])
         symbol = name.rstrip("0123456789")
