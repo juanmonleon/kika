@@ -256,13 +256,26 @@ def combine_mf33_covariances(
     return unified, list(union_grid)
 
 
+#: Why a row MT was left out: its blocks need σ(E) and none was given.
+NEEDS_CROSS_SECTIONS = "needs_cross_sections"
+#: Why a row MT was left out: none of its blocks resolves to a matrix.
+NO_MATRIX = "no_matrix"
+
+
+@dataclasses.dataclass
+class Declined:
+    """One row MT :func:`per_mt_covariances_from_suite` left out: a code and the sentence behind it."""
+
+    code: str
+    message: str
+
+
 @dataclasses.dataclass
 class SuiteBlocks:
     """What :func:`per_mt_covariances_from_suite` built, and what it could not."""
 
     per_mt: Dict[int, CrossSectionCovariance]
-    #: Row MT → why its blocks were left out (a stated sum, a missing σ(E)).
-    declined: Dict[int, str]
+    declined: Dict[int, Declined]
     #: Blocks with another material, not part of one evaluation's covariance.
     other_material: List[str]
 
@@ -284,8 +297,9 @@ def per_mt_covariances_from_suite(
     σ(E), anything :func:`~kika.cov.group_arithmetic.table_bin_average` reads; it
     is read only for a block that mixes absolute and relative components, and a
     summation MT it lacks is summed from its partials as on the tape path. A row
-    MT whose blocks state a sum (ENDF NC LTY=0) or need a σ(E) that is missing is
-    left out whole and named in ``declined``.
+    MT whose blocks need σ(E) (:func:`suite_needs_cross_sections`) when none is
+    given, or that resolve to no matrix, is left out whole and named in
+    ``declined``: the tape path would sum relative matrices directly there.
     """
     from kika.cov.group_arithmetic import MixedKindsNeedCrossSections
     from kika.sampling.model_blocks import _endf_mfmt, _za_of
@@ -300,12 +314,20 @@ def per_mt_covariances_from_suite(
             other_material.append(str(getattr(section, "label", "?")))
             continue
         col = _endf_mfmt(section.columnData) if section.columnData is not None else None
-        rows.setdefault(mfmt[1], {})[col[1] if col is not None else mfmt[1]] = section
+        mt1 = col[1] if col is not None else mfmt[1]
+        if mt1 in rows.setdefault(mfmt[1], {}):
+            raise ValueError(f"MF{mf}: two covariance sections for the block MT{mfmt[1]}→MT{mt1}")
+        rows[mfmt[1]][mt1] = section
 
     resolver = _SuiteSumResolver(rows, cross_sections, logger)
     per_mt: Dict[int, CrossSectionCovariance] = {}
     declined: Dict[int, str] = {}
     for mt in sorted(rows):
+        if not cross_sections and _blocks_need_cross_sections(rows[mt].values()):
+            declined[mt] = Declined(NEEDS_CROSS_SECTIONS,
+                                    f"MF{mf} MT{mt} states a sum or an absolute component, "
+                                    f"which needs σ(E) of its reactions")
+            continue
         cov = CrossSectionCovariance(energy_unit=energy_unit)
         try:
             for mt1, section in rows[mt].items():
@@ -317,15 +339,49 @@ def per_mt_covariances_from_suite(
                 cov.add_matrix(za, mt, za, mt1, matrix, energy_grid=grid,
                                is_relative=bool(is_relative))
         except MixedKindsNeedCrossSections as why:
-            declined[mt] = str(why)
+            declined[mt] = Declined(NEEDS_CROSS_SECTIONS, str(why))
             if logger is not None:
                 logger.warning(f"[MF{mf}] MT{mt} left out: {why}")
             continue
         if cov.matrices:
             per_mt[mt] = cov
         else:
-            declined[mt] = "no block of this MT resolves to a matrix"
+            declined[mt] = Declined(NO_MATRIX, f"MF{mf} MT{mt}: no block resolves to a matrix")
     return SuiteBlocks(per_mt=per_mt, declined=declined, other_material=other_material)
+
+
+def _component_needs_cross_sections(component) -> bool:
+    if getattr(component, "summands", None) is not None:
+        return True
+    if hasattr(component, "dependenceOnProcessedGroupWidth"):
+        return True
+    return getattr(component, "isRelative", True) is False
+
+
+def _blocks_need_cross_sections(sections) -> bool:
+    for section in sections:
+        form = section.form
+        components = getattr(form, "components", None)
+        if any(_component_needs_cross_sections(c)
+               for c in (components if components is not None else [form])):
+            return True
+    return False
+
+
+def suite_needs_cross_sections(suite, mt_list: Optional[Sequence[int]] = None, mf: int = 33) -> bool:
+    """Whether the MF33 (or MF31) blocks of *mt_list* (default: all) need σ(E) to be assembled.
+
+    The model's form of the tape path's rule: a stated sum (ENDF NC LTY=0), an
+    absolute matrix (LB=0) or a short-range variance (LB=8/9).
+    """
+    from kika.sampling.model_blocks import _endf_mfmt
+
+    wanted = None if mt_list is None else {int(mt) for mt in mt_list}
+    sections = [s for s in getattr(suite, "covarianceSections", suite)
+                if (m := _endf_mfmt(s.rowData)) is not None and m[0] == mf
+                and (wanted is None or m[1] in wanted)
+                and getattr(s.columnData, "otherEvaluation", None) is None]
+    return _blocks_need_cross_sections(sections)
 
 
 def _summand_mt(summand) -> int:

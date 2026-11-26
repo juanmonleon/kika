@@ -158,3 +158,14 @@ def test_a_sum_is_not_collapsed_on_its_own():
     form = Sum(summands=[Summand(href="x", coefficient=1.0, ENDF_MFMT="33,2")], label="eval")
     with pytest.raises(CovarianceSumNotResolved):
         collapse_form(form)
+
+
+def test_without_cross_sections_a_block_that_needs_them_is_declined_by_code():
+    from kika.sampling.mf33_sampling import NEEDS_CROSS_SECTIONS, suite_needs_cross_sections
+
+    endf = read_endf(str(DATA / "micro_si28_covcheck.endf"))
+    suite = _model_suite(endf, _sigma(_all_mts()))
+    assert suite_needs_cross_sections(suite)
+    _, _, present, blocks = build_mf33_covariance_from_suite(suite, None, None)
+    assert blocks.declined and {d.code for d in blocks.declined.values()} == {NEEDS_CROSS_SECTIONS}
+    assert not set(blocks.declined) & set(present)

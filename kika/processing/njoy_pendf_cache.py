@@ -518,6 +518,18 @@ def pointwise_cross_sections_from_suite(suite, *, tolerance: float = 0.001
     whose form is not a table is left out. Each table is ``energies``/``values``/
     ``energy_interpolation`` (ENDF ``(NBT, INT)`` pairs), as an MF3 section reads.
 
+    Parameters
+    ----------
+    suite
+        A model ``ReactionSuite``, read from any format; it is not modified.
+    tolerance
+        Relative tolerance of the reconstruction, as a fraction.
+
+    Returns
+    -------
+    tuple of (dict of int to object, str)
+        The tables keyed by MT (eV and b), and a phrase naming their source.
+
     Raises
     ------
     ~kika.processing.resonances.UnsupportedResonanceError

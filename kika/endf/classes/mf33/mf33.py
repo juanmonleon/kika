@@ -360,19 +360,48 @@ class MF33MT(MT):
         native_grid: List[float],
         target_grid: List[float],
     ) -> np.ndarray:
-        """Overlap-weighted average of per-interval ``values`` on ``target_grid``, piecewise constant."""
+        """Project a 1D diagonal (per-interval values) onto a target energy grid.
+
+        Uses piecewise-constant assumption: each source interval has a constant
+        value, and target intervals get the overlap-weighted average.
+
+        Parameters
+        ----------
+        values : array of shape (M,)
+            Per-interval values on the native grid (M = len(native_grid) - 1).
+        native_grid : list of float
+            Energy boundaries of the source grid (M+1 points).
+        target_grid : list of float
+            Energy boundaries of the target grid (N+1 points).
+
+        Returns
+        -------
+        np.ndarray of shape (N,)
+        """
         src = np.asarray(native_grid, dtype=float)
         tgt = np.asarray(target_grid, dtype=float)
         vals = np.asarray(values, dtype=float)
+
+        n = len(tgt) - 1
+        result = np.zeros(n)
+
+        # For each target interval, compute overlap-weighted average
+        tgt_lo = tgt[:-1]
+        tgt_hi = tgt[1:]
+        src_lo = src[:-1]
+        src_hi = src[1:]
+
+        # Vectorised: overlap[i, k] = overlap of target_i with source_k
         overlap = np.maximum(
             0.0,
-            np.minimum(tgt[1:][:, None], src[1:][None, :])
-            - np.maximum(tgt[:-1][:, None], src[:-1][None, :]),
+            np.minimum(tgt_hi[:, None], src_hi[None, :])
+            - np.maximum(tgt_lo[:, None], src_lo[None, :]),
         )
-        tgt_widths = tgt[1:] - tgt[:-1]
+        tgt_widths = tgt_hi - tgt_lo
         with np.errstate(divide='ignore', invalid='ignore'):
             weights = np.where(tgt_widths[:, None] > 0, overlap / tgt_widths[:, None], 0.0)
-        return weights @ vals
+        result = weights @ vals
+        return result
 
     def _process_ni_records_to_matrix(
         self,
