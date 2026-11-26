@@ -604,14 +604,15 @@ def test_every_sum_holds_on_a_whole_evaluation(fe56_b81_tape, tmp_path):
     grid. MT4 and MT103 carry blocks over partials that carry none (MT51-91,
     MT600-649), so they are undecomposed and move those partials; MT1's is
     discarded because MT2, MT4, MT5, MT16 and MT102 under it carry their own
-    (measured 2026-10-07).
+    (measured 2026-10-07). Drawn in linear space: MT102 states a relative
+    covariance of -2.04 between 582-600 and 600-620 keV, which has no logarithm.
     """
     from kika.endf.model_adapter.decode import _summationMTs as summation
     from kika.sampling.cross_section_sums import _leavesUnder
 
     run = perturbFromModel(str(fe56_b81_tape), {33: None}, 1, seed=7,
                            outputDir=tmp_path, formats=("endf-delta",),
-                           resonanceRegion="reconstructed")
+                           resonanceRegion="reconstructed", space={33: "linear"})
     delta = run.paths("endf-delta")[0]
     # The tape the realisation was made from: the evaluation with its resonance
     # region reconstructed (MF3 from RECONR, LRP=2).
