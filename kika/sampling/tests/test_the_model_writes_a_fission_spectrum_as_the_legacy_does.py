@@ -276,13 +276,13 @@ def test_a_rounded_correlation_is_drawn_as_the_legacy_draws_it(
     legacy puts no shoulder under it and ramps the factor from 1e-5 eV up to
     0.5 MeV, and none above it, so the factor ramps down again to the next node;
     the model steps at 0.4995 and 0.5005 MeV (2026-10-08) and perturbs
-    the 0.5 MeV node alone. Every original incident node carries the same
-    table on both sides -- the ramps live *between* them.
+    the 0.5 MeV node alone. Every other original incident node carries the
+    same table on both sides -- the ramps live *between* them.
 
-    **Not run at home**: there is no ENDF/B-VII.1 on this box. The 0.5005 MeV
-    half was written on 2026-10-08 from the semantics pinned by
-    ``test_the_spectrum_factor_stops_where_the_covariance_does.py`` (synthetic
-    point band, and JEFF-4.0 U-238's band 0) and has not yet seen this tape.
+    At 0.5 MeV the model also steps the factor to 1 just outside the MF35
+    grid's outgoing edges (10 eV, 20 MeV), which the legacy does not; the
+    renormalisation then differs by ~1e-8 and flips the last written digit of
+    90 of the 867 values (measured on the IAEA mirror's tape, 2026-11-26).
     """
     _assertSameDraw(pu240_b71_tape)
 
@@ -302,10 +302,18 @@ def test_a_rounded_correlation_is_drawn_as_the_legacy_draws_it(
     nodes = np.asarray(source.incident_energies)
     assert np.array_equal(old.incident_energies, nodes)
     assert np.array_equal(new.incident_energies,
-                          np.sort(np.concatenate([nodes, [4.995e5, 5.005e5]]))),         "the shoulder below the point band and the one above it"
-    for energy in nodes:
+                          np.sort(np.concatenate([nodes, [4.995e5, 5.005e5]]))), \
+        "the shoulder below the point band and the one above it"
+    for energy in nodes[nodes != 5e5]:
         a, b = old.evaluate_at_incident(energy), new.evaluate_at_incident(energy)
         assert all(np.array_equal(x, y) for x, y in zip(a, b)), energy
+
+    (g0, gN), = [(grid[0], grid[-1]) for grid in band_grids(
+        build_pfns_covariance(read_endf(str(pu240_b71_tape), mf_numbers=[5, 35]), mt=18)[0])]
+    (eOld, yOld), (eNew, yNew) = old.evaluate_at_incident(5e5), new.evaluate_at_incident(5e5)
+    extra = np.setdiff1d(eNew, eOld)
+    assert len(extra) == 2 and g0 * (1 - 1e-3) < extra[0] < g0 and gN < extra[1] < gN * (1 + 1e-3)
+    np.testing.assert_allclose(yNew[np.isin(eNew, eOld)], yOld, rtol=1e-5, atol=0)
     assert any(not np.array_equal(x, y)
                for x, y in zip(old.evaluate_at_incident(2.5e5),
                                new.evaluate_at_incident(2.5e5))), \
