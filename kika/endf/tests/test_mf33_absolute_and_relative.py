@@ -229,27 +229,36 @@ def test_lb8_no_longer_counts_as_relative_for_the_pendf_sentinel():
     assert cache.mf33_needs_pendf(mf33, 2) is True
 
 
-def test_the_suite_decode_refuses_a_mixed_block_when_it_has_no_tape_to_read_sigma_from():
+def test_the_suite_decode_keeps_a_mixed_block_as_its_records_and_needs_no_sigma():
     from kika.endf.model_adapter import decodeCovarianceSuite
+    from kika.nuclear_data.model import CovarianceMatrix, Mixed, ShortRangeSelfScalingVariance
     endf = ENDF()
     mf = MF(number=33)
     mf.add_section(_section([_lb5([0.01, 0.002, 0.04]), _table(8, [0.04, 0.09])]))
     endf.add_file(mf)
-    with pytest.raises(ValueError, match="does not know which file"):
-        decodeCovarianceSuite(endf)
-
-
-def test_the_suite_decode_uses_a_pendf_already_attached():
-    from kika.endf.model_adapter import decodeCovarianceSuite
-    endf = ENDF()
-    mf = MF(number=33)
-    mf.add_section(_section([_lb5([0.01, 0.002, 0.04]), _table(8, [0.04, 0.09])]))
-    endf.add_file(mf)
-    endf.pendf = {1: _xs(2.0)}
-    suite, report = decodeCovarianceSuite(endf, target="Si28")
+    suite, _ = decodeCovarianceSuite(endf, target="Si28", checks=False)
     (section,) = suite.covarianceSections
-    assert any("σ(E) from `endf.pendf`" in w for w in report.warnings)
-    assert section is not None
+    assert isinstance(section.form, Mixed)
+    lb5, lb8 = section.form.components
+    assert isinstance(lb5, CovarianceMatrix) and lb5.isRelative
+    assert isinstance(lb8, ShortRangeSelfScalingVariance)
+    assert lb8.dependenceOnProcessedGroupWidth == "inverse"
+    np.testing.assert_array_equal(np.diag(np.asarray(lb8.matrix.matrix)), [0.04, 0.09])
+
+
+def test_a_pendf_already_attached_does_not_change_what_is_read():
+    from kika.endf.model_adapter import decodeCovarianceSuite
+    endf = ENDF()
+    mf = MF(number=33)
+    mf.add_section(_section([_lb5([0.01, 0.002, 0.04]), _table(8, [0.04, 0.09])]))
+    endf.add_file(mf)
+    bare, _ = decodeCovarianceSuite(endf, target="Si28", checks=False)
+    endf.pendf = {1: _xs(2.0)}
+    withPendf, _ = decodeCovarianceSuite(endf, target="Si28", checks=False)
+    (a,), (b,) = bare.covarianceSections, withPendf.covarianceSections
+    for x, y in zip(a.form.components, b.form.components):
+        inner = lambda c: np.asarray(getattr(c, "matrix", None).matrix if hasattr(c, "dependenceOnProcessedGroupWidth") else c.matrix)
+        np.testing.assert_array_equal(inner(x), inner(y))
 
 
 # --------------------------------------------------------------------------
@@ -285,10 +294,13 @@ def test_a_tape_without_resonance_ranges_makes_the_block_relative_with_its_own_m
     (sub,) = sec.subsections
     assert sorted(int(r.lb) for r in sub.ni_records) == [5, 8]
 
+    from kika.sampling.mf33_sampling import collapseComponentForms
+
     suite, report = decodeCovarianceSuite(endf, target="F19", checks=False)
     assert endf.pendf is None
-    assert any("σ(E) from the tape's MF3" in w for w in report.warnings)
-    (block,) = [s for s in suite.covarianceSections if s.label == "MF33-MT28"]
+    sections, unresolved = collapseComponentForms(suite, {33: dict(endf.mf[3].mt)})
+    assert not unresolved
+    (block,) = [s for s in sections if s.label == "MF33-MT28"]
     matrix = np.asarray(block.form.matrix, float)
     grid = list(block.form.rowGrid)
 
