@@ -157,6 +157,60 @@ def _sectionProvenance(section, ltt: Optional[int] = None) -> EndfProvenance:
     )
 
 
+def _keepsComponents(ni_records) -> bool:
+    """Whether a block's records have to stay apart: LB=8/9, or absolute beside relative.
+
+    Both depend on the grid the block is finally used on (an LB=8/9 variance
+    scales with the group width, and σ̄ divides the absolute part on that
+    grid), so collapsing them on the block's own grid fixes a result that
+    belongs to the consumer. Any other block is a sum of matrices, which
+    projects the same collapsed or not.
+    """
+    from kika.endf.classes.mf33 import mixesAbsoluteAndRelative
+
+    return bool({int(r.lb) for r in ni_records} & {8, 9}) or mixesAbsoluteAndRelative(ni_records)
+
+
+def _recordForm(record):
+    """One NI sub-subsection as the §25 form GNDS gives it: a matrix, or a short-range variance for LB=8/9."""
+    from kika.endf.classes.mf33.mf33 import MF33MT
+
+    lb = int(record.lb)
+    if lb in (8, 9):
+        grid = np.asarray(record.e_table_k, dtype=float)
+        values = np.asarray(record.f_table_k, dtype=float)[: len(grid) - 1]
+        inner = CovarianceMatrix(matrix=np.diag(values), rowGrid=grid, columnGrid=grid,
+                                 isRelative=False, arrayStorage="diagonal")
+        return ShortRangeSelfScalingVariance(
+            matrix=inner, dependenceOnProcessedGroupWidth="direct" if lb == 9 else "inverse")
+    if lb in (0, 1, 2):
+        matrix, rows = MF33MT._decode_lb012_matrix(record)
+        columns, storage = rows, ("diagonal" if lb in (0, 1) else "symmetric")
+    elif lb in (3, 4):
+        matrix, rows, columns = MF33MT._decode_lb34_matrix(record)
+        storage = "full"
+    elif lb == 5:
+        matrix, rows = MF33MT._decode_lb5_matrix(record)
+        columns, storage = rows, ("symmetric" if int(record.ls or 0) == 1 else "full")
+    elif lb == 6:
+        matrix, rows, columns = MF33MT._decode_lb6_matrix(record)
+        storage = "full"
+    else:
+        raise ValueError(f"NI sub-subsection with LB={lb} has no §25 form")
+    return CovarianceMatrix(matrix=np.asarray(matrix, dtype=float),
+                            rowGrid=np.asarray(rows, dtype=float),
+                            columnGrid=np.asarray(columns, dtype=float),
+                            isRelative=lb != 0, arrayStorage=storage)
+
+
+def _componentsForm(ni_records):
+    """A block's NI records kept apart, as a ``mixed`` of their forms (FUDGE's reading of the same records)."""
+    from .mf33_structure import _mixed
+
+    forms = [_recordForm(r) for r in ni_records]
+    return forms[0] if len(forms) == 1 else _mixed(forms)
+
+
 def decodeMF33MT(mf33mt, report: Optional[ConversionReport] = None,
                  xsSections: Optional[dict] = None):
     """One MF33/MT section → a list of :class:`CovarianceSection`.
@@ -181,7 +235,13 @@ def decodeMF33MT(mf33mt, report: Optional[ConversionReport] = None,
     if any(sub.nc_records for sub in mf33mt.subsections):
         from .mf33_structure import decodeSums
         return decodeSums(mf33mt, report, xsSections)
-    covmat = mf33mt.to_xs_covmat(mf3_sections=xsSections)
+    from dataclasses import replace
+
+    own = int(mf33mt._mat or 0)
+    kept = [sub for sub in mf33mt.subsections
+            if int(sub.mat1 or 0) in (0, own) and _keepsComponents(sub.ni_records)]
+    rest = [sub for sub in mf33mt.subsections if not any(sub is k for k in kept)]
+    covmat = replace(mf33mt, _subsections=rest, _nl=len(rest)).to_xs_covmat(mf3_sections=xsSections)
 
     # `CrossSectionCovariance` has no `mt_metadata`, so unlike MF34 the section
     # header does not survive the trip through `kika/cov` at all: ZA reaches the
@@ -206,6 +266,19 @@ def decodeMF33MT(mf33mt, report: Optional[ConversionReport] = None,
             form=_matrixForm(matrix, grid, covmat.is_relative[index]),
             provenance=provenance,
         ))
+    for sub in kept:
+        rowMT, colMT = int(mf33mt.number), int(sub.mt1)
+        sections.append(CovarianceSection(
+            label=f"MF33-MT{rowMT}" + (f"-MT{colMT}" if colMT != rowMT else ""),
+            rowData=DataLink(href=reactionHref(rowMT), ENDF_MFMT=f"33/{rowMT}"),
+            columnData=(DataLink(href=reactionHref(colMT), ENDF_MFMT=f"33/{colMT}")
+                        if colMT != rowMT else None),
+            form=_componentsForm(sub.ni_records),
+            provenance=provenance,
+        ))
+    order = {int(sub.mt1): i for i, sub in enumerate(mf33mt.subsections)}
+    sections.sort(key=lambda s: order.get(int(s.columnData.ENDF_MFMT.split("/")[1])
+                                          if s.columnData is not None else int(mf33mt.number), 0))
 
     sections += _crossMaterialSections(mf33mt, 33, provenance, report)
     if not sections:

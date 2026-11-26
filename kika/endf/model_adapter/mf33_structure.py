@@ -28,7 +28,8 @@ def decodeSums(section, report, xsSections):
             ni = replace(sub, nc=0, nc_records=[])
             explicit, _ = decodeMF33MT(replace(section, _subsections=[ni], _nl=1),
                                       report, xsSections=xsSections)
-            forms.extend(s.form for s in explicit)
+            for s in explicit:
+                forms.extend(s.form.components if isinstance(s.form, Mixed) else [s.form])
         for nc in sub.nc_records:
             if nc.lty != 0:
                 report.lost(f"MF33/MT{section.number}: NC LTY={nc.lty} ratio to a standard "
