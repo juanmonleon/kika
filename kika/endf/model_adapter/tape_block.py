@@ -6,6 +6,7 @@ derived for a suite read back from GNDS.
 """
 from __future__ import annotations
 
+import collections
 from typing import Dict, List, Optional, Tuple
 
 from kika.nuclear_data.model.endf_conversion import EndfTapeData
@@ -211,10 +212,13 @@ def _resolvedAsMF2Differs(suite, energyRange) -> Dict[str, object]:
         else:
             rows = []
         from kika.gnds.encode_resonances import _breitWignerRows
+        keys = collections.Counter((float(r.energy), float(r.spin))
+                                   for _, r in _breitWignerRows(region.formalism))
         totals = {(float(r.energy), float(r.spin)): float(r.totalWidth or 0.0)
                   for _, r in _breitWignerRows(region.formalism)}
+        # (ER, AJ) names one row only where it is unique (U-233 repeats energies).
         gt = [[float(e), float(j), float(t)] for e, j, t in rows
-              if (float(e), float(j)) in totals and totals[float(e), float(j)] != float(t)]
+              if keys[float(e), float(j)] == 1 and totals[float(e), float(j)] != float(t)]
         if gt:
             out["gt"] = gt
     return out
