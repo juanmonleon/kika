@@ -512,7 +512,7 @@ def pointwise_cross_sections_from_suite(suite, *, tolerance: float = 0.001
     from GNDS: a suite with no resolved or unresolved range (at most a scattering
     radius, like MF2 LRU=0) gives its ``eval`` tables, and one with them is
     reconstructed by kika at *tolerance*
-    (:func:`~kika.processing.resonances.suite.reconstruct_suite` on a copy), the
+    (:func:`~kika.processing.resonances.reconstruct_suite` on a copy), the
     reconstruction the tape path uses. A ``crossSectionReconstructed`` style the
     file already states is another code's processing and is not read. A reaction
     whose form is not a table is left out. Each table is ``energies``/``values``/
