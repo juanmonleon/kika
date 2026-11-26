@@ -502,3 +502,61 @@ def pointwise_cross_sections(endf, *, tolerance: float = 0.001,
         raise
     endf.pendf = read_pendf_mf3_sections(pendf)
     return endf.pendf, f"kika's resonance reconstruction (tolerance {tolerance:g})"
+
+
+def pointwise_cross_sections_from_suite(suite, *, tolerance: float = 0.001
+                                        ) -> tuple[Dict[int, object], str]:
+    """σ(E) of every MT of a model ``ReactionSuite``, with its interpolation laws, and where it came from.
+
+    The model's counterpart of :func:`pointwise_cross_sections`, for a suite read
+    from GNDS: a suite with no resolved or unresolved range (at most a scattering
+    radius, like MF2 LRU=0) gives its ``eval`` tables, and one with them is
+    reconstructed by kika at *tolerance*
+    (:func:`~kika.processing.resonances.suite.reconstruct_suite` on a copy), the
+    reconstruction the tape path uses. A ``crossSectionReconstructed`` style the
+    file already states is another code's processing and is not read. A reaction
+    whose form is not a table is left out. Each table is ``energies``/``values``/
+    ``energy_interpolation`` (ENDF ``(NBT, INT)`` pairs), as an MF3 section reads.
+
+    Raises
+    ------
+    ~kika.processing.resonances.UnsupportedResonanceError
+        If the suite uses resonance data kika does not reconstruct; and
+        ``ReconstructionConvergenceError`` if a budget runs out or a check fails.
+    """
+    import copy
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    label, source = "eval", "the suite's evaluated cross sections (no resonance ranges)"
+    resonances = getattr(suite, "resonances", None)
+    if resonances is not None and (resonances.resolved or resonances.unresolved is not None):
+        from kika.processing.resonances import ReconstructionOptions
+        from kika.processing.resonances.suite import attach_reconstruction, reconstruct_suite
+
+        taken = set(suite.styles.labels)
+        label = next(c for c in ("recon", "kika-recon", *(f"kika-recon-{i}" for i in range(1, 100)))
+                     if c not in taken)
+        result = reconstruct_suite(suite, label=label, options=ReconstructionOptions(rtol=tolerance))
+        suite = copy.deepcopy(suite)
+        attach_reconstruction(suite, result)
+        label, source = result.label, f"kika's resonance reconstruction (tolerance {tolerance:g})"
+
+    tables: Dict[int, object] = {}
+    for container in (suite.reactions, suite.sums, suite.fissionComponents):
+        for reaction in container:
+            mt = getattr(reaction, "ENDF_MT", None)
+            if mt is None or int(mt) in tables:
+                continue
+            for form in dict.fromkeys((label, "eval")):
+                try:
+                    suite.cross_section(int(mt), form)
+                except (KeyError, TypeError, ValueError):
+                    continue
+                energies, values, laws = reaction.crossSection[form].toEndfRegions()
+                tables[int(mt)] = SimpleNamespace(energies=np.asarray(energies, dtype=float),
+                                                  values=np.asarray(values, dtype=float),
+                                                  energy_interpolation=list(laws))
+                break
+    return tables, source
