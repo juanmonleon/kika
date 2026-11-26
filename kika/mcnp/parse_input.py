@@ -4,7 +4,12 @@ from .input import Input
 from .perturbations import Perturbation, Pert
 from kika.materials import Material, MaterialCollection
 from kika.materials.parse_mcnp import read_card, read_material
+from pathlib import Path
+from typing import List, Tuple
 import re
+
+_PERT_KEYWORDS = {"CELL", "MAT", "RHO", "METHOD", "RXN", "ERG"}
+_READ_CARD = re.compile(r"\s{0,4}READ\b.*?\bFILE\s*=\s*(\S+)", re.IGNORECASE)
 
 def _read_PERT(lines, start_index):
     """Internal helper function to read and parse a PERT card from MCNP input lines.
@@ -19,83 +24,75 @@ def _read_PERT(lines, start_index):
         - The new index after processing the PERT card
     :rtype: tuple[Pert, int]
     """
-    i = start_index
-    line = lines[i].strip()
-    card_lines = []
-    
-    # Accumulate lines that end with '&'
-    while line.endswith("&"):
-        card_lines.append(line.rstrip("&").strip())
-        i += 1
-        if i < len(lines):
-            line = lines[i].strip()
-        else:
-            break
-    card_lines.append(line)
-    full_line = " ".join(card_lines)
-    
-    # Tokenize the full card line
-    tokens = full_line.split()
-    # Parse header: e.g. "PERT1:n"
-    header_match = re.match(r'PERT(\d+):(\w)', tokens[0])
+    text, end = read_card(lines, start_index)
+    header, _, body = text.partition(" ")
+    header_match = re.fullmatch(r'PERT(\d+):([A-Za-z,]+)', header, re.IGNORECASE)
     if not header_match:
-        return None, i + 1
-        
-    pert_num = int(header_match.group(1))
-    particle = header_match.group(2)
-    
-    allowed_keywords = {"CELL", "MAT", "RHO", "METHOD", "RXN", "ERG"}
-    pert_attrs = {}
-    j = 1
-    while j < len(tokens):
-        token = tokens[j]
-        if "=" in token:
-            key, val = token.split("=", 1)
-            key = key.upper()
-            if key not in allowed_keywords:
+        return None, end
+
+    values = {}
+    key = None
+    for token in body.replace(",", " ").replace("=", "= ").split():
+        if token.endswith("="):
+            key = token[:-1].upper()
+            if key not in _PERT_KEYWORDS:
                 break
-            if key == "CELL":
-                cell_vals = val.replace(',', ' ').split()
-                # Consume following bare tokens (space-separated cell IDs)
-                j += 1
-                while j < len(tokens) and "=" not in tokens[j]:
-                    cell_vals.extend(tokens[j].replace(',', ' ').split())
-                    j += 1
-                pert_attrs['cell'] = [int(x) for x in cell_vals]
-                continue
-            elif key == "MAT":
-                pert_attrs['material'] = int(val)
-            elif key == "RHO":
-                pert_attrs['rho'] = float(val)
-            elif key == "METHOD":
-                pert_attrs['method'] = int(val)
-            elif key == "RXN":
-                pert_attrs['reaction'] = int(val)
-            elif key == "ERG":
-                erg_numbers = [val]
-                j += 1
-                while j < len(tokens) and "=" not in tokens[j]:
-                    erg_numbers.append(tokens[j])
-                    j += 1
-                if len(erg_numbers) >= 2:
-                    pert_attrs['energy'] = (float(erg_numbers[0]), float(erg_numbers[1]))
-                else:
-                    pert_attrs['energy'] = None
-                continue
-            j += 1
-        else:
+            values[key] = []
+        elif key is None:
             break
-    
-    return Pert(id=pert_num, particle=particle, **pert_attrs), i + 1
+        else:
+            values[key].append(token)
+
+    pert_attrs = {}
+    if "CELL" in values:
+        pert_attrs['cell'] = [int(x) for x in values["CELL"]]
+    if "MAT" in values:
+        pert_attrs['material'] = int(values["MAT"][0])
+    if "RHO" in values:
+        pert_attrs['rho'] = float(values["RHO"][0])
+    if "METHOD" in values:
+        pert_attrs['method'] = int(values["METHOD"][0])
+    if "RXN" in values:
+        pert_attrs['reactions'] = tuple(int(x) for x in values["RXN"])
+    if "ERG" in values:
+        erg = values["ERG"]
+        pert_attrs['energy'] = (float(erg[0]), float(erg[1])) if len(erg) >= 2 else None
+
+    return Pert(id=int(header_match.group(1)), particle=header_match.group(2).lower(), **pert_attrs), end
+
+
+def _expand_read_cards(path: Path, seen: Tuple[Path, ...] = ()) -> List[str]:
+    """The lines of *path* with each ``READ FILE=`` card replaced by the lines of its file."""
+    path = path.resolve()
+    if path in seen:
+        chain = " -> ".join(p.name for p in (*seen, path))
+        raise ValueError(f"READ cards form a loop: {chain}")
+    with open(path, 'r') as f:
+        lines = f.readlines()
+    expanded = []
+    for line in lines:
+        match = _READ_CARD.match(line)
+        if not match:
+            expanded.append(line)
+            continue
+        target = path.parent / match.group(1)
+        if not target.is_file():
+            raise FileNotFoundError(
+                f"{path.name}: '{line.strip()}' names {target}, which does not exist "
+                f"(a READ file is looked for beside the input that reads it)"
+            )
+        expanded.extend(_expand_read_cards(target, (*seen, path)))
+    return expanded
 
 def read_mcnp(file_path, pert_metadata=None):
     """Read the PERT cards and the material cards of an MCNP input deck.
 
-    Every other card is skipped. A PERT card is a line that starts with ``PERT``
-    in capitals (continuation with a trailing ``&``); a material card is a line that
-    starts with a lowercase ``m`` followed by the material number. A PERT card takes
-    the keywords ``CELL``, ``MAT``, ``RHO``, ``METHOD``, ``RXN`` and ``ERG``; the
-    first other keyword ends the card. The cards written by
+    Every other card is skipped. A ``READ FILE=`` card is replaced by the lines of
+    its file, looked for beside the input that reads it. A PERT card is a line that
+    starts with ``PERT`` in any case; a material card is a line that starts with
+    ``m`` followed by the material number. A PERT card takes the keywords ``CELL``,
+    ``MAT``, ``RHO``, ``METHOD``, ``RXN`` and ``ERG``, each followed by its values
+    separated by blanks or commas; the first other keyword ends the card. The cards written by
     :func:`~kika.mcnp.pert_generator.generate_PERTcards` are read back, with the ``zaid`` and
     ``original_material`` of the ``c kika:pert_zaid=<zaid> pert_mat=<material>``
     comment line that precedes them (it applies to every PERT card after it, until
@@ -123,14 +120,15 @@ def read_mcnp(file_path, pert_metadata=None):
         If a material card mixes positive and negative fractions or lists a
         nuclide twice, or an ``mt`` card names a material the deck does not define.
     FileNotFoundError
-        If *file_path* does not exist.
+        If *file_path*, or a file named by a ``READ`` card, does not exist.
+    ValueError
+        Also if ``READ`` cards read each other in a loop.
     """
     inst = Input()  # instance of the input class
     inst.perturbation = Perturbation()
     inst.materials = MaterialCollection()
 
-    with open(file_path, 'r') as f:
-        lines = f.readlines()
+    lines = _expand_read_cards(Path(file_path))
 
     i = 0
     current_zaid = None
@@ -144,7 +142,7 @@ def read_mcnp(file_path, pert_metadata=None):
             current_zaid = int(zaid_match.group(1))
             current_original_mat = int(zaid_match.group(2)) if zaid_match.group(2) else None
             i += 1
-        elif line.startswith("PERT"):
+        elif line[:4].upper() == "PERT":
             pert_obj, i = _read_PERT(lines, i)
             if pert_obj:
                 if current_zaid is not None:
