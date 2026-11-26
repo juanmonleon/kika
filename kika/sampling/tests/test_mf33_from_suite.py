@@ -194,3 +194,23 @@ def test_without_cross_sections_a_block_that_needs_them_is_declined_by_code():
     _, _, present, blocks = build_mf33_covariance_from_suite(suite, None, None)
     assert blocks.declined and {d.code for d in blocks.declined.values()} == {NEEDS_CROSS_SECTIONS}
     assert not set(blocks.declined) & set(present)
+
+
+def test_a_suite_written_to_gnds_by_kika_assembles_as_it_did(tmp_path):
+    """NNDC's F-19 covariances, written by kika's GNDS writer and read back: the same MF33."""
+    from kika.gnds.covariances import readCovarianceSuite
+    from kika.gnds.encode import writeCovarianceSuite
+    from kika.gnds.xpath import Document
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        suite, _ = readCovarianceSuite(Document.parse(GNDS_COV / "n-009_F_019.endf.gnds-covar.xml"))
+        tree, _ = writeCovarianceSuite(suite, "2.0")
+        path = tmp_path / "f19-covar.xml"
+        tree.write(str(path), encoding="utf-8", xml_declaration=True)
+        back, _ = readCovarianceSuite(Document.parse(path))
+    xs = _sigma(_all_mts())
+    before, _, present, _ = build_mf33_covariance_from_suite(suite, None, xs)
+    after, _, presentAfter, _ = build_mf33_covariance_from_suite(back, None, xs)
+    assert presentAfter == present
+    _same(before, after)
