@@ -161,7 +161,7 @@ _TAPES: Dict[str, Sequence[str]] = {
     "dy162_b81": ("endfb81/n-066_Dy_162.endf", "n-066_Dy_162.endf"),
     # The two PFNS tapes the pre-flight refused (PF-7, PF-8): a correlation
     # above 1 by 1.2e-5, and a band stated as a 1x1 zero.
-    "pu240_b71": ("endfb71/neutrons/n-094_Pu_240.endf",),
+    "pu240_b71": ("endfb71/neutrons/n-094_Pu_240.endf", "endfb71/n-094_Pu_240.endf"),
     "pu242_j40": ("jeff40/neutrons/94-Pu-242g.txt", "jeff40/n_94-Pu-242g.jeff",
                   "jeff40/neutrons/n_94-Pu-242g.jeff"),
     "th232": ("jeff40-endf/90-Th-232g.txt", "90-Th-232g.txt", "jeff40/n_90-Th-232g.jeff"),
@@ -220,8 +220,10 @@ _TAPES: Dict[str, Sequence[str]] = {
     # only section on this machine long enough to wrap the sequence number.
     "mn55_b81": ("endfb81/n-025_Mn_055.endf", "endfb8.1/n/25055.endf"),
     "ta181_b81": ("endfb81/n-073_Ta_181.endf", "endfb8.1/n/73181.endf"),
-    "mn55_jendl": ("jendl5/n/25055.endf", "JENDL-5/Mn55_jendl5_n.endf"),
-    "pu239_jendl": ("jendl5/n/94239.endf", "JENDL-5/Pu239_jendl5_n.endf"),
+    "mn55_jendl": ("jendl5/n/25055.endf", "JENDL-5/Mn55_jendl5_n.endf",
+                   "jendl5/n_025-Mn-055.dat"),
+    "pu239_jendl": ("jendl5/n/94239.endf", "JENDL-5/Pu239_jendl5_n.endf",
+                    "jendl5/n_094-Pu-239.dat"),
     # The ENDF/B-VIII.1 GNDS distribution, as published by the NNDC. Only the
     # oracle tests need it: they compare what the GNDS reader gets out of Fe-56
     # against what the ENDF adapter gets out of the same evaluation, and that
@@ -308,7 +310,8 @@ _TAPES: Dict[str, Sequence[str]] = {
     # He-3 of ENDF/B-VIII.1 as NJOY processed it: n + He-3 -> d + d (MT650)
     # lists MT650 twice in the deuteron's MTRH, one entry per deuteron, the
     # one table where an IXS MT repeats (kika/ace/classes/ixs_keys.py).
-    "he3_ace_b81": ("ace/endfb81/293.6K/2003.10c", "ace/2003.10c", "ACE_samples/2003.10c"),
+    "he3_ace_b81": ("ace/endfb81/293.6K/2003.10c", "ace/2003.10c", "ACE_samples/2003.10c",
+                    "../ace/endfb81/293.6K/2003.10c"),
     "fe56_pendf": ("pendf/Fe56.pendf",),
     # MF6, the energy-angle distributions. These three are not a sample: they
     # are the carriers. Swept over all 557 ENDF/B-VIII.1 neutron tapes, LAW=7
@@ -382,9 +385,10 @@ _TAPES: Dict[str, Sequence[str]] = {
     # elemental ZA (4000, not the pseudo-ZA 126 ENDF/B writes for the same
     # material), and LIST bodies padded with explicit zeros. ``tsl_Be_BeO.txt``
     # is the control — the *same* evaluation as ENDF/B's, adopted, 75-column.
-    "tsl_jeff_be": ("jeff40/tsl/tsl_4-Be.txt",),
-    "tsl_jeff_be_beo": ("jeff40/tsl/tsl_Be_BeO.txt",),
-    "tsl_jeff_si": ("jeff40/tsl/tsl_Si.txt",),
+    # The IAEA's copy, in NuclearData's tsl/jeff40, keeps the NEA dialect.
+    "tsl_jeff_be": ("jeff40/tsl/tsl_4-Be.txt", "../tsl/jeff40/tsl_4-Be-_0026.dat"),
+    "tsl_jeff_be_beo": ("jeff40/tsl/tsl_Be_BeO.txt", "../tsl/jeff40/tsl_Be_BeO_0027.dat"),
+    "tsl_jeff_si": ("jeff40/tsl/tsl_Si.txt", "../tsl/jeff40/tsl_Si_0059.dat"),
     "serpent_input": ("serpent/PWRSphere.sss2", "PWRSphere.sss2"),
     # Smallest real Fe-56 ACE on the share (16 MB) is preferred over the
     # 112 MB JEFF one: the round-trip gate reads and rewrites the whole XSS,

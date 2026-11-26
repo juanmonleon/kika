@@ -651,10 +651,28 @@ def _lct(products, e6) -> int:
     return 3
 
 
+def _recordsByProduct(records, byLabel):
+    """The MF6 records keyed by the label of the product each now describes, and their order.
+
+    Attaching a level's cascade renames its residual to the level (``Si28`` to
+    ``Si28_e1``); the record keeps the label it was read with, so it is found by ZA.
+    """
+    renamed = {}
+    for r in records:
+        if r["label"] in byLabel or "massCode" not in r:
+            continue
+        same = [lab for lab, pr in byLabel.items()
+                if lab not in renamed.values() and not any(x["label"] == lab for x in records)
+                and float(zaFromPid(pr.pid)) == float(r["massCode"])]
+        if len(same) == 1:
+            renamed[r["label"]] = same[0]
+    order = [renamed.get(r["label"], r["label"]) for r in records]
+    return dict(zip(order, records)), order
+
+
 def _energyAngle(products, e6, suite, targetMass, where, report) -> EnergyAngleBody:
-    recs = {r["label"]: r for r in (e6.get("products") or [])}
-    order = [r["label"] for r in (e6.get("products") or [])]
     byLabel = {(pr.label or pr.pid): pr for pr in products}
+    recs, order = _recordsByProduct(e6.get("products") or [], byLabel)
     labels = [lab for lab in order if lab in byLabel] + \
              [lab for lab in byLabel if lab not in order]
     mass = _mass(e6.get("targetMass"), targetMass, suite, where)
