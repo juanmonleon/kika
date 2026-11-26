@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from kika.mcnp.parse_input import read_mcnp, _read_PERT
 
@@ -141,6 +143,7 @@ def test_read_file_cards_are_followed_beside_the_input(tmp_path):
     assert inp.perturbation.pert[1].reactions == (51, 52)
     assert inp.perturbation.pert[1].zaid == 26056
     assert 2 in inp.materials.by_id
+    assert [Path(p).name for p in inp.source_files] == ["deck.i", "PERT.i", "more.i"]
 
 
 def test_a_missing_read_file_is_named(tmp_path):

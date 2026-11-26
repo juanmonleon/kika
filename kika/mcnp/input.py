@@ -1,6 +1,6 @@
 """The container that :func:`~kika.mcnp.parse_input.read_mcnp` returns for an MCNP input deck."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from kika.materials import MaterialCollection
 from .perturbations import Perturbation
 from kika.energy_grids.utils import _identify_energy_grid
@@ -19,9 +19,12 @@ class Input:
         The PERT cards, keyed by card number in ``perturbation.pert``.
     materials : ~kika.materials.material.MaterialCollection
         The material cards, keyed by material number in ``materials.by_id``.
+    source_files : list of str
+        The deck and every file its ``READ`` cards read, as absolute paths.
     """
     perturbation: 'Perturbation' = None
     materials: 'MaterialCollection' = None
+    source_files: list = field(default_factory=list)
 
     def __repr__(self):
         """Returns a formatted string representation of the MCNP input data.

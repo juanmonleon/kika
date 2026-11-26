@@ -5,7 +5,7 @@ from .perturbations import Perturbation, Pert
 from kika.materials import Material, MaterialCollection
 from kika.materials.parse_mcnp import read_card, read_material
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 import re
 
 _PERT_KEYWORDS = {"CELL", "MAT", "RHO", "METHOD", "RXN", "ERG"}
@@ -61,27 +61,46 @@ def _read_PERT(lines, start_index):
     return Pert(id=int(header_match.group(1)), particle=header_match.group(2).lower(), **pert_attrs), end
 
 
-def _expand_read_cards(path: Path, seen: Tuple[Path, ...] = ()) -> List[str]:
-    """The lines of *path* with each ``READ FILE=`` card replaced by the lines of its file."""
-    path = path.resolve()
+def read_card_target(line: str) -> Optional[str]:
+    """The file a ``READ FILE=`` card names, or None when *line* is not one."""
+    match = _READ_CARD.match(line)
+    return match.group(1) if match else None
+
+
+def expand_read_cards(path, seen: Tuple[Path, ...] = (), read: Optional[List[Path]] = None) -> List[str]:
+    """The lines of the deck at *path* with each ``READ FILE=`` card replaced by the lines of its file.
+
+    A READ file is looked for beside the file whose card names it. Every file opened
+    is appended to *read*, the deck first.
+
+    Raises
+    ------
+    FileNotFoundError
+        If *path* or a file named by a READ card does not exist.
+    ValueError
+        If READ cards read each other in a loop.
+    """
+    path = Path(path).resolve()
     if path in seen:
         chain = " -> ".join(p.name for p in (*seen, path))
         raise ValueError(f"READ cards form a loop: {chain}")
     with open(path, 'r') as f:
         lines = f.readlines()
+    if read is not None:
+        read.append(path)
     expanded = []
     for line in lines:
-        match = _READ_CARD.match(line)
-        if not match:
+        name = read_card_target(line)
+        if name is None:
             expanded.append(line)
             continue
-        target = path.parent / match.group(1)
+        target = path.parent / name
         if not target.is_file():
             raise FileNotFoundError(
                 f"{path.name}: '{line.strip()}' names {target}, which does not exist "
                 f"(a READ file is looked for beside the input that reads it)"
             )
-        expanded.extend(_expand_read_cards(target, (*seen, path)))
+        expanded.extend(expand_read_cards(target, (*seen, path), read))
     return expanded
 
 def read_mcnp(file_path, pert_metadata=None):
@@ -112,7 +131,8 @@ def read_mcnp(file_path, pert_metadata=None):
     ~kika.mcnp.input.Input
         The PERT cards and the materials found, in ``perturbation.pert`` and
         ``materials.by_id``. Both are empty when the deck has none. A material's
-        ``mt`` card is in its ``thermal_scattering``.
+        ``mt`` card is in its ``thermal_scattering``. ``source_files`` lists the
+        deck and every file its READ cards read, as absolute paths.
 
     Raises
     ------
@@ -128,7 +148,9 @@ def read_mcnp(file_path, pert_metadata=None):
     inst.perturbation = Perturbation()
     inst.materials = MaterialCollection()
 
-    lines = _expand_read_cards(Path(file_path))
+    source_files = []
+    lines = expand_read_cards(file_path, read=source_files)
+    inst.source_files = [str(p) for p in source_files]
 
     i = 0
     current_zaid = None
