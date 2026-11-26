@@ -303,6 +303,9 @@ _TAPES: Dict[str, Sequence[str]] = {
     # MF32 and MF35 of JEFF-4.0 for the same layer-1 checks, phase C8.
     "k41_jeff40": ("jeff40/n_19-K-041g.jeff", "jeff40/neutrons/n_19-K-041g.jeff"),
     "u239_jeff40": ("jeff40/n_92-U-239g.jeff", "jeff40/neutrons/n_92-U-239g.jeff"),
+    # MF32 stating other values than MF2: Tc-98's EH, Ac-227's GT.
+    "tc98_jeff40": ("jeff40/n_43-Tc-098g.jeff",),
+    "ac227_jeff40": ("jeff40/n_89-Ac-227g.jeff",),
     # The ACE of that same evaluation (ENDF/B-VIII.1, 293.6 K), and a PENDF of the
     # JEFF-4.0 host: the three sources kika.plotting.plottable overlays in its
     # acceptance test.
@@ -706,6 +709,8 @@ fe57_jeff40_tape = _tape_fixture("fe57_jeff40")
 hf176_jeff40_tape = _tape_fixture("hf176_jeff40")
 k41_jeff40_tape = _tape_fixture("k41_jeff40")
 u239_jeff40_tape = _tape_fixture("u239_jeff40")
+tc98_jeff40_tape = _tape_fixture("tc98_jeff40")
+ac227_jeff40_tape = _tape_fixture("ac227_jeff40")
 fe56_ace_b81_tape = _tape_fixture("fe56_ace_b81")
 he3_ace_b81_tape = _tape_fixture("he3_ace_b81")
 fe56_pendf_tape = _tape_fixture("fe56_pendf")

@@ -99,6 +99,17 @@ def test_mf2_values_gnds_cannot_hold_come_back(name, request, tmp_path):
 
 
 @pytest.mark.tape
+@pytest.mark.parametrize("name", ["tc98_jeff40_tape", "ac227_jeff40_tape"])
+def test_mf32_values_off_mf2_come_back(name, request, tmp_path):
+    """JEFF-4.0 Tc-98's MF32 range ends at 1e-2 eV, MF2's at 149 eV; Ac-227's MF32 GT is
+    MF2's plus one in the last digit. GNDS takes both from MF2."""
+    tape = request.getfixturevalue(name)
+    _report, back, endf = _roundTrip(tape, tmp_path, covariances=True)
+    assert EndfTapeData.of(back).mf32["resolved"].keys() & {"eh", "gt"}
+    assert _sections(endf, 32)[151] == _sections(tape, 32)[151]
+
+
+@pytest.mark.tape
 def test_a_per_l_awri_the_block_holds_is_not_declared_lost(dy162_b81_tape, tmp_path):
     from kika.gnds.encode import writeReactionSuite
     from kika.nuclear_data.model.endf_conversion import EndfTapeData

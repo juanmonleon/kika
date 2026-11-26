@@ -112,8 +112,9 @@ def _breitWigner(records, resonances, region, matrix, lcomp, sortByL, ndigit, aw
 
     formalism = region.formalism
     rows = _breitWignerRows(formalism)
-    table = [(L, r.energy, r.spin, r.totalWidth or 0.0, r.neutronWidth, r.captureWidth,
-              r.fissionWidth or 0.0) for L, r in rows]
+    totals = {(e, j): t for e, j, t in stated.get("gt", ())}
+    table = [(L, r.energy, r.spin, totals.get((float(r.energy), float(r.spin)), r.totalWidth or 0.0),
+              r.neutronWidth, r.captureWidth, r.fissionWidth or 0.0) for L, r in rows]
     gnds = [(t[1], t[4], t[5]) for t in table]
     ls = [t[0] for t in table]
     nls = 0 if lcomp in (1, 2) or not sortByL else len(set(ls))
@@ -603,7 +604,7 @@ def _resolved(records, suite, covariance, conversions, awr, neutron, spi, mat, s
     calculate = (formalism.radiusPolicy.channelMode == "mass" if formalism.radiusPolicy is not None
                  else bool(getattr(formalism, "calculateChannelRadius", True)))
     naps = stated.get("naps", 0 if lrf == 7 else int(not calculate))
-    records.head(region.domainMin, region.domainMax, 1, lrf, 0, naps)
+    records.head(stated.get("el", region.domainMin), stated.get("eh", region.domainMax), 1, lrf, 0, naps)
     if lrf in (1, 2):
         if dap is not None and len(dap) > 1:
             raise ValueError("an L-dependent scattering-radius uncertainty on a Breit-Wigner range")

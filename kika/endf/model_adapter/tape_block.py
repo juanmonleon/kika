@@ -145,8 +145,9 @@ def _mf6Awps(suite, nodes) -> Dict[str, Dict[int, float]]:
 def _mf32(suite) -> Dict[str, object]:
     """MF32's head fields GNDS's parameter covariance has no place for, by range kind.
 
-    NAPS of each range, NLS of an LCOMP=1 or 2 head, L2 of an LRF=7 particle-pair LIST and
-    the AWRI of each unresolved L block."""
+    NAPS of each range, NLS of an LCOMP=1 or 2 head, L2 of an LRF=7 particle-pair LIST, the
+    AWRI of each unresolved L block, and where they differ from MF2's the resolved range's
+    EL/EH and a Breit-Wigner resonance's GT."""
     from kika.endf.classes.mf32.mf32mt151 import (LCOMP1Body, LCOMP2Body, LCOMP2RMLBody,
                                                   UnresolvedBody)
     from kika.endf.parsers.parse_mf32 import parse_mf32_mt151
@@ -175,11 +176,47 @@ def _mf32(suite) -> Dict[str, object]:
             entry["nls"] = int(body.control.n1)
         if isinstance(body, LCOMP2RMLBody) and body.particle_pairs is not None:
             entry["pairsL2"] = int(body.particle_pairs.l2)
+        if kind == "resolved":
+            entry.update(_resolvedAsMF2Differs(suite, energyRange))
         if isinstance(body, UnresolvedBody):
             entry["awri"] = {int(block.l1): float(block.c1) for block in body.l_blocks}
             if _unresolvedNotInMF2(suite, body):
                 entry["body"] = [_fields(record) for record in
                                  (energyRange.control, body.control, *body.l_blocks, body.matrix)]
+    return out
+
+
+def _resolvedAsMF2Differs(suite, energyRange) -> Dict[str, object]:
+    """``el``/``eh`` and ``gt`` (``[[ER, AJ, GT], ...]``) where MF32 states other values than
+    MF2, which the GNDS covariance takes them from (JEFF-4.0 Tc-98's EH, Ac-227's GT)."""
+    from kika.endf.classes.mf32.mf32mt151 import LCOMP0Body, LCOMP1Body, LCOMP2Body
+    from kika.nuclear_data.model.resonances import BreitWigner
+
+    regions = list(getattr(suite.resonances, "resolved", None) or ())
+    if len(regions) != 1:
+        return {}
+    region, out = regions[0], {}
+    for name, stated, mf2 in (("el", energyRange.el, region.domainMin),
+                              ("eh", energyRange.eh, region.domainMax)):
+        if float(stated) != float(mf2):
+            out[name] = float(stated)
+    body = energyRange.body
+    if isinstance(region.formalism, BreitWigner):
+        if isinstance(body, LCOMP0Body):
+            rows = [block.values[18 * k:18 * k + 3] for block in body.l_blocks for k in range(block.n2)]
+        elif isinstance(body, LCOMP1Body):
+            rows = [block.values[6 * k:6 * k + 3] for block in body.short_range for k in range(block.n2)]
+        elif isinstance(body, LCOMP2Body) and body.parameters is not None:
+            rows = [body.parameters.values[12 * k:12 * k + 3] for k in range(body.parameters.n2)]
+        else:
+            rows = []
+        from kika.gnds.encode_resonances import _breitWignerRows
+        totals = {(float(r.energy), float(r.spin)): float(r.totalWidth or 0.0)
+                  for _, r in _breitWignerRows(region.formalism)}
+        gt = [[float(e), float(j), float(t)] for e, j, t in rows
+              if (float(e), float(j)) in totals and totals[float(e), float(j)] != float(t)]
+        if gt:
+            out["gt"] = gt
     return out
 
 
