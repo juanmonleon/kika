@@ -1,8 +1,8 @@
 """A processed suite → ACE, and the round-trip gate on a real table.
 
-The gate: ACE → model → ACE is the original word for word, once the
-two things the encoder does not write are taken out of the original (the
-charged-particle blocks and NJOY's unused room after some law tables).
+The gate: ACE → model → ACE is the original word for word, once what the
+encoder does not write is taken out of the original (NJOY's unused room
+after some law tables); the charged-particle blocks come back too.
 Both sides are laid out by the ACE encoders, whose own gate makes the
 original's re-encoding its XSS; so a difference here is the model losing or
 changing something. Integer words must be equal and real words within a few
@@ -24,11 +24,8 @@ pytestmark = pytest.mark.tape
 
 
 def _strip(ace):
-    """The original without the charged-particle blocks and NJOY's padding."""
+    """The original without NJOY's padding."""
     a = copy.deepcopy(ace)
-    if a.secondary_particle_types is not None:
-        a.secondary_particle_types.particle_ids = []
-    a.reaction_mt_data.particle_production = []
     ed = a.energy_distributions
     for chain in list(ed.incident_neutron.values()) + list(ed.photon_production.values()) + \
             list(ed.delayed_neutron):
@@ -122,8 +119,8 @@ def test_an_ace_table_holds_one_temperature(decoded):
         encodeAce(hot)
 
 
-def test_the_charged_particle_blocks_are_reported_not_written(decoded):
+def test_the_charged_particles_come_back(original, decoded):
     suite, _ = decoded
     written, report = encodeAce(suite)
-    assert not list(getattr(written.secondary_particle_types, "particle_ids", []) or [])
-    assert any("charged-particle production" in line for line in report.unsupported)
+    assert list(written.secondary_particle_types.particle_ids) == list(original.secondary_particle_types.particle_ids)
+    assert not any("charged-particle production" in line for line in report.unsupported)
