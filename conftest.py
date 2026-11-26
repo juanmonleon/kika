@@ -164,8 +164,8 @@ _TAPES: Dict[str, Sequence[str]] = {
     "pu240_b71": ("endfb71/neutrons/n-094_Pu_240.endf",),
     "pu242_j40": ("jeff40/neutrons/94-Pu-242g.txt", "jeff40/n_94-Pu-242g.jeff",
                   "jeff40/neutrons/n_94-Pu-242g.jeff"),
-    "th232": ("jeff40-endf/90-Th-232g.txt", "90-Th-232g.txt"),
-    "pu241": ("jeff40-endf/94-Pu-241g.txt", "94-Pu-241g.txt"),
+    "th232": ("jeff40-endf/90-Th-232g.txt", "90-Th-232g.txt", "jeff40/n_90-Th-232g.jeff"),
+    "pu241": ("jeff40-endf/94-Pu-241g.txt", "94-Pu-241g.txt", "jeff40/n_94-Pu-241g.jeff"),
     "u238": ("jeff40-endf/92-U-238g.txt", "U238_jeff4.0_n.endf",
              "jeff40/n_92-U-238g.jeff"),
     # JEFF-4.0 Fe-56 as distributed, from the library tree: NOT the host tape
