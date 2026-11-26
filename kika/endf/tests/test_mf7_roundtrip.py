@@ -563,21 +563,12 @@ def test_the_same_evaluation_reads_identically_from_both_libraries(
 
 
 @pytest.mark.slow
-def test_a_plain_decimal_field_is_re_emitted_canonically(tsl_jeff_si_tape):
-    """A measured divergence, not a defect: same value, different bytes.
+def test_a_plain_decimal_field_comes_back_as_written(tsl_jeff_si_tape):
+    """JEFF-4.0's Si writes the SB of MF7/MT2's incoherent TAB1 as ``2.16827944``.
 
-    JEFF-4.0's Si writes ``2.16827944`` as the SB field of MF7/MT2's incoherent
-    TAB1, in plain Fortran decimal rather than ENDF's exponential form.
-    ``parse_number`` tries ``float()`` first and reads it without complaint, and
-    kika re-emits the canonical ``2.168279+0``. The values are equal; the bytes
-    are not.
-
-    Recorded as a measurement rather than pinned as an xfail because there is
-    nothing to fix — re-emitting it verbatim would mean storing the source text
-    of every number on the tape. Identical in kind to
-    ``test_endfb81_pu239_mf5_head_roundtrip``, and the reason this is *one* line
-    rather than a class of them: it is the only field on the tape written that
-    way.
+    Nine digits in plain decimal name a double closer than the seven of
+    ``2.168279+0``, so the writer's closest-field rule gives the bytes back.
+    It is the only field on the tape written that way.
     """
     text = Path(tsl_jeff_si_tape).read_text()
     section = sections_of(tsl_jeff_si_tape)[2]
@@ -585,10 +576,7 @@ def test_a_plain_decimal_field_is_re_emitted_canonically(tsl_jeff_si_tape):
     source = data_lines(text, 7, 2)
     got = data_lines(str(section), 7, 2)
     assert source[1][:11].strip() == "2.16827944"
-    assert got[1][:11].strip() == "2.168279+0"
-    assert section.incoherent.sb == pytest.approx(2.16827944)
+    assert section.incoherent.sb == 2.16827944
 
     width = source_width(source)
-    differing = [i for i, (a, b)
-                 in enumerate(zip(source, got)) if a[:width] != b[:width]]
-    assert differing == [1], f"only the SB field should differ, got {differing}"
+    assert [a[:width] for a in source] == [b[:width] for b in got]
