@@ -83,6 +83,23 @@ def test_the_nubar_covariance_assembles_as_the_tape_does():
     _same(fromTape, fromSuite)
 
 
+def test_the_nubar_covariance_of_a_model_suite_is_build_mf31_covariance_s():
+    """MF31 weighted by the suite's own nu-bar, against the tape path the app uses."""
+    import kika
+    from kika.sampling.mf31_sampling import build_mf31_covariance, build_mf31_covariance_from_suite
+
+    tape = DATA / "micro_u235_nubar.endf"
+    endf = read_endf(str(tape))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        suite = kika.read(str(tape))
+    fromTape, _, gridTape, presentTape = build_mf31_covariance(endf)
+    fromSuite, _, gridSuite, presentSuite, blocks = build_mf31_covariance_from_suite(suite)
+    assert presentSuite == presentTape and not blocks.declined
+    assert gridSuite == gridTape
+    _same(fromTape, fromSuite)
+
+
 def test_a_gnds_mixed_with_a_short_range_term_and_a_sum_assembles_as_its_endf_records():
     """NNDC's F-19: ``mixed`` of matrices with LB=8 terms, and a stated ``sum``.
 

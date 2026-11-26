@@ -391,7 +391,9 @@ def nubarNode(suite, mt: int):
     because MF6's yield collapses to an ``XYs1d`` where MF1's stays a
     ``Regions1d``, and that is luck rather than a gate. The provenance is the
     gate: ``attachNubar`` puts an :class:`EndfProvenance` on the
-    :class:`Multiplicity` it builds and nothing else does.
+    :class:`Multiplicity` it builds and nothing else does. A suite read from
+    GNDS has no provenance; there the MT452 sum naming the fission neutron's
+    multiplicity as a summand is what says it is the prompt nu-bar (MT456).
     """
     if mt not in NUBAR_MT:
         raise ValueError(f"MT{mt} is not a fission multiplicity")
@@ -402,13 +404,22 @@ def nubarNode(suite, mt: int):
 
     reaction = suite.findReactionByENDF_MT(FISSION_MT)
     if reaction is not None and mt in (452, 456):
+        total = suite.sums.multiplicitySums.byENDF_MT(452) if mt == 456 else None
+        named = {str(getattr(s, "href", "")) for s in (getattr(total, "summands", None) or [])}
         for product in reaction.outputChannel.products:
             multiplicity = product.multiplicity
             if (product.pid == "n" and multiplicity is not None
                     and multiplicity.isEvaluable
-                    and multiplicity.provenance is not None):
+                    and (multiplicity.provenance is not None
+                         or _namesProduct(named, reaction, product))):
                 return multiplicity
     return None
+
+
+def _namesProduct(hrefs, reaction, product) -> bool:
+    """Whether one of *hrefs* is *product*'s multiplicity: GNDS's MT452 sum naming the prompt nu-bar."""
+    tail = f"/outputChannel/products/product[@label='{product.label}']/multiplicity"
+    return any(h.endswith(tail) and f"[@label='{reaction.label}']" in h for h in hrefs)
 
 
 def _tab1FromMultiplicity(multiplicity, mt: int, label: str = EVAL_LABEL):

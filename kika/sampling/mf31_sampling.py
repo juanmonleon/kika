@@ -1074,3 +1074,57 @@ def perturbNubarFamilyOnModel(
             f"  [MF31] MT{derived}: recomputed from sum rule on "
             f"{union_e.size} points.")
     return out, diags
+
+
+def nubar_central_values_from_suite(suite) -> Dict[int, _NubarXS]:
+    """{MT: _NubarXS} for MT452/455/456 of a model ``ReactionSuite``, as :func:`build_mf31_covariance` reads MF1.
+
+    The nu-bar is the suite's, written back as the MF1 sections the model gives
+    (``encodeMF1MT452`` and its siblings) and read by the same tabulation, so a
+    suite read from GNDS weights MF31 as its tape does. An MT the suite does not
+    state is left out.
+    """
+    from types import SimpleNamespace
+
+    from kika.endf.model_adapter.multiplicity import encodeMF1MT452, encodeMF1MT455, encodeMF1MT456
+
+    sections = {}
+    for mt, encode in ((452, encodeMF1MT452), (455, encodeMF1MT455), (456, encodeMF1MT456)):
+        try:
+            sections[mt], _ = encode(suite)
+        except (KeyError, ValueError):
+            continue
+    return _nubar_central_values(SimpleNamespace(sections=sections)) if sections else {}
+
+
+def build_mf31_covariance_from_suite(
+    suite,
+    mt_list: Optional[Sequence[int]] = None,
+    covariance_suite=None,
+    *,
+    energy_unit: str = "eV",
+    logger=None,
+):
+    """:func:`build_mf31_covariance` from a model ``ReactionSuite``, whatever format filled it.
+
+    The nu-bar comes from *suite* (:func:`nubar_central_values_from_suite`) and
+    the covariance from *covariance_suite* (default ``suite.covarianceSuite``).
+    Returns ``(cov, nubar_central, union_grid, mts_present, blocks)``, with the
+    :class:`~kika.sampling.mf33_sampling.SuiteBlocks` the MF31 blocks came from.
+    """
+    from kika.sampling.mf33_sampling import combine_mf33_covariances, per_mt_covariances_from_suite
+
+    covariances = covariance_suite if covariance_suite is not None else suite.covarianceSuite
+    nubar_central = nubar_central_values_from_suite(suite)
+    blocks = per_mt_covariances_from_suite(covariances, 31, nubar_central or None,
+                                           energy_unit=energy_unit, logger=logger)
+    requested = (sorted(blocks.per_mt) if mt_list is None
+                 else sorted({int(mt) for mt in mt_list}))
+    present = [mt for mt in requested if mt in blocks.per_mt]
+    if not present:
+        raise RuntimeError(f"None of MTs {requested} have MF31 blocks in the suite")
+    unified, grid = combine_mf33_covariances(
+        {mt: blocks.per_mt[mt] for mt in present}, present, nubar_central,
+        energy_unit=energy_unit, logger=logger,
+    )
+    return unified, nubar_central, grid, present, blocks
