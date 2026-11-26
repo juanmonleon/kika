@@ -8,17 +8,20 @@
   stated (MF 10 with its own laws), an MF 9 production is the multiplicity
   times the cross section to the processing tolerance, and a tape with
   resonance parameters is refused.
-* With IRDFF-II beside the repo (``../NuclearData/dosimetry/irdff2``): Mg, Al-27
+* With IRDFF-II beside the library tapes (``dosimetry/irdff2`` next to
+  ``KIKA_LIB_TAPES``, as ``gnds/`` is for the GNDS oracle): Mg, Al-27
   and Ti come out as the IAEA's ACE library writes them, MT 5 products numbered
   by their product and the tape's blank-exponent numbers read.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import numpy as np
 import pytest
 
+from kika._text import read_text
 from kika.ace import read_ace
 from kika.ace.classes.dosimetry import DosimetryAce, split_production_mt
 from kika.endf import ProcessingOutputError, ProcessingPlan, dosimetry_ace, process_endf
@@ -133,22 +136,27 @@ def test_a_tape_with_resonance_parameters_is_refused(tmp_path):
         dosimetry_ace(STRUCTURAL, tmp_path, extension=".02y")
 
 
-IRDFF2 = Path(__file__).resolve().parents[5] / "NuclearData" / "dosimetry" / "irdff2"
+def _irdff2() -> Path | None:
+    tapes = os.environ.get("KIKA_LIB_TAPES")
+    return Path(tapes).parent / "dosimetry" / "irdff2" if tapes else None
+
+
+IRDFF2 = _irdff2()
 
 
 def _irdffMaterial(mat, out):
-    lines = (IRDFF2 / "endf" / "IRDFF-II.endf").read_text().splitlines(keepends=True)
+    lines = read_text(IRDFF2 / "endf" / "IRDFF-II.endf").splitlines(keepends=True)
     body = [l for l in lines[1:] if l[66:70].strip() == str(mat)]
     path = out / f"irdff2-{mat}.endf"
     end = " " * 66 + "   0 0  0    0\n" + " " * 66 + "  -1 0  0    0\n"
-    path.write_text(lines[0] + "".join(body) + end)
+    path.write_text(lines[0] + "".join(body) + end, encoding="utf-8")
     return path
 
 
 @pytest.mark.parametrize("mat", [1200, 1325, 2200])
 def test_irdff2_agrees_with_the_iaea_ace_library(mat, tmp_path):
-    if not (IRDFF2 / "endf" / "IRDFF-II.endf").exists():
-        pytest.skip("no IRDFF-II in ../NuclearData/dosimetry/irdff2")
+    if IRDFF2 is None or not (IRDFF2 / "endf" / "IRDFF-II.endf").exists():
+        pytest.skip("no IRDFF-II in dosimetry/irdff2 beside KIKA_LIB_TAPES")
     mine = read_ace(str(dosimetry_ace(_irdffMaterial(mat, tmp_path), tmp_path, xsdir=False)))
     ref = read_ace(str(IRDFF2 / "ace" / "IRDFF-II" / f"dos-irdff2-{mat}.acef"))
     assert set(ref.mt_numbers) <= set(mine.mt_numbers) and set(mine.mt_numbers) - set(ref.mt_numbers) <= {1}

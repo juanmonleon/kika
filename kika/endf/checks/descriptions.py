@@ -79,11 +79,13 @@ def _build() -> Dict[str, CheckDescription]:
             "downstream sees it. Usually a record that breaks the format (a count that does "
             "not match what follows); the evidence carries the parser's message."),
         "count_mismatch": D(
-            "A count does not match the content", XS + (35,),
+            "A count does not match the content", XS + (32, 35),
             {DEFECT: "always"},
-            "A declared count (NL, NMT1, NI, NC, NCI, NK, or the number of (L, L1) blocks "
-            "NL/NL1 imply) differs from what the section holds. A processor that trusts the "
-            "count reads a different set of blocks than the evaluator wrote."),
+            "A declared count (NL, NMT1, NI, NC, NCI, NK, the number of (L, L1) blocks "
+            "NL/NL1 imply, or the NX of an MF32 LRF=7 LCOMP=2 resonance list, which must be "
+            "N1/12) differs from what the section holds. A processor that trusts the count "
+            "reads a different set of blocks than the evaluator wrote; NJOY 2016.78 ERRORR "
+            "reads NX as the number of resonances."),
         "nt_mismatch": D(
             "NT inconsistent with NE and LS", XS + (35,),
             {DEFECT: "always"},

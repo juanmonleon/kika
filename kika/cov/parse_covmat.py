@@ -4,10 +4,16 @@ COVERX and BOXER (SCALE and NJOY COVR) and COVFIL (NJOY GENDF covariance
 tapes) are read into a covariance object and written back from one. The
 readers and writers do not convert covariance values between relative and
 absolute.
+
+Each reader takes an optional ``diagnostics`` list. Given one, the reader
+appends a :class:`ReadEvent` for what the file declares and for everything it
+drops, tolerates or cannot tell, and returns the same object as without it.
 """
+import re
 import struct
 import warnings
-from typing import Dict, Tuple, List, Optional, Union
+from dataclasses import dataclass, field
+from typing import Any, Dict, Tuple, List, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -30,6 +36,79 @@ class EmptyParsingError(Exception):
 class InvalidDataFormatError(Exception):
     """Raised when the data format is invalid or corrupted."""
     pass
+
+
+@dataclass(frozen=True)
+class ReadEvent:
+    """Something a reader saw in a multigroup covariance file and did not keep as it was.
+
+    Attributes
+    ----------
+    kind : str
+        One of :data:`READ_EVENT_KINDS`: ``declared`` (a header as written),
+        ``unit_assumed`` (the file does not say relative or absolute; the flag
+        set), ``reaction_not_stated``, ``dropped_block`` (``reason``: ``zero``,
+        ``unknown_mt`` or ``unfinished``), ``dropped_values`` (in a TENDL
+        listing, ``reason``: ``overflow`` or ``stddev_differs``),
+        ``count_mismatch``, ``count_defaulted`` (a blank or zero count or
+        boundary the reader supplied), ``record_longer``,
+        ``index_out_of_range``, ``row_order``, ``repeated_block`` (a pair of
+        reactions given twice, in either orientation), ``skipped_line`` (a
+        matrix header whose matrix could not be read), and ``raw_stddev`` and
+        ``raw_correlation`` (values as written, before the reader uses them).
+    message : str
+        One sentence, with the numbers.
+    where : dict
+        The indices that apply, as the file writes them: ``mat``, ``mt``,
+        ``mat1``, ``mt1``, ``l``, ``l1``, ``row`` (1-based group), ``record``
+        (0-based matrix in file order).
+    evidence : dict
+        The values behind the message, such as the header fields of
+        ``declared`` or the arrays of ``raw_stddev`` and ``raw_correlation``.
+    """
+
+    kind: str
+    message: str
+    where: Dict[str, Any] = field(default_factory=dict)
+    evidence: Dict[str, Any] = field(default_factory=dict)
+
+
+READ_EVENT_KINDS = (
+    "declared", "unit_assumed", "reaction_not_stated", "dropped_block", "dropped_values",
+    "count_mismatch", "count_defaulted", "record_longer", "index_out_of_range", "row_order",
+    "repeated_block", "skipped_line", "raw_stddev", "raw_correlation",
+)
+
+
+def _note(diagnostics: Optional[list], kind: str, message: str,
+          where: Optional[Dict[str, Any]] = None, **evidence) -> None:
+    if diagnostics is not None:
+        diagnostics.append(ReadEvent(kind, message, dict(where or {}), evidence))
+
+
+def _note_repeated_blocks(covmat, diagnostics: Optional[list]) -> None:
+    """A pair of reactions stored twice, in the same or the other orientation."""
+    if diagnostics is None:
+        return
+    l_rows = getattr(covmat, "l_rows", None) or [-1] * len(covmat.matrices)
+    l_cols = getattr(covmat, "l_cols", None) or [-1] * len(covmat.matrices)
+    nodes = [((ir, rr, lr), (ic, rc, lc)) for ir, rr, lr, ic, rc, lc in zip(
+        covmat.isotope_rows, covmat.reaction_rows, l_rows,
+        covmat.isotope_cols, covmat.reaction_cols, l_cols)]
+    first: Dict[Tuple, int] = {}
+    for k, (a, b) in enumerate(nodes):
+        key = (a, b) if a <= b else (b, a)
+        if key not in first:
+            first[key] = k
+            continue
+        same = nodes[first[key]] == (a, b)
+        where = {"mat": a[0], "mt": a[1], "mat1": b[0], "mt1": b[1]}
+        if a[2] >= 0:
+            where.update(l=a[2], l1=b[2])
+        _note(diagnostics, "repeated_block",
+              f"MAT{a[0]}/MT{a[1]} x MAT{b[0]}/MT{b[1]} is stored again "
+              f"({'same' if same else 'other'} orientation); covariance_matrix keeps the last",
+              where, first=first[key], again=k, same_orientation=same)
 
 
 # ---------------------------------------------------------------------------
@@ -69,6 +148,14 @@ def _read_fortran_record(f, endian: str) -> bytes:
             f"Fortran record marker mismatch: header={rec_len}, trailer={tail}"
         )
     return data
+
+
+def _note_long_record(diagnostics: Optional[list], what: str, found: int, needed: int,
+                      where: Dict[str, Any]) -> None:
+    if found > needed:
+        _note(diagnostics, "record_longer",
+              f"the {what} record holds {found} bytes; its counts need {needed}",
+              where, record_bytes=found, needed_bytes=needed)
 
 
 def _write_fortran_record(f, data: bytes, endian: str) -> None:
@@ -199,7 +286,8 @@ def _coverx_energy_grid(
 # Public API — COVERX (text or binary, auto-detected)
 # ---------------------------------------------------------------------------
 
-def read_coverx(file_path: str, ascending: bool = True, energy_unit: str = 'eV') -> CrossSectionCovariance:
+def read_coverx(file_path: str, ascending: bool = True, energy_unit: str = 'eV',
+                diagnostics: Optional[list] = None) -> CrossSectionCovariance:
     """
     Read a COVERX covariance file (text or binary) and return a CrossSectionCovariance object.
 
@@ -210,11 +298,17 @@ def read_coverx(file_path: str, ascending: bool = True, energy_unit: str = 'eV')
     COVERX holds its group boundaries in eV, in descending order. Each matrix
     is stored under ``(isotope_row, mt_row, isotope_col, mt_col)``, with the
     vertical parameter of the file as the row and the horizontal one as the
-    column. The reader leaves ``is_relative`` empty (no per-matrix flag) and
-    keeps only the first Legendre block (P0) of a binary matrix. A matrix whose
-    MT is not a known reaction is skipped, in both formats. A matrix whose
-    values are all zero is skipped by the binary reader only; the text reader
-    keeps it.
+    column. A binary file says what its matrices are (NTYPE): relative
+    covariances (2) are flagged relative, covariances (1) absolute, and
+    correlations (3) are multiplied by the standard deviations of their two
+    pairs and flagged absolute. Its matrices may be split into blocks of
+    consecutive groups (NBLOK), which are put back together. A text file may
+    give its grid as the NGROUP upper bounds only, as SCALE's libraries do; the
+    lowest boundary is then the one of the ``kika.energy_grids`` structure with
+    those upper bounds. The text reader leaves ``is_relative`` empty (no
+    per-matrix flag). A matrix whose MT is not
+    a known reaction is skipped, in both formats. A matrix whose values are all
+    zero is skipped by the binary reader only; the text reader keeps it.
 
     Parameters
     ----------
@@ -228,6 +322,10 @@ def read_coverx(file_path: str, ascending: bool = True, energy_unit: str = 'eV')
         ``'eV'`` (default) or ``'MeV'``. The file holds eV: ``'MeV'`` converts
         the grid values and sets ``energy_unit`` of the result. Matrix values
         and cross sections are not touched.
+    diagnostics : list, optional
+        If given, :class:`ReadEvent` entries are appended to it: the header
+        as declared and everything the reader drops or tolerates. The result
+        does not depend on it.
 
     Returns
     -------
@@ -241,22 +339,31 @@ def read_coverx(file_path: str, ascending: bool = True, energy_unit: str = 'eV')
     EmptyParsingError
         If no valid covariance matrices were found in the file
     InvalidDataFormatError
-        If the binary structure is corrupted, or the energy grid of a text
-        file does not hold ``num_groups + 1`` numbers
+        If the binary structure is corrupted (its blocks do not add up to the
+        groups, or a correlation matrix has no standard deviations), or the
+        energy grid of a text file does not hold ``num_groups + 1`` numbers
     ValueError
         If *energy_unit* is not ``'eV'`` or ``'MeV'``
     """
     fmt = _detect_coverx_format(file_path)
     if fmt == 'binary':
-        return _read_coverx_binary(file_path, ascending, energy_unit)
-    return _read_coverx_text(file_path, ascending, energy_unit)
+        covmat = _read_coverx_binary(file_path, ascending, energy_unit, diagnostics)
+    else:
+        covmat = _read_coverx_text(file_path, ascending, energy_unit, diagnostics)
+    if not covmat.is_relative:
+        _note(diagnostics, "unit_assumed",
+              "no relative/absolute flag is kept, so kika reads every matrix as relative",
+              is_relative=None)
+    _note_repeated_blocks(covmat, diagnostics)
+    return covmat
 
 
 # ---------------------------------------------------------------------------
 # COVERX text parser (formerly read_scale_covmat)
 # ---------------------------------------------------------------------------
 
-def _read_coverx_text(file_path: str, ascending: bool = True, energy_unit: str = 'eV') -> CrossSectionCovariance:
+def _read_coverx_text(file_path: str, ascending: bool = True, energy_unit: str = 'eV',
+                      diagnostics: Optional[list] = None) -> CrossSectionCovariance:
     """
     Read a SCALE covariance matrix text file and convert it to a CrossSectionCovariance object.
 
@@ -285,12 +392,17 @@ def _read_coverx_text(file_path: str, ascending: bool = True, energy_unit: str =
 
     # Parse the group number from the second line
     num_groups = int(file_lines[1].split()[0])
+    _note(diagnostics, "declared",
+          f"COVERX text, {num_groups} groups; control line {file_lines[1].split()}",
+          format="coverx-text", title=file_lines[0].strip(), control=file_lines[1].split())
 
     # COVERX stores energy boundaries in eV immediately after the control line.
     # Parse the file's own grid instead of inferring one from the group count.
     energy_values = []
     cursor = 2
     while cursor < len(file_lines) and len(energy_values) < num_groups + 1:
+        if len(energy_values) == num_groups and _is_coverx_text_header(file_lines[cursor]):
+            break
         try:
             energy_values.extend(
                 float(token.replace("D", "E"))
@@ -301,6 +413,9 @@ def _read_coverx_text(file_path: str, ascending: bool = True, energy_unit: str =
                 "Invalid COVERX text energy grid"
             ) from exc
         cursor += 1
+
+    if len(energy_values) == num_groups:
+        energy_values = _complete_upper_bounds(energy_values, file_path, diagnostics)
 
     if len(energy_values) != num_groups + 1:
         raise InvalidDataFormatError(
@@ -320,16 +435,26 @@ def _read_coverx_text(file_path: str, ascending: bool = True, energy_unit: str =
     )
 
     # Parse the file
+    headers = 0
     for i in range(cursor, len(file_lines)):
         line = file_lines[i]
         if len(line.split()) == 5:
+            tokens = line.split()
+            is_header = all(t.lstrip("-").isdigit() for t in tokens)
+            where = ({"mat": int(tokens[2]), "mt": int(tokens[3]), "mat1": int(tokens[0]),
+                      "mt1": int(tokens[1]), "record": headers} if is_header else {})
+            headers += is_header
             try:
                 # COVERX labels the first pair as the horizontal (column)
                 # parameter and the second as the vertical (row) parameter.
                 reaction_horizontal = int(line.split()[1])
                 reaction_vertical = int(line.split()[3])
 
-                if (reaction_horizontal in MT_TO_REACTION and reaction_vertical in MT_TO_REACTION):
+                if not (reaction_horizontal in MT_TO_REACTION and reaction_vertical in MT_TO_REACTION):
+                    _note(diagnostics, "dropped_block",
+                          f"MT{reaction_vertical} x MT{reaction_horizontal}: an MT kika does not "
+                          "know, so the matrix is skipped", where, reason="unknown_mt", line=i + 1)
+                else:
 
                     isotope_horizontal = int(line.split()[0])
                     isotope_vertical = int(line.split()[2])
@@ -358,9 +483,17 @@ def _read_coverx_text(file_path: str, ascending: bool = True, energy_unit: str =
                         reaction_horizontal,
                         matrix,
                     )
-            except (ValueError, IndexError):
-                # Skip lines with invalid data
+            except (ValueError, IndexError) as exc:
+                # Data lines of five values land here too; only a header is worth saying.
+                if is_header:
+                    _note(diagnostics, "skipped_line",
+                          f"line {i + 1} is a matrix header whose matrix could not be read "
+                          f"({type(exc).__name__}: {exc}); the matrix is skipped",
+                          where, line=i + 1)
                 continue
+
+    _note(diagnostics, "declared", f"{headers} matrix headers in the file",
+          format="coverx-text", matrix_headers=headers)
 
     # Verify we found at least some valid data
     if covmat.num_matrices == 0:
@@ -373,7 +506,48 @@ def _read_coverx_text(file_path: str, ascending: bool = True, energy_unit: str =
 # COVERX binary parser
 # ---------------------------------------------------------------------------
 
-def _read_coverx_binary(file_path: str, ascending: bool = True, energy_unit: str = 'eV') -> CrossSectionCovariance:
+def _is_coverx_text_header(line: str) -> bool:
+    tokens = line.split()
+    return len(tokens) == 5 and all(t.lstrip("-").isdigit() for t in tokens)
+
+
+def _complete_upper_bounds(upper_ev: List[float], file_path, diagnostics: Optional[list],
+                           rtol: float = 1e-6, what: str = "COVERX text grid") -> List[float]:
+    """A grid of upper bounds only, with the lowest boundary of the kika structure it matches."""
+    from kika.energy_grids import grids
+
+    upper = np.sort(np.asarray(upper_ev, dtype=float))
+    matches = {}
+    for name, preset in vars(grids).items():
+        if not name.isupper() or not isinstance(preset, list) or len(preset) != upper.size + 1:
+            continue
+        edges = np.sort(np.asarray(preset, dtype=float))
+        edges_ev = edges * (1.0e6 if edges[-1] < 1.0e3 else 1.0)
+        if np.allclose(edges_ev[1:], upper, rtol=rtol, atol=0.0):
+            matches[name] = float(edges_ev[0])
+    if len(set(matches.values())) > 1:
+        raise InvalidDataFormatError(
+            f"the {what} gives {upper.size} upper bounds and no lowest boundary, and the "
+            f"structures with these upper bounds disagree on it ({matches}): {file_path}")
+    if not matches:
+        raise InvalidDataFormatError(
+            f"the {what} gives {upper.size} upper bounds and no lowest boundary, and "
+            f"no group structure in kika.energy_grids has these upper bounds: {file_path}")
+    name, emin = sorted(matches.items())[0]
+    _note(diagnostics, "count_defaulted",
+          f"the grid gives the {upper.size} upper bounds only; the lowest boundary, "
+          f"{emin:g} eV, is the one of {name}, whose upper bounds these are",
+          structure=name, emin_ev=emin)
+    descending = upper_ev[0] > upper_ev[-1]
+    return list(upper_ev) + [emin] if descending else [emin] + list(upper_ev)
+
+
+#: NTYPE (ORNL/TM-7181, appendix A): 1 covariance, 2 relative covariance, 3 correlation.
+_COVERX_NTYPE_RELATIVE = {1: False, 2: True, 3: False}
+
+
+def _read_coverx_binary(file_path: str, ascending: bool = True, energy_unit: str = 'eV',
+                        diagnostics: Optional[list] = None) -> CrossSectionCovariance:
     """
     Read a binary COVERX covariance file and return a CrossSectionCovariance object.
 
@@ -412,6 +586,11 @@ def _read_coverx_binary(file_path: str, ascending: bool = True, energy_unit: str
         ngroup, nngrup, _nggrup, _ntype, nmmp, nmtrix, nholl = struct.unpack(
             endian + '7i', rec2
         )
+        _note(diagnostics, "declared",
+              f"COVERX binary ({'big' if endian == '>' else 'little'}-endian): NGROUP={ngroup}, "
+              f"NNGRUP={nngrup}, NGGRUP={_nggrup}, NTYPE={_ntype}, NMMP={nmmp}, NMTRIX={nmtrix}",
+              format="coverx-binary", ngroup=ngroup, nngrup=nngrup, nggrup=_nggrup,
+              ntype=_ntype, nmmp=nmmp, nmtrix=nmtrix, nholl=nholl)
 
         # Record 3: File description
         _read_fortran_record(f, endian)
@@ -421,19 +600,44 @@ def _read_coverx_binary(file_path: str, ascending: bool = True, energy_unit: str
         n_energies = nngrup + 1
         energy_grid = list(struct.unpack(endian + f'{n_energies}f',
                                          rec4[:n_energies * 4]))
+        _note_long_record(diagnostics, "group boundaries", len(rec4), n_energies * 4, {})
 
         # Record 5: Material-reaction pair metadata — nmmp × (matid, mtid, mwgt)
         rec5 = _read_fortran_record(f, endian)
         triplets = struct.unpack(endian + f'{nmmp * 3}i', rec5)
         pairs = [(triplets[i * 3], triplets[i * 3 + 1]) for i in range(nmmp)]
+        _note(diagnostics, "declared", f"{nmmp} material-reaction pairs with their MWGT",
+              format="coverx-binary",
+              pairs=[[triplets[i * 3], triplets[i * 3 + 1], triplets[i * 3 + 2]] for i in range(nmmp)])
 
-        # Records 6 … 6+nmmp-1: cross-section data per (matid, mtid) pair
+        # Records 6 … 6+nmmp-1: cross sections and standard deviations per (matid, mtid) pair
         xs_data: Dict[Tuple[int, int], np.ndarray] = {}
+        stddevs: Dict[Tuple[int, int], np.ndarray] = {}
         for matid, mtid in pairs:
             rec = _read_fortran_record(f, endian)
             xs = np.array(struct.unpack(endian + f'{ngroup}f', rec[:ngroup * 4]))
             if not np.allclose(xs, 0.0):
                 xs_data[(matid, mtid)] = xs
+            elif diagnostics is not None:
+                _note(diagnostics, "dropped_values",
+                      f"MAT{matid}/MT{mtid}: the cross sections are all zero and are not kept",
+                      {"mat": matid, "mt": mtid}, values="cross_sections")
+            where = {"mat": matid, "mt": mtid}
+            if len(rec) >= 2 * ngroup * 4:
+                stddevs[(matid, mtid)] = np.array(
+                    struct.unpack(endian + f'{ngroup}f', rec[ngroup * 4:2 * ngroup * 4]))
+                _note(diagnostics, "raw_stddev",
+                      f"MAT{matid}/MT{mtid}: the standard deviations the file gives (NTYPE={_ntype})",
+                      where, stddev=stddevs[(matid, mtid)].copy(), order="file")
+            _note_long_record(diagnostics, "cross sections and standard deviations",
+                              len(rec), 2 * ngroup * 4, where)
+
+        relative = _COVERX_NTYPE_RELATIVE.get(_ntype)
+        if _ntype not in _COVERX_NTYPE_RELATIVE:
+            _note(diagnostics, "unit_assumed",
+                  f"NTYPE={_ntype} is none of 1 (covariance), 2 (relative covariance) or "
+                  "3 (correlation); the matrices are kept as written, with no flag",
+                  ntype=_ntype, is_relative=None)
 
         # --- Covariance matrix blocks (nmtrix total) ----------------------
         covmat = CrossSectionCovariance(num_groups=ngroup, energy_unit=energy_unit)
@@ -449,10 +653,11 @@ def _read_coverx_binary(file_path: str, ascending: bool = True, energy_unit: str
         for key, xs in xs_data.items():
             covmat.cross_sections[key] = xs[::-1] if reverse else xs
 
-        for _ in range(nmtrix):
+        for record in range(nmtrix):
             # Control record: mat1, mt1, mat2, mt2, nblock
             rec_ctrl = _read_fortran_record(f, endian)
             mat1, mt1, mat2, mt2, nblock = struct.unpack(endian + '5i', rec_ctrl)
+            where = {"mat": mat2, "mt": mt2, "mat1": mat1, "mt1": mt1, "record": record}
 
             # Band + Legendre record: ngroup×(jband,ijj) + nblock×lgpr
             rec_band = _read_fortran_record(f, endian)
@@ -462,14 +667,37 @@ def _read_coverx_binary(file_path: str, ascending: bool = True, energy_unit: str
             jband = [ints[i * 2] for i in range(ngroup)]
             ijj = [ints[i * 2 + 1] for i in range(ngroup)]
 
-            # Data record(s) — one per Legendre block; use only P0 (first)
-            total_vals = sum(jband)
-            rec_data = _read_fortran_record(f, endian)
-            vals = struct.unpack(endian + f'{total_vals}f', rec_data[:total_vals * 4])
+            _note_long_record(diagnostics, "band", len(rec_band), n_ints * 4, where)
 
-            # Skip remaining Legendre blocks if nblock > 1
-            for _ in range(1, nblock):
-                _read_fortran_record(f, endian)
+            # One data record per block of LGRP(N) consecutive groups (rows).
+            lgrp = list(ints[2 * ngroup:2 * ngroup + nblock])
+            if sum(lgrp) != ngroup:
+                if nblock != 1:
+                    raise InvalidDataFormatError(
+                        f"COVERX matrix {record} (MAT{mat2}/MT{mt2} x MAT{mat1}/MT{mt1}): its "
+                        f"{nblock} blocks hold {sum(lgrp)} groups (LGRP={lgrp}), not {ngroup}: "
+                        f"{file_path}")
+                _note(diagnostics, "count_mismatch",
+                      f"LGRP={lgrp[0]} for the one block of a {ngroup}-group matrix; read as "
+                      f"{ngroup}", where, declared=lgrp[0], found=ngroup)
+                lgrp = [ngroup]
+            vals: List[float] = []
+            first_row = 0
+            for rows in lgrp:
+                kmax = sum(jband[first_row:first_row + rows])
+                rec_data = _read_fortran_record(f, endian)
+                vals.extend(struct.unpack(endian + f'{kmax}f', rec_data[:kmax * 4]))
+                _note_long_record(diagnostics, "matrix data", len(rec_data), kmax * 4,
+                                  dict(where, row=first_row + 1))
+                first_row += rows
+
+            if diagnostics is not None:
+                outside = [j + 1 for j in range(ngroup) if jband[j] > 0
+                           and (j - ijj[j] + 1 < 0 or j - ijj[j] + 1 + jband[j] > ngroup)]
+                if outside:
+                    _note(diagnostics, "index_out_of_range",
+                          f"{len(outside)} rows have a band (JBAND, IJJ) that reaches outside "
+                          f"the {ngroup}x{ngroup} matrix", where, rows=outside[:10], n=len(outside))
 
             # Unpack banded sparse into dense matrix
             matrix = np.zeros((ngroup, ngroup))
@@ -484,18 +712,36 @@ def _read_coverx_binary(file_path: str, ascending: bool = True, energy_unit: str
             # small relative covariance, or one whose negative correlations
             # cancel its variances, sums to nearly nothing and is still data.
             if not np.any(matrix):
+                _note(diagnostics, "dropped_block", "the matrix is all zero and is skipped",
+                      where, reason="zero")
                 continue
 
             # Skip unknown reaction types
             if mt1 not in MT_TO_REACTION or mt2 not in MT_TO_REACTION:
+                _note(diagnostics, "dropped_block",
+                      f"MT{mt2} x MT{mt1}: an MT kika does not know, so the matrix is skipped",
+                      where, reason="unknown_mt")
                 continue
+
+            if _ntype == 3:
+                sd_row, sd_col = stddevs.get((mat2, mt2)), stddevs.get((mat1, mt1))
+                if sd_row is None or sd_col is None:
+                    raise InvalidDataFormatError(
+                        f"COVERX correlation matrix (NTYPE 3) MAT{mat2}/MT{mt2} x MAT{mat1}/MT{mt1} "
+                        f"has no standard deviations for both pairs, so it cannot be turned "
+                        f"into a covariance: {file_path}")
+                _note(diagnostics, "raw_correlation",
+                      f"MAT{mat2}/MT{mt2} x MAT{mat1}/MT{mt1}: the correlations (NTYPE 3) as "
+                      "written, before the standard deviations multiply them",
+                      where, correlation=matrix.copy(), order="file")
+                matrix = matrix * np.outer(sd_row, sd_col)
 
             if reverse:
                 matrix = np.flipud(np.fliplr(matrix))
 
             # COVERX control fields 1/2 identify the horizontal (column)
             # parameter; fields 3/4 identify the vertical (row) parameter.
-            covmat.add_matrix(mat2, mt2, mat1, mt1, matrix)
+            covmat.add_matrix(mat2, mt2, mat1, mt1, matrix, is_relative=relative)
 
     if covmat.num_matrices == 0:
         raise EmptyParsingError(
@@ -1149,7 +1395,8 @@ def _choose_boxer_ncf(controls: list) -> int:
 # Public API — BOXER format
 # ---------------------------------------------------------------------------
 
-def read_boxer(file_path: str, energy_unit: str = 'eV') -> CrossSectionCovariance:
+def read_boxer(file_path: str, energy_unit: str = 'eV',
+               diagnostics: Optional[list] = None) -> CrossSectionCovariance:
     """
     Read a BOXER card-image (ASCII) covariance file and return a CrossSectionCovariance.
 
@@ -1160,8 +1407,8 @@ def read_boxer(file_path: str, energy_unit: str = 'eV') -> CrossSectionCovarianc
     The energy grid is kept in the order of the file (no reordering). A
     covariance matrix (ITYPE 3) is stored as read; a correlation matrix
     (ITYPE 4) is multiplied by the outer product of the standard-deviation
-    vectors (ITYPE 2) of its row and column reactions, so it comes back as a
-    covariance in the units of those vectors. The reader leaves ``is_relative``
+    vectors (ITYPE 2) of its row and column reactions, wherever they are in the
+    file, so it comes back as a covariance in the units of those vectors. The reader leaves ``is_relative``
     empty (no per-matrix flag). A block that is exactly zero is skipped.
 
     Parameters
@@ -1172,6 +1419,10 @@ def read_boxer(file_path: str, energy_unit: str = 'eV') -> CrossSectionCovarianc
         Energy unit for the energy grid: ``'eV'`` (default) or ``'MeV'``.
         BOXER holds eV; ``'MeV'`` converts the values, not just the label.
         Matrix values, standard deviations and cross sections are not touched.
+    diagnostics : list, optional
+        If given, :class:`ReadEvent` entries are appended to it: each header
+        as declared, the standard deviations and correlations as written, and
+        everything the reader drops. The result does not depend on it.
 
     Returns
     -------
@@ -1202,6 +1453,10 @@ def read_boxer(file_path: str, energy_unit: str = 'eV') -> CrossSectionCovarianc
     cur_nrowh = cur_ncolh = 0
     cur_itype = 0
     cur_row = 0
+    cur_cells = 0
+    cur_where: Dict[str, Any] = {}
+    itypes: Dict[int, int] = {}
+    finished: List[Tuple[int, int, int, int, int, np.ndarray, Dict[str, Any]]] = []
 
     while cursor < len(lines):
         line = lines[cursor]
@@ -1226,8 +1481,21 @@ def read_boxer(file_path: str, energy_unit: str = 'eV') -> CrossSectionCovarianc
         ncolh = hdr['ncolh']
 
         # Read values and controls
+        header_line = cursor
         xval, cursor = _read_boxer_values(lines, cursor, nval, nvf)
         icons, cursor = _read_boxer_controls(lines, cursor, ncon, ncf)
+        if diagnostics is not None:
+            itypes[itype] = itypes.get(itype, 0) + 1
+            where = {"mat": mat, "mt": mt, "mat1": mat1, "mt1": mt1, "line": header_line}
+            if sum(itypes.values()) == 1:
+                _note(diagnostics, "declared",
+                      f"BOXER {hdr['hlib']!r} {hdr['hdescr'].strip()!r}",
+                      format="boxer", hlib=hdr['hlib'], hdescr=hdr['hdescr'].strip())
+            new_values = sum(1 for ic in icons if ic < 0)
+            if new_values != nval:
+                _note(diagnostics, "count_mismatch",
+                      f"ITYPE {itype}: NVAL={nval} values declared, the controls load {new_values}",
+                      where, declared=nval, found=new_values, itype=itype)
 
         if itype == 0:
             # Energy boundaries
@@ -1251,6 +1519,8 @@ def read_boxer(file_path: str, energy_unit: str = 'eV') -> CrossSectionCovarianc
             sd = vec[:, 0] if vec.shape[1] == 1 else vec[0, :]
             zaid = int(_map_mat(str(mat)))
             stddevs[(zaid, mt)] = sd
+            _note(diagnostics, "raw_stddev", f"MAT{mat}/MT{mt}: the standard deviations (ITYPE 2)",
+                  {"mat": mat, "mt": mt}, stddev=np.array(sd, copy=True), order="file")
 
         elif itype in (3, 4):
             # Covariance (3) or correlation (4) matrix.
@@ -1264,6 +1534,13 @@ def read_boxer(file_path: str, energy_unit: str = 'eV') -> CrossSectionCovarianc
                 or key != (cur_mat, cur_mt, cur_mat1, cur_mt1, cur_itype)
             )
             if is_new_matrix:
+                if cur_matrix is not None:
+                    _note(diagnostics, "dropped_block",
+                          f"the matrix MAT{cur_mat}/MT{cur_mt} x MAT{cur_mat1}/MT{cur_mt1} "
+                          "ends before its last block (NROWM never reached 0) and is lost",
+                          cur_where, reason="unfinished")
+                cur_cells = 0
+                cur_where = {"mat": mat, "mt": mt, "mat1": mat1, "mt1": mt1, "line": header_line}
                 ncol_init = nrowh if ncolh == 0 else ncolh
                 cur_matrix = np.zeros((nrowh, ncol_init))
                 cur_mat, cur_mt, cur_mat1, cur_mt1 = mat, mt, mat1, mt1
@@ -1276,33 +1553,58 @@ def read_boxer(file_path: str, energy_unit: str = 'eV') -> CrossSectionCovarianc
                 istart=cur_row, matrix=cur_matrix,
             )
             cur_row = nrowh - nrowm
+            cur_cells += sum(abs(ic) for ic in icons)
 
             if nrowm == 0:
-                zaid_row = int(_map_mat(str(cur_mat)))
-                zaid_col = int(_map_mat(str(cur_mat1)))
-
-                if cur_itype == 4:
-                    # Correlation → covariance
-                    sd_row = stddevs.get((zaid_row, cur_mt))
-                    sd_col = stddevs.get((zaid_col, cur_mt1))
-                    if sd_row is None or sd_col is None:
-                        missing = [f"MAT{m} MT{r}" for m, r, s in
-                                   ((cur_mat, cur_mt, sd_row), (cur_mat1, cur_mt1, sd_col))
-                                   if s is None]
-                        raise InvalidDataFormatError(
-                            f"BOXER correlation matrix (ITYPE 4) MAT{cur_mat} MT{cur_mt} x "
-                            f"MAT{cur_mat1} MT{cur_mt1} has no standard deviations "
-                            f"(ITYPE 2) for {', '.join(missing)}, so it cannot be turned "
-                            f"into a covariance: {file_path}"
-                        )
-                    cur_matrix = cur_matrix * np.outer(sd_row, sd_col)
-
-                if np.any(cur_matrix):  # only an exactly-zero block is skipped
-                    covmat.add_matrix(zaid_row, cur_mt, zaid_col, cur_mt1, cur_matrix)
-
+                expected = (cur_nrowh * (cur_nrowh + 1) // 2 if cur_ncolh == 0
+                            else cur_nrowh * cur_ncolh)
+                if cur_cells != expected:
+                    _note(diagnostics, "count_mismatch",
+                          f"the controls fill {cur_cells} cells of a matrix that has {expected}",
+                          cur_where, declared=expected, found=cur_cells, itype=cur_itype)
+                finished.append((cur_mat, cur_mt, cur_mat1, cur_mt1, cur_itype, cur_matrix, cur_where))
                 cur_matrix = None
                 cur_row = 0
 
+    if cur_matrix is not None:
+        _note(diagnostics, "dropped_block",
+              f"the matrix MAT{cur_mat}/MT{cur_mt} x MAT{cur_mat1}/MT{cur_mt1} ends with the "
+              "file before its last block (NROWM never reached 0) and is lost",
+              cur_where, reason="unfinished")
+
+    # COVR writes a correlation before the standard deviations of its second reaction.
+    for m, r, m1, r1, itype_, matrix, where in finished:
+        zaid_row, zaid_col = int(_map_mat(str(m))), int(_map_mat(str(m1)))
+        if itype_ == 4:
+            sd_row, sd_col = stddevs.get((zaid_row, r)), stddevs.get((zaid_col, r1))
+            if sd_row is None or sd_col is None:
+                missing = [f"MAT{a} MT{b}" for a, b, s in ((m, r, sd_row), (m1, r1, sd_col))
+                           if s is None]
+                raise InvalidDataFormatError(
+                    f"BOXER correlation matrix (ITYPE 4) MAT{m} MT{r} x MAT{m1} MT{r1} has no "
+                    f"standard deviations (ITYPE 2) for {', '.join(missing)} in the file, so it "
+                    f"cannot be turned into a covariance: {file_path}"
+                )
+            _note(diagnostics, "raw_correlation",
+                  f"MAT{m}/MT{r} x MAT{m1}/MT{r1}: the correlations (ITYPE 4) as written, "
+                  "before the standard deviations multiply them",
+                  where, correlation=np.array(matrix, copy=True), order="file")
+            matrix = matrix * np.outer(sd_row, sd_col)
+        if np.any(matrix):  # only an exactly-zero block is skipped
+            covmat.add_matrix(zaid_row, r, zaid_col, r1, matrix)
+        else:
+            _note(diagnostics, "dropped_block", "the matrix is all zero and is skipped",
+                  where, reason="zero")
+    if diagnostics is not None:
+        _note(diagnostics, "declared",
+              "headers by ITYPE: " + ", ".join(f"{k}: {v}" for k, v in sorted(itypes.items())),
+              format="boxer", itypes=dict(sorted(itypes.items())))
+        if not covmat.is_relative:
+            _note(diagnostics, "unit_assumed",
+                  "BOXER does not say whether its covariances are relative (it follows the "
+                  "irelco of COVR); no flag is kept, so kika reads every matrix as relative",
+                  is_relative=None)
+        _note_repeated_blocks(covmat, diagnostics)
     if covmat.num_matrices == 0:
         raise EmptyParsingError(
             f"No valid data was extracted from the BOXER file: {file_path}"
@@ -1484,6 +1786,216 @@ def write_boxer(
 
 # ---------------------------------------------------------------------------
 # Public API — COVFIL / GENDF (NJOY format)
+_TENDL_MATMT = re.compile(r"mat-mt=\(\s*(\d+),\s*(\d+)\)")
+
+
+def _tendl_table(lines: List[str], cursor: int, columns: int, where: Dict[str, Any],
+                 diagnostics: Optional[list]) -> Tuple[np.ndarray, int]:
+    """The group table after a ``material`` header: one row per group, ``columns`` numbers each."""
+    rows = []
+    while cursor < len(lines):
+        tokens = lines[cursor].split()
+        if len(tokens) != columns or not tokens[0].isdigit():
+            break
+        try:
+            rows.append([float(t) for t in tokens])
+        except ValueError:
+            break
+        cursor += 1
+    table = np.array(rows, dtype=float).reshape(-1, columns)
+    if table.size and not np.array_equal(table[:, 0], np.arange(1, len(table) + 1)):
+        _note(diagnostics, "row_order", "the group numbers of the table are not 1, 2, 3, ...",
+              where, groups=table[:, 0].astype(int).tolist())
+    return table, cursor
+
+
+def _tendl_correlation(lines: List[str], cursor: int, ngroup: int, where: Dict[str, Any],
+                       diagnostics: Optional[list]) -> Tuple[np.ndarray, int]:
+    """The panels after ``<<< correlation matrix >>>``, in thousandths; ``*****`` becomes NaN."""
+    rho = np.zeros((ngroup, ngroup))
+    overflow = []
+    out_of_range = 0
+    cursor += 2  # the marker and the 'column material ... vs row material ...' line
+    while cursor < len(lines) and lines[cursor].split()[:1] == ["row"]:
+        cols = [int(t) - 1 for t in lines[cursor].split()[1:]]
+        cursor += 2  # the 'row' header and the 'column-----' rule
+        while cursor < len(lines):
+            line = lines[cursor]
+            head = line[:6].strip()
+            if not head.isdigit():
+                break
+            g = int(head) - 1
+            for k, c in enumerate(cols):
+                field_ = line[6 + 5 * k: 11 + 5 * k]
+                if not (0 <= g < ngroup and 0 <= c < ngroup):
+                    out_of_range += 1
+                    continue
+                if "*" in field_:
+                    rho[g, c] = np.nan
+                    overflow.append((g + 1, c + 1))
+                else:
+                    rho[g, c] = int(field_) / 1000.0
+            cursor += 1
+    if overflow:
+        _note(diagnostics, "dropped_values",
+              f"{len(overflow)} correlations are printed as ***** (the value does not fit "
+              "the field) and are kept as NaN", where, reason="overflow", cells=overflow)
+    if out_of_range:
+        _note(diagnostics, "index_out_of_range",
+              f"{out_of_range} correlations sit at a group outside 1..{ngroup} and are dropped",
+              where, count=out_of_range, ngroup=ngroup)
+    return rho, cursor
+
+
+def read_tendl_matrix(file_path: str, energy_unit: str = 'eV',
+                      diagnostics: Optional[list] = None) -> CrossSectionCovariance:
+    """
+    Read a TENDL covariance listing (``*-njoy-cov-187g.all.300.K.matrix``).
+
+    For many of its nuclides TENDL publishes a text listing of the covariances
+    processed with NJOY. For each reaction it gives a table of groups (upper
+    boundary in eV, cross section, relative and absolute standard deviation);
+    for each pair of reactions, a table with both cross sections and both
+    relative standard deviations. Each table is followed by the correlation
+    matrix in thousandths, in panels of 25 groups, with only the groups whose
+    standard deviation is not zero printed. The lines of a panel are the groups
+    of the first reaction of the pair and its columns those of the second.
+
+    Each block comes back as a relative covariance (``is_relative`` True):
+    the correlation times the relative standard deviations of the two
+    reactions, taken from their own tables. Groups that are not printed are
+    zero. A correlation printed as ``*****`` is NaN. The grid keeps the order
+    of the file (descending); the listing gives upper bounds only, and the
+    lowest boundary is the one of the kika group structure whose upper bounds
+    match (the 187-group listings are the LANL 187-group structure). The
+    listing gives MAT numbers and no ZA: a MAT outside kika's table stays the
+    isotope of its blocks.
+
+    Parameters
+    ----------
+    file_path : str
+        Path to the listing.
+    energy_unit : str, optional
+        Unit of the returned grid: ``'eV'`` (default) or ``'MeV'``.
+    diagnostics : list, optional
+        If given, :class:`ReadEvent` entries are appended to it: the tables as
+        declared, the standard deviations and correlations as written, and
+        everything the reader drops or supplies. The result does not depend on it.
+
+    Returns
+    -------
+    CrossSectionCovariance
+
+    Raises
+    ------
+    InvalidDataFormatError
+        If a correlation matrix has no table before it, or the grid matches no
+        kika group structure.
+    EmptyParsingError
+        If the file holds no table.
+    """
+    with open(file_path, 'r', encoding='ascii', errors='replace') as f:
+        lines = f.read().splitlines()
+
+    grid_desc: Optional[List[float]] = None
+    tables: Dict[Tuple[int, int], Dict[str, np.ndarray]] = {}
+    blocks = []
+    cursor, n_self, n_cross = 0, 0, 0
+    while cursor < len(lines):
+        line = lines[cursor]
+        stripped = line.strip()
+        is_self = stripped.startswith("material mat-mt=")
+        is_cross = stripped.startswith("1st material mat-mt=")
+        if not (is_self or is_cross):
+            if stripped:
+                _note(diagnostics, "skipped_line", f"line {cursor + 1} is not part of a table "
+                      "or a correlation matrix and is skipped", {"line": cursor + 1},
+                      text=stripped[:80])
+            cursor += 1
+            continue
+        pairs = [(int(m), int(t)) for m, t in _TENDL_MATMT.findall(line)]
+        (mat, mt), (mat1, mt1) = pairs[0], pairs[-1]
+        where = {"mat": mat, "mt": mt, "mat1": mat1, "mt1": mt1, "record": len(blocks)}
+        table, cursor = _tendl_table(lines, cursor + 2, 5 if is_self else 6, where, diagnostics)
+        if grid_desc is None:
+            grid_desc = table[:, 1].tolist()
+        elif table.shape[0] != len(grid_desc) or not np.allclose(table[:, 1], grid_desc,
+                                                                  rtol=1e-6, atol=0.0):
+            _note(diagnostics, "count_mismatch",
+                  f"the table has {table.shape[0]} groups whose energies are not those of the "
+                  f"first table ({len(grid_desc)} groups); its block is dropped",
+                  where, declared=len(grid_desc), found=table.shape[0])
+            while cursor < len(lines) and not lines[cursor].strip().startswith(
+                    ("material mat-mt=", "1st material mat-mt=")):
+                cursor += 1
+            continue
+        if is_self:
+            n_self += 1
+            key = (mat, mt)
+            if key in tables:
+                _note(diagnostics, "repeated_block", f"MAT{mat}/MT{mt} has a second table; "
+                      "the reader keeps the last", where)
+            tables[key] = {"xs": table[:, 2], "rsd": table[:, 3]}
+            rsd_row = rsd_col = table[:, 3]
+            _note(diagnostics, "raw_stddev", f"MAT{mat}/MT{mt}: the relative standard "
+                  "deviations as written", where, stddev=table[:, 3].copy(), relative=True,
+                  order="file")
+        else:
+            n_cross += 1
+            rsd_row, rsd_col = table[:, 4], table[:, 5]
+        if cursor >= len(lines) or "correlation matrix" not in lines[cursor]:
+            raise InvalidDataFormatError(
+                f"the table of MAT{mat}/MT{mt} x MAT{mat1}/MT{mt1} is not followed by its "
+                f"correlation matrix (line {cursor + 1}): {file_path}")
+        rho, cursor = _tendl_correlation(lines, cursor, len(grid_desc), where, diagnostics)
+        _note(diagnostics, "raw_correlation", f"MAT{mat}/MT{mt} x MAT{mat1}/MT{mt1}: the "
+              "correlations as written (thousandths divided by 1000)", where,
+              correlation=rho.copy(), order="file", resolution=1e-3)
+        blocks.append((mat, mt, mat1, mt1, rho, rsd_row, rsd_col, where))
+
+    if grid_desc is None:
+        raise EmptyParsingError(f"No table was found in the TENDL listing: {file_path}")
+
+    edges = _complete_upper_bounds(grid_desc, file_path, diagnostics, rtol=1e-4,
+                                   what="TENDL listing")
+    covmat = CrossSectionCovariance(num_groups=len(grid_desc),
+                                    energy_grid=_ev_grid_in(edges, energy_unit),
+                                    energy_unit=energy_unit)
+    for mat in sorted({m for m, _ in tables} | {b[2] for b in blocks}):
+        if mat not in ENDF_MAT_TO_ZAID:
+            _note(diagnostics, "declared", f"MAT {mat} is not in kika's MAT table and the "
+                  "listing gives no ZA: its blocks keep the MAT as their isotope",
+                  {"mat": mat}, mat_kept=mat)
+    for (mat, mt), table in tables.items():
+        covmat.cross_sections[(int(_map_mat(str(mat))), mt)] = table["xs"]
+    for mat, mt, mat1, mt1, rho, rsd_row, rsd_col, where in blocks:
+        own = [tables.get((mat, mt)), tables.get((mat1, mt1))]
+        for side, (given, table) in enumerate(zip((rsd_row, rsd_col), own)):
+            if table is not None and not np.allclose(given, table["rsd"], rtol=1e-4, atol=0.0):
+                _note(diagnostics, "dropped_values",
+                      f"the {'1st' if side == 0 else '2nd'} relative standard deviations of "
+                      "this pair differ from the reaction's own table, which the reader uses",
+                      where, reason="stddev_differs", given=np.array(given),
+                      own=np.array(table["rsd"]))
+        rsd_row = own[0]["rsd"] if own[0] is not None else rsd_row
+        rsd_col = own[1]["rsd"] if own[1] is not None else rsd_col
+        matrix = rho * np.outer(rsd_row, rsd_col)
+        if np.any(matrix != 0):  # NaN counts as not zero
+            covmat.add_matrix(int(_map_mat(str(mat))), mt, int(_map_mat(str(mat1))), mt1,
+                              matrix, is_relative=True)
+        else:
+            _note(diagnostics, "dropped_block", "the matrix is all zero and is skipped",
+                  where, reason="zero")
+    if diagnostics is not None:
+        _note(diagnostics, "declared",
+              f"{n_self} reaction tables and {n_cross} pair tables in {len(grid_desc)} groups",
+              format="tendl_matrix", reactions=n_self, pairs=n_cross, ngroup=len(grid_desc))
+        _note_repeated_blocks(covmat, diagnostics)
+    if covmat.num_matrices == 0:
+        raise EmptyParsingError(f"No valid data was extracted from the TENDL listing: {file_path}")
+    return covmat
+
+
 # ---------------------------------------------------------------------------
 
 def _read_n_values(lines: List[str], cursor: int, n: int) -> Tuple[List[float], int]:
@@ -1513,6 +2025,52 @@ def _read_n_values(lines: List[str], cursor: int, n: int) -> Tuple[List[float], 
             values.append(float(val))
         cursor += 1
     return values, cursor
+
+
+def _note_covfil_row(diagnostics: Optional[list], where: Dict[str, Any], row_head,
+                     ng: int, rows_seen: List[int]) -> None:
+    """What is wrong with one row record (0, 0, NW, ISTART, NW, IROW) of a COVFIL block."""
+    if diagnostics is None:
+        return
+    nw = int(row_head['C3'] or 0)
+    nw2 = int(row_head['C5'] or 0)
+    istart = int(row_head['C4'] or 0)
+    irow = int(row_head['C6'] or 0)
+    here = dict(where, row=irow)
+    if nw != nw2:
+        _note(diagnostics, "count_mismatch",
+              f"row {irow}: NW is {nw} in C3 and {nw2} in C5", here, declared=nw, found=nw2)
+    if not 1 <= irow <= ng or (nw > 0 and (istart < 1 or istart - 1 + nw > ng)):
+        # A 0 is read as 1, so such a row lands on row or column 1 without an error.
+        _note(diagnostics, "index_out_of_range",
+              f"row {irow}, columns {istart}-{istart + nw - 1}: outside the {ng}x{ng} block",
+              here, irow=irow, istart=istart, nw=nw, ng=ng)
+    irow = irow or 1
+    if rows_seen and irow <= rows_seen[-1]:
+        _note(diagnostics, "row_order",
+              f"row {irow} comes after row {rows_seen[-1]}"
+              + ("; it was given before" if irow in rows_seen else ""),
+              here, previous=rows_seen[-1], repeated=irow in rows_seen)
+    rows_seen.append(irow)
+
+
+def _note_pair_count(diagnostics: Optional[list], lines: List[str], cursor: int, declared: int,
+                     where: Dict[str, Any]) -> None:
+    """After NMT1 pairs the section must end; a pair more means NMT1 was short."""
+    if diagnostics is None or cursor >= len(lines):
+        return
+    _, mf, mt = parse_endf_id(lines[cursor])
+    if mf != 0 and mt != 0:
+        _note(diagnostics, "count_mismatch",
+              f"NMT1={declared} pairs read and the section goes on (line {cursor + 1}); the "
+              "rest is read as if it were a new section", where, declared=declared, line=cursor + 1)
+
+
+def _covfil_zaid(mat: int, za: float) -> int:
+    """The ZAID of the tape's own material: kika's table for a known MAT, else the ZA of the file."""
+    if mat in ENDF_MAT_TO_ZAID:
+        return ENDF_MAT_TO_ZAID[mat]
+    return int(round(za)) if za > 0 else mat
 
 
 def _parse_covfil_mf1(lines: List[str], cursor: int) -> Tuple[float, float, float, int, List[float], int]:
@@ -1560,7 +2118,7 @@ def _parse_covfil_mf1(lines: List[str], cursor: int) -> Tuple[float, float, floa
 
 
 def _parse_covfil_mf3(
-    lines: List[str], cursor: int, ngrp: int
+    lines: List[str], cursor: int, ngrp: int, own_zaid: Optional[int] = None
 ) -> Tuple[Dict[Tuple[int, int], np.ndarray], int]:
     """
     Parse all MF3 cross-section sections until FEND (MF=0).
@@ -1592,13 +2150,14 @@ def _parse_covfil_mf3(
         # Read cross-section values
         values, cursor = _read_n_values(lines, cursor, n_vals)
 
-        zaid = int(_map_mat(str(mat)))
+        zaid = own_zaid if own_zaid is not None else int(_map_mat(str(mat)))
         xs_dict[(zaid, mt)] = np.array(values)
     return xs_dict, cursor
 
 
 def _parse_covfil_mf33(
-    lines: List[str], cursor: int, ngrp: int, mat: int
+    lines: List[str], cursor: int, ngrp: int, mat: int, diagnostics: Optional[list] = None,
+    zaid: Optional[int] = None,
 ) -> Tuple[List[Tuple[int, int, int, int, np.ndarray]], int]:
     """
     Parse all MF33 covariance sections until FEND.
@@ -1608,7 +2167,8 @@ def _parse_covfil_mf33(
     blocks : list of (iso_row, mt_row, iso_col, mt_col, matrix)
     new_cursor : int
     """
-    zaid = int(_map_mat(str(mat)))
+    if zaid is None:
+        zaid = int(_map_mat(str(mat)))
     blocks: List[Tuple[int, int, int, int, np.ndarray]] = []
 
     while cursor < len(lines):
@@ -1627,6 +2187,9 @@ def _parse_covfil_mf33(
         nmt1 = int(head['C6'] or 0)
         mt_row = mt
         cursor += 1
+        _note(diagnostics, "declared", f"MF33 MT{mt}: HEAD (ZA, AWR, L1, L2, N1, NMT1)",
+              {"mat": rmat, "mf": 33, "mt": mt}, format="covfil",
+              head=[head[k] for k in ("C1", "C2", "C3", "C4", "C5", "C6")])
 
         # Loop over NMT1 reaction pairs
         for _ in range(nmt1):
@@ -1635,9 +2198,27 @@ def _parse_covfil_mf33(
             mat1 = int(cont['C3'] or 0)
             mt1 = int(cont['C4'] or 0)
             ng = int(cont['C6'] or ngrp)
+            where = {"mat": rmat, "mf": 33, "mt": mt_row, "mat1": mat1, "mt1": mt1}
+            if diagnostics is not None:
+                if parse_endf_id(lines[cursor])[2] == 0:
+                    _note(diagnostics, "count_mismatch",
+                          f"MF33 MT{mt_row}: NMT1={nmt1} but the section ends at line {cursor + 1}",
+                          {"mat": rmat, "mf": 33, "mt": mt_row}, declared=nmt1, line=cursor + 1)
+                if not int(cont['C6'] or 0):
+                    _note(diagnostics, "count_defaulted",
+                          f"NG of the pair is blank or zero; the file's {ngrp} groups are used",
+                          where, used=ngrp)
+                elif ng != ngrp:
+                    _note(diagnostics, "count_mismatch",
+                          f"NG={ng} for the pair, {ngrp} groups in MF1", where, declared=ngrp, found=ng)
             cursor += 1
+            rows_seen: List[int] = []
 
-            iso_col = int(_map_mat(str(mat1))) if mat1 != 0 else zaid
+            iso_col = int(_map_mat(str(mat1))) if mat1 not in (0, mat) else zaid
+            if mat1 not in (0, mat) and mat1 not in ENDF_MAT_TO_ZAID:
+                _note(diagnostics, "declared",
+                      f"MAT1={mat1} is not in kika's MAT table: the block keeps the MAT as its isotope",
+                      where, mat1_kept=mat1)
 
             sub_mat = np.zeros((ng, ng))
 
@@ -1652,6 +2233,7 @@ def _parse_covfil_mf33(
                 nw = int(row_head['C3'] or 0)
                 istart = int(row_head['C4'] or 1)
                 irow = int(row_head['C6'] or 1)
+                _note_covfil_row(diagnostics, where, row_head, ng, rows_seen)
                 cursor += 1
 
                 if nw > 0:
@@ -1679,23 +2261,31 @@ def _parse_covfil_mf33(
 
             if np.any(sub_mat):  # only an exactly-zero block is skipped
                 blocks.append((zaid, mt_row, iso_col, mt1, sub_mat))
+            else:
+                _note(diagnostics, "dropped_block", "the matrix is all zero and is skipped",
+                      where, reason="zero")
+        _note_pair_count(diagnostics, lines, cursor, nmt1, {"mat": rmat, "mf": 33, "mt": mt_row})
 
     return blocks, cursor
 
 
 def _parse_covfil_mf34(
-    lines: List[str], cursor: int, ngrp: int, mat: int, energy_grid: List[float]
-) -> Tuple[List[Tuple[int, int, int, int, int, int, np.ndarray]], int]:
+    lines: List[str], cursor: int, ngrp: int, mat: int, energy_grid: List[float],
+    diagnostics: Optional[list] = None, zaid: Optional[int] = None,
+) -> Tuple[List[Tuple[int, int, int, int, int, int, np.ndarray, bool]], int]:
     """
     Parse all MF34 covariance sections until FEND.
 
+    ERRORR writes MT251 with irelco, not NMT1, in C4 (errorr.f90, covout).
+
     Returns
     -------
-    blocks : list of (iso_row, mt_row, l_row, iso_col, mt_col, l_col, matrix)
+    blocks : list of (iso_row, mt_row, l_row, iso_col, mt_col, l_col, matrix, is_relative)
     new_cursor : int
     """
-    zaid = int(_map_mat(str(mat)))
-    blocks: List[Tuple[int, int, int, int, int, int, np.ndarray]] = []
+    if zaid is None:
+        zaid = int(_map_mat(str(mat)))
+    blocks: List[Tuple[int, int, int, int, int, int, np.ndarray, bool]] = []
 
     while cursor < len(lines):
         rmat, mf, mt = parse_endf_id(lines[cursor])
@@ -1713,16 +2303,41 @@ def _parse_covfil_mf34(
         nmt1 = int(head['C4'] or 0)
         mt_row = mt
         cursor += 1
+        _note(diagnostics, "declared",
+              f"MF34 MT{mt}: HEAD (ZA, AWR, C3, C4, C5, C6); ERRORR writes C4=irelco, C5=L, C6=L1",
+              {"mat": rmat, "mf": 34, "mt": mt}, format="covfil",
+              head=[head[k] for k in ("C1", "C2", "C3", "C4", "C5", "C6")])
+        errorr = mt == 251
+        relative = True
+        if errorr:
+            relative = nmt1 != 0
+            _note(diagnostics, "reaction_not_stated",
+                  "ERRORR writes MF34 under MT251: the reaction whose Legendre coefficients these "
+                  "are is not in the file", {"mat": rmat, "mf": 34, "mt": mt})
+        else:
+            _note(diagnostics, "unit_assumed",
+                  "an MF34 section not written by ERRORR does not say whether it is relative; "
+                  "its blocks are flagged relative", {"mat": rmat, "mf": 34, "mt": mt},
+                  is_relative=True)
 
         # Loop over reaction pairs (including L/L1 combinations)
-        for _ in range(nmt1):
+        pairs = 0
+        while (cursor < len(lines) and parse_endf_id(lines[cursor])[2] != 0 if errorr
+               else pairs < nmt1):
+            pairs += 1
             # CONT: (0, 0, MT1, L, L1, NG)
             cont = parse_line(lines[cursor])
             mt1 = int(cont['C3'] or 0)
             l_row = int(cont['C4'] or 0)
             l_col = int(cont['C5'] or 0)
             ng = int(cont['C6'] or ngrp)
+            where = {"mat": rmat, "mf": 34, "mt": mt_row, "mt1": mt1, "l": l_row, "l1": l_col}
+            if diagnostics is not None and not int(cont['C6'] or 0):
+                _note(diagnostics, "count_defaulted",
+                      f"NG of the pair is blank or zero; the file's {ngrp} groups are used",
+                      where, used=ngrp)
             cursor += 1
+            rows_seen: List[int] = []
 
             sub_mat = np.zeros((ng, ng))
 
@@ -1736,6 +2351,7 @@ def _parse_covfil_mf34(
                 nw = int(row_head['C3'] or 0)
                 istart = int(row_head['C4'] or 1)
                 irow = int(row_head['C6'] or 1)
+                _note_covfil_row(diagnostics, where, row_head, ng, rows_seen)
                 cursor += 1
 
                 if nw > 0:
@@ -1750,12 +2366,18 @@ def _parse_covfil_mf34(
                         break
 
             if np.any(sub_mat):  # only an exactly-zero block is skipped
-                blocks.append((zaid, mt_row, l_row, zaid, mt1, l_col, sub_mat))
+                blocks.append((zaid, mt_row, l_row, zaid, mt1, l_col, sub_mat, relative))
+            else:
+                _note(diagnostics, "dropped_block", "the matrix is all zero and is skipped",
+                      where, reason="zero")
+        if not errorr:
+            _note_pair_count(diagnostics, lines, cursor, nmt1, {"mat": rmat, "mf": 34, "mt": mt_row})
 
     return blocks, cursor
 
 
-def read_covfil(file_path: str, energy_unit: str = 'eV') -> Union[CrossSectionCovariance, LegendreCovariance]:
+def read_covfil(file_path: str, energy_unit: str = 'eV',
+                diagnostics: Optional[list] = None) -> Union[CrossSectionCovariance, LegendreCovariance]:
     """
     Parse an NJOY-generated COVFIL/GENDF covariance file.
 
@@ -1765,9 +2387,13 @@ def read_covfil(file_path: str, energy_unit: str = 'eV') -> Union[CrossSectionCo
     MF3 cross sections are stored in ``CrossSectionCovariance.cross_sections`` (MF33 case only).
 
     The file is one material and holds its group boundaries in eV; the grid is
-    kept in the order of the file (no reordering). Every matrix is flagged
-    ``is_relative=True``: NJOY writes relative covariances, and the reader does
-    not check it. A block that is exactly zero is skipped. In an MF34 file the
+    kept in the order of the file (no reordering). The material's isotope is
+    its ZAID from kika's MAT table, or the ZA of the file when the MAT is not in
+    it. An MF33 matrix is flagged ``is_relative=True`` (ERRORR's default; its
+    ``irelco`` is not written). An MF34 section under MT251, as ERRORR writes
+    it, takes the flag from ``irelco`` in its HEAD and keeps 251 as the
+    reaction, since the file does not name it; any other MF34 section is
+    flagged relative. A block that is exactly zero is skipped. In an MF34 file the
     rows and columns of a block index the groups of the file's grid, and the
     block belongs to the Legendre orders ``l_row`` and ``l_col`` of its
     section; the frame is ``"unknown"`` (the file does not say). The grouped
@@ -1783,6 +2409,10 @@ def read_covfil(file_path: str, energy_unit: str = 'eV') -> Union[CrossSectionCo
         Energy unit for the energy grid: ``'eV'`` (default) or ``'MeV'``.
         The file holds eV; ``'MeV'`` converts the values, not just the label.
         Matrix values and cross sections are not touched.
+    diagnostics : list, optional
+        If given, :class:`ReadEvent` entries are appended to it: each header
+        as declared and everything the reader drops, defaults or cannot tell.
+        The result does not depend on it.
 
     Returns
     -------
@@ -1808,15 +2438,25 @@ def read_covfil(file_path: str, energy_unit: str = 'eV') -> Union[CrossSectionCo
 
     # --- MF1 MT451: energy grid (eV in the file) ---
     za, awr, temperature, ngrp, energy_grid, cursor = _parse_covfil_mf1(lines, cursor)
-    energy_grid = _ev_grid_in(energy_grid, energy_unit)
     mat, _, _ = parse_endf_id(lines[1])  # MAT from first data line
+    _note(diagnostics, "declared",
+          f"COVFIL MAT{mat}: ZA={za:g}, AWR={awr:g}, T={temperature:g} K, {ngrp} groups",
+          {"mat": mat, "mf": 1, "mt": 451}, format="covfil", za=za, awr=awr,
+          temperature=temperature, ngroup=ngrp, boundaries=len(energy_grid))
+    if len(energy_grid) != ngrp + 1:
+        _note(diagnostics, "count_mismatch",
+              f"MF1 declares {ngrp} groups and {len(energy_grid)} boundaries",
+              {"mat": mat, "mf": 1, "mt": 451}, declared=ngrp + 1, found=len(energy_grid))
+    energy_grid = _ev_grid_in(energy_grid, energy_unit)
+
+    own_zaid = _covfil_zaid(mat, za)
 
     # --- MF3: cross sections (optional) ---
     xs_dict: Dict[Tuple[int, int], np.ndarray] = {}
     if cursor < len(lines):
         peek_mat, peek_mf, peek_mt = parse_endf_id(lines[cursor])
         if peek_mf == 3:
-            xs_dict, cursor = _parse_covfil_mf3(lines, cursor, ngrp)
+            xs_dict, cursor = _parse_covfil_mf3(lines, cursor, ngrp, own_zaid)
 
     # --- Determine covariance type: MF33 or MF34 ---
     if cursor < len(lines):
@@ -1827,7 +2467,7 @@ def read_covfil(file_path: str, energy_unit: str = 'eV') -> Union[CrossSectionCo
         )
 
     if peek_mf == 33:
-        blocks, cursor = _parse_covfil_mf33(lines, cursor, ngrp, mat)
+        blocks, cursor = _parse_covfil_mf33(lines, cursor, ngrp, mat, diagnostics, own_zaid)
         covmat = CrossSectionCovariance(num_groups=ngrp, energy_unit=energy_unit)
         covmat.energy_grid = energy_grid
         covmat.metadata['awr'] = awr
@@ -1835,6 +2475,11 @@ def read_covfil(file_path: str, energy_unit: str = 'eV') -> Union[CrossSectionCo
         for iso_row, mt_row, iso_col, mt_col, matrix in blocks:
             covmat.add_matrix(iso_row, mt_row, iso_col, mt_col, matrix, is_relative=True)
         covmat.cross_sections.update(xs_dict)
+        _note(diagnostics, "unit_assumed",
+              "COVFIL MF33 does not say whether its covariances are relative (ERRORR's irelco is "
+              "not written); every matrix is flagged relative, ERRORR's default",
+              {"mat": mat, "mf": 33}, is_relative=True)
+        _note_repeated_blocks(covmat, diagnostics)
         if covmat.num_matrices == 0:
             raise EmptyParsingError(
                 f"No valid data was extracted from the NJOY covariance matrix file: {file_path}"
@@ -1842,17 +2487,19 @@ def read_covfil(file_path: str, energy_unit: str = 'eV') -> Union[CrossSectionCo
         return covmat
 
     elif peek_mf == 34:
-        blocks34, cursor = _parse_covfil_mf34(lines, cursor, ngrp, mat, energy_grid)
+        blocks34, cursor = _parse_covfil_mf34(lines, cursor, ngrp, mat, energy_grid, diagnostics,
+                                              own_zaid)
         mf34 = LegendreCovariance(energy_unit=energy_unit)
         mf34.metadata['awr'] = awr
         mf34.metadata['temperature'] = temperature
-        for iso_row, mt_row, l_row, iso_col, mt_col, l_col, matrix in blocks34:
+        for iso_row, mt_row, l_row, iso_col, mt_col, l_col, matrix, relative in blocks34:
             mf34.add_matrix(
                 isotope_row=iso_row, reaction_row=mt_row, l_row=l_row,
                 isotope_col=iso_col, reaction_col=mt_col, l_col=l_col,
                 matrix=matrix, energy_grid=energy_grid,
-                is_relative=True, frame="unknown",
+                is_relative=relative, frame="unknown",
             )
+        _note_repeated_blocks(mf34, diagnostics)
         if mf34.num_matrices == 0:
             raise EmptyParsingError(
                 f"No valid data was extracted from the NJOY covariance matrix file: {file_path}"

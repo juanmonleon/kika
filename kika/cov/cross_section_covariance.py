@@ -227,7 +227,7 @@ class CrossSectionCovariance:
         One flag per block: True for a relative covariance (dimensionless, the
         covariance of ``Δσ/σ`` in each group, not a percentage), False for an
         absolute one (in the square of the cross-section unit). A list shorter
-        than *matrices* is allowed (the readers of COVERX and BOXER leave it
+        than *matrices* is allowed (the BOXER and COVERX text readers leave it
         empty): the code of this class reads a missing flag as relative.
     cross_sections : dict
         ``(isotope, mt)`` to a vector of ``G`` group cross sections, as the

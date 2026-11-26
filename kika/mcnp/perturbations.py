@@ -3,6 +3,28 @@ from typing import Dict, Optional, List, Tuple
 import pandas as pd
 from kika.energy_grids.utils import _identify_energy_grid
 
+# ENDF-6 sum MTs and the MT range each one adds up.
+_SUM_MT_RANGES = {
+    4: range(51, 92),
+    16: range(875, 892),
+    103: range(600, 650),
+    104: range(650, 700),
+    105: range(700, 750),
+    106: range(750, 800),
+    107: range(800, 850),
+}
+
+
+def _single_mt(reactions: Tuple[int, ...]) -> Optional[int]:
+    """The one MT that *reactions* stand for: itself, or the sum MT whose whole range they list."""
+    unique = set(reactions)
+    if len(unique) == 1:
+        return reactions[0]
+    for mt, members in _SUM_MT_RANGES.items():
+        if unique == set(members):
+            return mt
+    return None
+
 class PertCollection(dict):
     """A collection class for perturbation cards that provides a nice summary representation.
     
@@ -164,7 +186,7 @@ class Perturbation:
         :returns: Sorted list of unique reaction numbers across all perturbations
         :rtype: List[Optional[int]]
         """
-        return sorted(list({pert.reaction for pert in self.pert.values()}))
+        return sorted({pert.reaction for pert in self.pert.values()}, key=lambda r: (r is None, r or 0))
     
     def reactions_for_zaid(self, zaid: int) -> List[Optional[int]]:
         """Get unique reaction numbers from perturbations for a specific ZAID.
@@ -174,7 +196,7 @@ class Perturbation:
         :returns: Sorted list of unique reaction numbers for the given ZAID
         :rtype: List[Optional[int]]
         """
-        return sorted({p.reaction for p in self.pert.values() if p.zaid == zaid})
+        return sorted({p.reaction for p in self.pert.values() if p.zaid == zaid}, key=lambda r: (r is None, r or 0))
 
     @property
     def zaids(self) -> List[int]:
@@ -210,7 +232,8 @@ class Perturbation:
         :type zaid: Optional[int]
         :returns: Dictionary mapping reaction numbers to lists of perturbation IDs
         :rtype: Dict[Optional[int], List[int]]
-        :raises ValueError: If no perturbations are defined
+        :raises ValueError: If no perturbations are defined, or a selected card's
+            ``RXN=`` lists several MTs that are not the whole range of a sum MT
         """
         if not self.pert:
             raise ValueError("No perturbations defined")
@@ -226,7 +249,17 @@ class Perturbation:
             filtered = {id: pert for id, pert in filtered.items() if pert.zaid == zaid}
         if not filtered:
             return {}
-            
+
+        mixed = {id: pert.reactions for id, pert in filtered.items()
+                 if pert.reaction is None and len(pert.reactions) > 1}
+        if mixed:
+            cards = "; ".join(f"PERT{id} RXN={' '.join(map(str, rxns))}" for id, rxns in sorted(mixed.items()))
+            raise ValueError(
+                f"{cards}: these cards perturb several reactions together, and a sensitivity "
+                f"profile is one MT. Write one PERT card per MT, or list a sum MT's whole range "
+                f"(51-91 for MT 4)."
+            )
+
         groups = {}
         for id, pert in filtered.items():
             reaction = pert.reaction
@@ -386,8 +419,11 @@ class Pert:
     :type rho: Optional[float]
     :ivar method: Method number for the perturbation calculation
     :type method: Optional[int]
-    :ivar reaction: Reaction number for the perturbation
+    :ivar reaction: The MT the perturbation stands for: the one ``RXN=`` value, the sum
+        MT when ``RXN=`` lists its whole range (51–91 is MT 4), otherwise None
     :type reaction: Optional[int]
+    :ivar reactions: Every MT of ``RXN=``, in the card's order
+    :type reactions: Tuple[int, ...]
     :ivar energy: Energy range (min, max) for the perturbation
     :type energy: Optional[Tuple[float, float]]
     """
@@ -401,6 +437,14 @@ class Pert:
     energy: Optional[Tuple[float, float]] = None
     zaid: Optional[int] = None
     original_material: Optional[int] = None
+    reactions: Tuple[int, ...] = ()
+
+    def __post_init__(self):
+        self.reactions = tuple(self.reactions)
+        if not self.reactions and self.reaction is not None:
+            self.reactions = (self.reaction,)
+        elif self.reactions and self.reaction is None:
+            self.reaction = _single_mt(self.reactions)
 
     def __repr__(self):
         """Returns a formatted string representation of the perturbation.
@@ -440,9 +484,11 @@ class Pert:
         if self.method is not None:
             info_lines.append(f"{'Method:':{label_width}} {self.method}")
         
-        if self.reaction is not None:
+        if len(self.reactions) > 1:
+            info_lines.append(f"{'Reactions:':{label_width}} {', '.join(map(str, self.reactions))}")
+        elif self.reaction is not None:
             info_lines.append(f"{'Reaction:':{label_width}} {self.reaction}")
-        
+
         if self.energy:
             info_lines.append(f"{'Energy range:':{label_width}} {self.energy[0]:.6e} - {self.energy[1]:.6e} MeV")
 

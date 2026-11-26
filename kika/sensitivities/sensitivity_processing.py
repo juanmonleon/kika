@@ -159,8 +159,8 @@ def _compute_sensitivity_impl(input_data, mctal, tally: int,
         in MCNP, added by the T parameter in the tally definition).
     """
     pert_energies = input_data.perturbation.pert_energies
-    reactions = input_data.perturbation.reactions_for_zaid(zaid)
     group_dict_first = input_data.perturbation._group_perts_by_reaction(2, material=material, zaid=zaid)
+    reactions = input_data.perturbation.reactions_for_zaid(zaid)
 
     # Check if second-order perturbations are available
     has_second_order = False

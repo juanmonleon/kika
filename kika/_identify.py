@@ -353,9 +353,10 @@ def _endfOrCovfil(path, lines) -> str:
     its N1 field (zero or more) and NJOY's grouped tapes store a negative
     number there (GENDF's ``-1``, ERRORR's ``-NK``; ``write_covfil`` follows
     ERRORR). A grouped tape is then streamed to its first MF33 or MF34, which
-    is what ``read_covfil`` reads. ERRORR also writes MF31 (with MF3) and MF35
-    (with MF5), and groupr writes MF3 and MF6 with no covariance at all; those
-    are refused by name, since there is no reader to hand them to.
+    is what ``read_covfil`` reads. ERRORR files the nubar covariances (MF31) as
+    MF33, so they are read too. It keeps MF35 (with MF5) and MF40, and groupr writes
+    MF3 and MF6 with no covariance at all; those are refused by name, since there
+    is no reader to hand them to.
 
     The order of sections alone is **not** a test. A COVFIL goes MF1, MF3,
     MF33 and never has MF2, which looked like enough until the committed
