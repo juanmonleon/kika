@@ -793,7 +793,7 @@ class MF33MT(MT):
             nc_is_rel: Optional[bool] = None
             if subsection.nc_records:
                 for nc in subsection.nc_records:
-                    if nc.lty == 0 and sibling_sections is not None and mt1 != self.number:
+                    if nc.lty == 0 and sibling_sections is not None and (mt1 != self.number or iso_col != isotope):
                         if iso_col != isotope:
                             logger.warning(f"MT{self.number}: NC LTY=0 in a block with another material "
                                            f"(MAT1={mat1}, MT1={mt1}) is not resolved; the block is left out")
