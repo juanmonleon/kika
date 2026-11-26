@@ -65,25 +65,20 @@ def explain_missing_matrix(form: object, where: str) -> str:
     if components is not None:
         return (
             f"{where} states its covariance as a <{tag}> of {len(components)} "
-            f"components, not as one matrix. GNDS §25.2 lets a section give "
-            f"several forms on different grids, and kika does not add them up: "
-            f"one of them may be a shortRangeSelfScalingVariance, whose "
-            f"magnitude depends on the processing group width, so summing them "
-            f"onto a fixed grid would state a number the file does not. "
-            f"The ENDF path merges them before the model sees "
-            f"them and the GNDS path does not, which is why the same evaluation "
-            f"reaches here in two shapes. Reach for `form.components` and "
-            f"decide which of them your calculation means — taking the first "
-            f"is not it, it is the 3×3 short-range block on Fe-56."
+            f"components, not as one matrix, and this calculation reads one "
+            f"matrix per section. `kika.cov.group_arithmetic.collapse_form` sums "
+            f"the matrices and short-range variances of a <mixed> on their union "
+            f"grid as ENDF's NI sub-subsections are summed, and "
+            f"`kika.sampling.mf33_sampling.build_mf33_covariance_from_suite` "
+            f"assembles a whole MF31/MF33 suite that way, sums included."
         )
 
     if summands is not None:
         return (
             f"{where} states its covariance as a <{tag}> of {len(summands)} "
             f"summands, which name other sections rather than carrying a "
-            f"matrix. Resolving them is the caller's: follow "
-            f"`form.summands[i].href` into the suite and combine with "
-            f"`.coefficient`."
+            f"matrix. `kika.sampling.mf33_sampling.build_mf33_covariance_from_suite` "
+            f"resolves them for MF31/MF33 by the bilinear sum rule."
         )
 
     return (

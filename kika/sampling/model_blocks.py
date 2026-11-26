@@ -703,8 +703,9 @@ def _stated_matrix(form, where: str):
     sections, which :mod:`kika.sampling.cross_section_sums` realises on the
     draw (a derived sum is re-derived, a ``Remainder`` takes the difference),
     so it contributes no block here. Any other form without one matrix still
-    raises: a GNDS ``mixed`` of matrices, or one holding a
-    ``shortRangeSelfScalingVariance``, is not decided.
+    raises: the sampler does not yet take a GNDS ``mixed`` of matrices or one
+    holding a ``shortRangeSelfScalingVariance``, which
+    :func:`kika.cov.group_arithmetic.collapse_form` sums for reading.
     """
     if _is_sum_statement(form):
         return None

@@ -309,10 +309,10 @@ class ShortRangeSelfScalingVariance:
     ``dependenceOnProcessedGroupWidth`` says how it scales with that width
     (``'inverse'`` in every file examined).
 
-    It is a class of its own rather than another :class:`CovarianceMatrix`
-    precisely so that nothing can add it to one by accident: it is not a
-    component that can be summed with its siblings on a fixed grid, and a
-    ``mixed`` that contains one does **not** mean "add these matrices together".
+    It is a class of its own rather than another :class:`CovarianceMatrix` so
+    that nothing adds it to one by accident: on another grid its variance scales
+    with the group width, not piecewise-constant. A ``mixed`` that holds one is
+    summed by :func:`kika.cov.group_arithmetic.collapse_form`, which applies it.
     """
 
     matrix: Optional[CovarianceMatrix] = None

@@ -183,8 +183,8 @@ def test_the_sum_of_a_mixed_reproduces_the_matrix_endf_merged(
     **The arithmetic is not invented here.** ``MF33MT._process_ni_records_to_matrix``
     already performs it on the ENDF side and has since long before GNDS: every
     NI sub-subsection projected piecewise-constant onto the union of the grids
-    and added, LB=8/9 decoded as LB=0 — i.e. the short-range self-scaling term
-    is summed in like any other. That is the carrier the thesis runs on, so the
+    and added (LB=8/9 by their group-width rule, which Fe-56 does not have).
+    That is the carrier the thesis runs on, so the
     question is not "what should combining a ``mixed`` do" but "does the ENDF
     answer come back out of the GNDS components", and the answer decides
     §2.2 rather than opening it.
@@ -226,3 +226,22 @@ def test_the_sum_of_a_mixed_reproduces_the_matrix_endf_merged(
         compared += 1
 
     assert compared == 3, f"expected MT1, MT2 and MT102 to be mixed; {compared}"
+
+
+def test_the_whole_mf33_assembled_from_gnds_is_the_tape_s(gndsCovariances, fe56_b81_tape):
+    """Every block of NNDC's file, ``mixed`` ones summed, against the tape path: bit for bit.
+
+    Fe-56's blocks are all relative, so neither side needs σ(E) and the two
+    assemblies share no code but the arithmetic in ``kika.cov``.
+    """
+    from kika.endf.read_endf import read_endf
+    from kika.sampling.mf33_sampling import build_mf33_covariance, build_mf33_covariance_from_suite
+
+    gnds, _ = gndsCovariances
+    mf33 = read_endf(str(fe56_b81_tape)).mf[33]
+    fromGnds, gridGnds, present, blocks = build_mf33_covariance_from_suite(gnds, None, None)
+    assert tuple(present) == EXPECTED_MTS and not blocks.declined
+    fromTape, gridTape, _ = build_mf33_covariance(mf33, present, None)
+    assert gridGnds == gridTape
+    np.testing.assert_array_equal(np.nan_to_num(fromGnds.covariance_matrix),
+                                  np.nan_to_num(fromTape.covariance_matrix))

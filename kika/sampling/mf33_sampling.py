@@ -40,6 +40,7 @@ from kika.endf.classes.mf33 import mixesAbsoluteAndRelative
 # resolved range.
 from kika.endf.classes.mf33.mf33 import bin_average_xs as _bin_average_xs
 from kika.algebra import interval_laws
+from kika.cov.group_arithmetic import table_bin_average
 from kika.processing.njoy_pendf_cache import (
     find_njoy_executable,
     get_or_create_pendf,
@@ -168,6 +169,28 @@ def build_mf33_covariance(
             mf3_sections=mf3_sections if mf3_sections else None,
         )
 
+    unified, union_grid = combine_mf33_covariances(
+        per_mt_covs, mts_present, mf3_sections, energy_unit=energy_unit, logger=logger,
+    )
+    return unified, union_grid, mts_present
+
+
+def combine_mf33_covariances(
+    per_mt_covs: Dict[int, CrossSectionCovariance],
+    mts_present: Sequence[int],
+    mf3_sections: Optional[Dict[int, object]] = None,
+    *,
+    energy_unit: str = "eV",
+    logger=None,
+) -> Tuple[CrossSectionCovariance, List[float]]:
+    """Steps 4-6 of :func:`load_mf33_covariance`: per-MT blocks → one relative covariance on their union grid.
+
+    *per_mt_covs* maps each row MT to its blocks on their own grids, from a tape
+    (``MF33MT.to_xs_covmat``) or from a covariance suite
+    (:func:`per_mt_covariances_from_suite`). An absolute block whose row or column
+    σ(E) is not in *mf3_sections* is dropped with a warning.
+    """
+    mf3_sections = mf3_sections or {}
     union_grid = _build_union_grid(per_mt_covs, mts_present)
     if len(union_grid) < 2:
         raise RuntimeError(
@@ -179,12 +202,7 @@ def build_mf33_covariance(
     if mf3_sections:
         for mt in mts_present:
             if mt in mf3_sections:
-                section = mf3_sections[mt]
-                energies = np.asarray(section.energies, dtype=float)
-                bin_xs[mt] = _bin_average_xs(
-                    energies, np.asarray(section.cross_sections, dtype=float), union_grid,
-                    interval_laws(energies.size, list(getattr(section, 'energy_interpolation', ()))),
-                )
+                bin_xs[mt] = table_bin_average(mf3_sections[mt], union_grid)
 
     unified = CrossSectionCovariance(
         num_groups=len(union_grid) - 1,
@@ -235,7 +253,197 @@ def build_mf33_covariance(
                 is_relative=True,
             )
 
-    return unified, list(union_grid), mts_present
+    return unified, list(union_grid)
+
+
+@dataclasses.dataclass
+class SuiteBlocks:
+    """What :func:`per_mt_covariances_from_suite` built, and what it could not."""
+
+    per_mt: Dict[int, CrossSectionCovariance]
+    #: Row MT → why its blocks were left out (a stated sum, a missing σ(E)).
+    declined: Dict[int, str]
+    #: Blocks with another material, not part of one evaluation's covariance.
+    other_material: List[str]
+
+
+def per_mt_covariances_from_suite(
+    suite,
+    mf: int = 33,
+    cross_sections: Optional[Dict[int, object]] = None,
+    *,
+    energy_unit: str = "eV",
+    logger=None,
+) -> SuiteBlocks:
+    """A covariance suite's MF33 (or MF31) sections → per-row-MT blocks, as ``MF33MT.to_xs_covmat`` gives them.
+
+    Works on the model, so a suite read from ENDF and one read from GNDS give the
+    same blocks: each section's form is collapsed by
+    :func:`kika.cov.group_arithmetic.collapse_form` (a ``mixed`` of matrices and
+    short-range variances summed on its union grid). *cross_sections* maps MT to
+    σ(E), anything :func:`~kika.cov.group_arithmetic.table_bin_average` reads; it
+    is read only for a block that mixes absolute and relative components, and a
+    summation MT it lacks is summed from its partials as on the tape path. A row
+    MT whose blocks state a sum (ENDF NC LTY=0) or need a σ(E) that is missing is
+    left out whole and named in ``declined``.
+    """
+    from kika.cov.group_arithmetic import MixedKindsNeedCrossSections
+    from kika.sampling.model_blocks import _endf_mfmt, _za_of
+
+    rows: Dict[int, Dict[int, object]] = {}
+    other_material: List[str] = []
+    for section in getattr(suite, "covarianceSections", suite):
+        mfmt = _endf_mfmt(section.rowData)
+        if mfmt is None or mfmt[0] != mf:
+            continue
+        if getattr(section.columnData, "otherEvaluation", None) is not None:
+            other_material.append(str(getattr(section, "label", "?")))
+            continue
+        col = _endf_mfmt(section.columnData) if section.columnData is not None else None
+        rows.setdefault(mfmt[1], {})[col[1] if col is not None else mfmt[1]] = section
+
+    resolver = _SuiteSumResolver(rows, cross_sections, logger)
+    per_mt: Dict[int, CrossSectionCovariance] = {}
+    declined: Dict[int, str] = {}
+    for mt in sorted(rows):
+        cov = CrossSectionCovariance(energy_unit=energy_unit)
+        try:
+            for mt1, section in rows[mt].items():
+                block = resolver.block(mt, mt1)
+                if block is None:
+                    continue
+                matrix, grid, is_relative = block
+                za = _za_of(suite, section)
+                cov.add_matrix(za, mt, za, mt1, matrix, energy_grid=grid,
+                               is_relative=bool(is_relative))
+        except MixedKindsNeedCrossSections as why:
+            declined[mt] = str(why)
+            if logger is not None:
+                logger.warning(f"[MF{mf}] MT{mt} left out: {why}")
+            continue
+        if cov.matrices:
+            per_mt[mt] = cov
+        else:
+            declined[mt] = "no block of this MT resolves to a matrix"
+    return SuiteBlocks(per_mt=per_mt, declined=declined, other_material=other_material)
+
+
+def _summand_mt(summand) -> int:
+    return int(str(summand.ENDF_MFMT).replace("/", ",").split(",")[1])
+
+
+class _SuiteSumResolver:
+    """The blocks of a suite's rows the way ``MF33MT.to_xs_covmat`` builds them from a tape.
+
+    A section's explicit components are collapsed; a ``sum`` is resolved by
+    :func:`kika.cov.sum_rule.sum_rule_covariance` from the first ``sum`` of the
+    row MT's *self* section, which is what the tape path does for every block
+    of that MT, cross blocks included.
+    """
+
+    def __init__(self, rows, cross_sections, logger):
+        self.rows = rows
+        self.xs = cross_sections
+        self.sum_xs = cross_sections if cross_sections else None
+        self.logger = logger
+
+    def _components(self, section):
+        form = section.form
+        comps = getattr(form, "components", None)
+        return list(comps) if comps is not None else [form]
+
+    def _explicit(self, mt, mt1, section):
+        from types import SimpleNamespace
+
+        from kika.cov.group_arithmetic import collapse_form
+        from kika.endf.classes.mf33.mf33 import cross_section_or_sum
+
+        explicit = [c for c in self._components(section) if getattr(c, "summands", None) is None]
+        if not explicit:
+            return None
+        return collapse_form(
+            SimpleNamespace(components=explicit),
+            xs_row=cross_section_or_sum(self.xs, mt),
+            xs_col=cross_section_or_sum(self.xs, mt1),
+            label=f"MT{mt}→MT{mt1}", logger=self.logger,
+        )
+
+    def _first_sum(self, mt):
+        section = self.rows.get(mt, {}).get(mt)
+        if section is None:
+            return None
+        return next((c for c in self._components(section)
+                     if getattr(c, "summands", None) is not None), None)
+
+    def _sum(self, mt, resolving):
+        from kika.cov.sum_rule import sum_rule_covariance
+
+        stated = self._first_sum(mt)
+        if stated is None:
+            return None
+        terms = [(float(s.coefficient), _summand_mt(s)) for s in stated.summands]
+        return sum_rule_covariance(mt, terms, self._self_block, self._cross_blocks,
+                                   xs=self.sum_xs, resolving=resolving, logger=self.logger)
+
+    def _self_block(self, mt, resolving):
+        from kika.cov.sum_rule import combine_sum_and_explicit
+
+        section = self.rows.get(mt, {}).get(mt)
+        if section is None:
+            return None
+        resolved = self._sum(mt, (resolving or set()) | {mt})
+        return combine_sum_and_explicit(resolved, self._explicit(mt, mt, section),
+                                        label=f"MT{mt}→MT{mt}", logger=self.logger)
+
+    def _cross_blocks(self, mts):
+        index = {}
+        for src in mts:
+            for tgt, section in self.rows.get(src, {}).items():
+                if tgt == src or tgt not in mts:
+                    continue
+                bundle = self._explicit(src, tgt, section)
+                if bundle is not None:
+                    index[(src, tgt)] = bundle
+        return index
+
+    def block(self, mt, mt1):
+        """One ``(matrix, grid, is_relative)`` block, or ``None`` when it resolves to nothing."""
+        from kika.cov.sum_rule import combine_sum_and_explicit
+
+        section = self.rows[mt][mt1]
+        has_sum = any(getattr(c, "summands", None) is not None for c in self._components(section))
+        resolved = self._sum(mt, {mt}) if has_sum else None
+        return combine_sum_and_explicit(resolved, self._explicit(mt, mt1, section),
+                                        label=f"MT{mt}→MT{mt1}", logger=self.logger)
+
+
+def build_mf33_covariance_from_suite(
+    suite,
+    mt_list: Optional[Sequence[int]] = None,
+    cross_sections: Optional[Dict[int, object]] = None,
+    *,
+    mf: int = 33,
+    energy_unit: str = "eV",
+    logger=None,
+) -> Tuple[CrossSectionCovariance, List[float], List[int], SuiteBlocks]:
+    """:func:`build_mf33_covariance` from a covariance suite in the model, whatever format filled it.
+
+    Returns the unified relative covariance, its union grid, the MTs in it and
+    the :class:`SuiteBlocks` it was built from (``declined`` says which requested
+    MTs were left out and why). *mt_list* None takes every MT that has blocks.
+    """
+    blocks = per_mt_covariances_from_suite(suite, mf, cross_sections,
+                                           energy_unit=energy_unit, logger=logger)
+    requested = (sorted(blocks.per_mt) if mt_list is None
+                 else sorted({int(mt) for mt in mt_list}))
+    present = [mt for mt in requested if mt in blocks.per_mt]
+    if not present:
+        raise RuntimeError(f"None of MTs {requested} have MF{mf} blocks in the suite")
+    unified, grid = combine_mf33_covariances(
+        {mt: blocks.per_mt[mt] for mt in present}, present, cross_sections,
+        energy_unit=energy_unit, logger=logger,
+    )
+    return unified, grid, present, blocks
 
 
 # ---------------------------------------------------------------------------

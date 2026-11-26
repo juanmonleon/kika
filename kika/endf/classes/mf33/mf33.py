@@ -9,6 +9,15 @@ from itertools import chain as _chain
 
 from ..mt import MT
 from ....utils import get_endf_logger
+from ....cov.group_arithmetic import (
+    MixedKindsNeedCrossSections,
+    bin_average_xs,
+    project_piecewise_constant,
+    short_range_variance,
+    sum_block_components,
+    table_bin_average,
+)
+from ....cov.sum_rule import combine_sum_and_explicit, sum_rule_covariance
 
 # Initialize logger for this module
 logger = get_endf_logger(__name__)
@@ -22,7 +31,7 @@ RELATIVE_LB = frozenset({1, 2, 3, 4, 5, 6})
 ABSOLUTE_LB = frozenset({0, 8, 9})
 
 
-class MF33NeedsCrossSections(ValueError):
+class MF33NeedsCrossSections(MixedKindsNeedCrossSections):
     """An MF33 block mixes absolute and relative components and no σ(E) was given.
 
     Summing them needs the absolute part divided by σ̄_i·σ̄_j, and below the
@@ -93,30 +102,6 @@ def cross_section_or_sum(xs_sections: Optional[Dict[int, object]], mt: int
 
 
 
-
-def bin_average_xs(energies, values, edges, laws=2) -> np.ndarray:
-    """Lethargy-flux (1/E) group average of a table over each bin, exactly.
-
-    The group cross section MF33 is a covariance of: ``int σ/E dE / int dE/E``
-    over the whole bin, with σ zero outside its own table. A bin whose lower
-    edge is not positive has no 1/E weight and gets the flat average; a bin of
-    zero width gets zero. *laws* is one ENDF code or one per interval.
-    """
-    from ....algebra import group_averages
-
-    e = np.asarray(energies, dtype=float)
-    v = np.asarray(values, dtype=float)
-    g = np.asarray(edges, dtype=float)
-    out = np.zeros(max(g.size - 1, 0))
-    if e.size < 2 or g.size < 2:
-        return out
-    positive = g[:-1] > 0
-    k = int(np.argmax(positive)) if positive.any() else g.size - 1
-    if k > 0:
-        out[:k] = group_averages(e, v, laws, g[:k + 1])
-    if positive.any():
-        out[k:] = group_averages(e, v, laws, g[k:], "1/x")
-    return np.nan_to_num(out, nan=0.0)
 
 @dataclass
 class NISubSubsectionRecord:
@@ -350,80 +335,13 @@ class MF33MT(MT):
     @staticmethod
     def _short_range_diagonal(record: 'NISubSubsectionRecord',
                               output_grid: List[float]) -> np.ndarray:
-        """Variance of an LB=8/9 sub-subsection on ``output_grid`` (absolute, b²).
-
-        ENDF-6 §33.2: each F_k is an *uncorrelated* contribution, so the result
-        is diagonal, and its size depends on the width of the group it lands in.
-        For a group j inside the interval k:
-
-        * LB=8: Var_jj = F_k · ΔE_k / ΔE_j  (grows as the group narrows);
-        * LB=9: Var_jj = F_k · (1 − ΔE_j / ΔE_k)  (zero on the native grid).
-
-        A group j that overlaps several intervals k averages them as
-        uncorrelated pieces: with o_jk the overlap,
-        LB=8 → Σ_k o_jk·F_k·ΔE_k / ΔE_j², LB=9 → Σ_k (o_jk/ΔE_j)²·F_k·(1 − o_jk/ΔE_k).
-        Both reduce to the manual's formulas when j ⊂ k, and LB=8 gives F_k
-        when j = k.
-
-        Projecting LB=8 the way LB=0 is projected (the same value in every
-        sub-bin, fully correlated) is what this replaces: it is right for LB=0,
-        whose F_k is the variance of the whole interval, and wrong here.
-        """
-        energies = np.asarray(record.e_table_k, dtype=float)
-        if energies.size < 2:
-            raise ValueError(f"LB={record.lb} requires NE >= 2, got {energies.size}")
-        f_values = np.asarray(record.f_table_k[:energies.size - 1], dtype=float)
-        grid = np.asarray(output_grid, dtype=float)
-
-        if record.lb == 8 and grid.size == energies.size and np.array_equal(grid, energies):
-            # The native grid: exactly F_k, without a round trip through ΔE.
-            return f_values.copy()
-
-        d_k = np.diff(energies)
-        d_j = np.diff(grid)
-        overlap = np.maximum(
-            0.0,
-            np.minimum(grid[1:, None], energies[None, 1:])
-            - np.maximum(grid[:-1, None], energies[None, :-1]),
-        )
-        with np.errstate(divide='ignore', invalid='ignore'):
-            if record.lb == 8:
-                var = (overlap * (f_values * d_k)[None, :]).sum(axis=1) / d_j ** 2
-            else:
-                frac_j = overlap / d_j[:, None]
-                frac_k = np.where(d_k[None, :] > 0, overlap / d_k[None, :], 0.0)
-                var = (frac_j ** 2 * f_values[None, :] * (1.0 - frac_k)).sum(axis=1)
-        return np.where(d_j > 0, var, 0.0)
+        """Variance of an LB=8/9 sub-subsection on ``output_grid``: :func:`~kika.cov.group_arithmetic.short_range_variance`."""
+        return short_range_variance(record.e_table_k, record.f_table_k, output_grid, record.lb)
 
     @staticmethod
     def _bin_average_xs(xs_source: object, energy_grid: List[float]) -> np.ndarray:
-        """1/E-weighted average of a tabulated σ(E) over each bin, exactly.
-
-        The section's own interpolation laws, integrated in closed form
-        (:func:`bin_average_xs`), so every point of the table is seen -- which
-        matters in the resolved range, where a bin can hold hundreds of
-        resonances. Until October 2026 this method was a 64-point Gauss-Legendre
-        rule in ln E, 6-50 % off on wide resolved-range bins of Fe-56, and a
-        separate exact lin-lin twin sat next to it.
-
-        Accepts an ``MF3MT`` (``energies``/``cross_sections``/
-        ``energy_interpolation``), a ``CrossSection`` (``energies``/``values``/
-        ``interval_laws()``) or a bare ``energies``/``values`` table, read
-        lin-lin.
-        """
-        from ....algebra import interval_laws
-
-        energies = np.asarray(xs_source.energies, dtype=float)
-        values = getattr(xs_source, 'values', None)
-        if values is None:
-            values = getattr(xs_source, 'cross_sections')
-        if hasattr(xs_source, 'energy_interpolation'):
-            laws = interval_laws(energies.size, list(xs_source.energy_interpolation))
-        elif hasattr(xs_source, 'interval_laws'):
-            laws = xs_source.interval_laws()
-        else:
-            laws = 2
-        return bin_average_xs(energies, values, energy_grid, laws)
+        """1/E-weighted average of a tabulated σ(E) over each bin: :func:`~kika.cov.group_arithmetic.table_bin_average`."""
+        return table_bin_average(xs_source, energy_grid)
 
     @staticmethod
     def _project_matrix_piecewise_constant(
@@ -433,31 +351,8 @@ class MF33MT(MT):
         native_col_grid: Optional[List[float]] = None,
     ) -> np.ndarray:
         """Project an interval matrix onto a union grid using piecewise constant assumption."""
-        union_arr = np.asarray(union_grid, dtype=float)
-        row_arr = np.asarray(native_row_grid, dtype=float)
-        col_arr = np.asarray(native_col_grid, dtype=float) if native_col_grid is not None else row_arr
-
-        union_m = len(union_arr) - 1
-
-        # Row transfer matrix
-        u_lo = union_arr[:-1, None]
-        u_hi = union_arr[1:, None]
-        delta_u = u_hi - u_lo
-
-        r_lo = row_arr[:-1][None, :]
-        r_hi = row_arr[1:][None, :]
-        overlap = np.maximum(0.0, np.minimum(u_hi, r_hi) - np.maximum(u_lo, r_lo))
-        with np.errstate(divide='ignore', invalid='ignore'):
-            T_row = np.where(delta_u > 0, overlap / delta_u, 0.0)
-
-        # Column transfer matrix
-        c_lo = col_arr[:-1][None, :]
-        c_hi = col_arr[1:][None, :]
-        overlap_c = np.maximum(0.0, np.minimum(u_hi, c_hi) - np.maximum(u_lo, c_lo))
-        with np.errstate(divide='ignore', invalid='ignore'):
-            T_col = np.where(delta_u > 0, overlap_c / delta_u, 0.0)
-
-        return T_row @ component_matrix @ T_col.T
+        return project_piecewise_constant(component_matrix, native_row_grid, union_grid,
+                                          native_col_grid)
 
     @staticmethod
     def _project_diagonal_piecewise_constant(
@@ -465,48 +360,19 @@ class MF33MT(MT):
         native_grid: List[float],
         target_grid: List[float],
     ) -> np.ndarray:
-        """Project a 1D diagonal (per-interval values) onto a target energy grid.
-
-        Uses piecewise-constant assumption: each source interval has a constant
-        value, and target intervals get the overlap-weighted average.
-
-        Parameters
-        ----------
-        values : array of shape (M,)
-            Per-interval values on the native grid (M = len(native_grid) - 1).
-        native_grid : list of float
-            Energy boundaries of the source grid (M+1 points).
-        target_grid : list of float
-            Energy boundaries of the target grid (N+1 points).
-
-        Returns
-        -------
-        np.ndarray of shape (N,)
-        """
+        """Overlap-weighted average of per-interval ``values`` on ``target_grid``, piecewise constant."""
         src = np.asarray(native_grid, dtype=float)
         tgt = np.asarray(target_grid, dtype=float)
         vals = np.asarray(values, dtype=float)
-
-        n = len(tgt) - 1
-        result = np.zeros(n)
-
-        # For each target interval, compute overlap-weighted average
-        tgt_lo = tgt[:-1]
-        tgt_hi = tgt[1:]
-        src_lo = src[:-1]
-        src_hi = src[1:]
-
-        # Vectorised: overlap[i, k] = overlap of target_i with source_k
         overlap = np.maximum(
             0.0,
-            np.minimum(tgt_hi[:, None], src_hi[None, :])
-            - np.maximum(tgt_lo[:, None], src_lo[None, :]),
+            np.minimum(tgt[1:][:, None], src[1:][None, :])
+            - np.maximum(tgt[:-1][:, None], src[:-1][None, :]),
         )
-        tgt_widths = tgt_hi - tgt_lo
+        tgt_widths = tgt[1:] - tgt[:-1]
         with np.errstate(divide='ignore', invalid='ignore'):
             weights = np.where(tgt_widths[:, None] > 0, overlap / tgt_widths[:, None], 0.0)
-        result = weights @ vals
-        return result
+        return weights @ vals
 
     def _process_ni_records_to_matrix(
         self,
@@ -516,49 +382,19 @@ class MF33MT(MT):
         xs_row: Optional[object] = None,
         xs_col: Optional[object] = None,
     ) -> Optional[Tuple[np.ndarray, List[float], bool]]:
-        """Process a list of NI records into a full covariance matrix.
+        """Sum a subsection's NI records into ``(matrix, energy_grid, is_relative)``, or ``None``.
 
-        All NI components are decoded, projected onto a shared grid, and
-        summed. The full matrix (with off-diagonal structure) is returned,
-        not just the diagonal.
-
-        **Relative and absolute components are summed separately** (see
-        :data:`RELATIVE_LB` / :data:`ABSOLUTE_LB`). A block that holds only one
-        kind comes back in that kind, exactly as before. A block that holds
-        both — the usual LB=5 + LB=8 of an evaluation with a short-range
-        variance in the resolved range — comes back relative, with the
-        absolute part divided by σ̄_i·σ̄_j, where σ̄ is the 1/E-weighted bin
-        average of ``xs_row`` / ``xs_col``. Without them it raises
-        :class:`MF33NeedsCrossSections`: adding barns² to fractions is the
-        alternative, and it is what this method did until 2026-10-06 — up to
-        ×6400 on JEFF-4.0 Eu-154 MT3.
-
-        LB=8/9 are projected by :meth:`_short_range_diagonal`, not as LB=0.
-
-        Parameters
-        ----------
-        ni_records : list of NISubSubsectionRecord
-            NI-type sub-subsections to sum.
-        mt_label : str
-            Diagnostic tag used in log messages.
-        target_grid : list of float, optional
-            Energy grid to project onto. If None, the union of every
-            component's grid is used.
-        xs_row, xs_col : MF3MT or CrossSection, optional
-            σ(E) of the row and column reaction. Only read when the block
-            mixes absolute and relative components; below the resolved
-            resonance upper limit it must be reconstructed.
-
-        Returns
-        -------
-        (matrix, energy_grid, is_relative) or None
-            Full NxN matrix on the chosen grid, its boundaries, and whether it
-            is relative.
+        The records are decoded here and summed by
+        :func:`~kika.cov.group_arithmetic.sum_block_components` on *target_grid*
+        (default: the union of every record's grid). A block that mixes absolute
+        (LB=0/8/9) and relative (LB=1-6) records needs σ(E) of its row and column
+        reactions, *xs_row* / *xs_col*, and raises :class:`MF33NeedsCrossSections`
+        without them.
         """
         all_energies: Set[float] = set()
-        relative = []       # (matrix, row_grid, col_grid)
-        absolute = []       # LB=0, projected like the relative ones
-        short_range = []    # LB=8/9 records, projected by _short_range_diagonal
+        relative = []
+        absolute = []
+        short_range = []
 
         for ni_rec in ni_records:
             try:
@@ -567,7 +403,7 @@ class MF33MT(MT):
                     if len(grid) < 2:
                         raise ValueError(f"LB={ni_rec.lb} requires NE >= 2, got {len(grid)}")
                     all_energies.update(grid)
-                    short_range.append(ni_rec)
+                    short_range.append((grid, ni_rec.f_table_k, int(ni_rec.lb)))
                 elif ni_rec.lb in (0, 1, 2):
                     mat, grid = self._decode_lb012_matrix(ni_rec)
                     all_energies.update(grid)
@@ -595,33 +431,13 @@ class MF33MT(MT):
         output_grid = list(target_grid) if target_grid is not None else sorted(all_energies)
         if len(output_grid) < 2:
             return None
-        m = len(output_grid) - 1
-
-        def _summed(components):
-            total = np.zeros((m, m))
-            for comp_mat, row_grid, col_grid in components:
-                if col_grid is None and row_grid == output_grid:
-                    projected = comp_mat
-                elif col_grid is not None and row_grid == output_grid and col_grid == output_grid:
-                    projected = comp_mat
-                else:
-                    projected = self._project_matrix_piecewise_constant(
-                        comp_mat, row_grid, output_grid, native_col_grid=col_grid
-                    )
-                total += projected
-            return total
-
-        rel_total = _summed(relative)
-        if not (absolute or short_range):
-            return rel_total, output_grid, True
-
-        abs_total = _summed(absolute)
-        for rec in short_range:
-            abs_total[np.diag_indices(m)] += self._short_range_diagonal(rec, output_grid)
-        if not relative:
-            return abs_total, output_grid, False
-
-        if xs_row is None or xs_col is None:
+        try:
+            return sum_block_components(relative, absolute, short_range, output_grid,
+                                        xs_row=xs_row, xs_col=xs_col,
+                                        label=f"MF33 {mt_label}", logger=logger)
+        except MF33NeedsCrossSections:
+            raise
+        except MixedKindsNeedCrossSections:
             lbs = sorted({int(r.lb) for r in ni_records})
             raise MF33NeedsCrossSections(
                 f"MF33 {mt_label}: the block mixes absolute "
@@ -633,19 +449,7 @@ class MF33MT(MT):
                 f"`kika.processing.pointwise_cross_sections(endf)`: the tape's "
                 f"MF3, or kika's reconstruction when it has resonances), or decode "
                 f"through `decodeCovarianceSuite(endf)`, which does it on its own."
-            )
-        s_row = self._bin_average_xs(xs_row, output_grid)
-        s_col = s_row if xs_col is xs_row else self._bin_average_xs(xs_col, output_grid)
-        denom = np.outer(s_row, s_col)
-        lost = (denom <= 0) & (abs_total != 0)
-        if lost.any():
-            logger.warning(
-                f"MF33 {mt_label}: {int(lost.sum())} absolute covariance entries "
-                f"sit where σ̄ = 0 and cannot be made relative; dropped."
-            )
-        with np.errstate(divide='ignore', invalid='ignore'):
-            converted = np.where(denom > 0, abs_total / np.where(denom > 0, denom, 1.0), 0.0)
-        return rel_total + converted, output_grid, True
+            ) from None
 
     def _get_cross_mt_matrix(
         self,
@@ -746,35 +550,10 @@ class MF33MT(MT):
                 xs_row=xs_self, xs_col=xs_self,
             )
 
-        if nc_matrix is not None and ni_bundle is not None:
-            ni_mat, ni_grid, ni_is_rel = ni_bundle
-            ni_is_zero = not np.any(np.abs(ni_mat) > 0)
-            if nc_is_rel != ni_is_rel and not ni_is_zero:
-                logger.warning(
-                    f"MT{self.number}→MT{self.number}: NC result is "
-                    f"{'relative' if nc_is_rel else 'absolute'} but NI "
-                    f"term is {'relative' if ni_is_rel else 'absolute'}; "
-                    f"adding in NC's space — NI noise term may be mis-scaled."
-                )
-            combined_grid = sorted(set(nc_grid or []) | set(ni_grid))
-            if len(combined_grid) < 2:
-                return None
-            nc_proj = (nc_matrix if list(nc_grid) == combined_grid
-                       else self._project_matrix_piecewise_constant(
-                           nc_matrix, nc_grid, combined_grid))
-            ni_proj = (ni_mat if list(ni_grid) == combined_grid
-                       else self._project_matrix_piecewise_constant(
-                           ni_mat, ni_grid, combined_grid))
-            return nc_proj + ni_proj, combined_grid, bool(nc_is_rel)
-        if nc_matrix is not None:
-            return (
-                nc_matrix,
-                list(nc_grid) if nc_grid else [],
-                bool(nc_is_rel),
-            )
-        if ni_bundle is not None:
-            return ni_bundle
-        return None
+        return combine_sum_and_explicit(
+            (nc_matrix, nc_grid, nc_is_rel) if nc_matrix is not None else None,
+            ni_bundle, label=f"MT{self.number}→MT{self.number}", logger=logger,
+        )
 
     def resolve_nc_lty0(
         self,
@@ -851,239 +630,44 @@ class MF33MT(MT):
         if nci == 0 or len(ci_list) < nci:
             logger.warning(f"MT{self.number}: NC LTY=0 has no contributing reactions")
             return None
-        ci_list = ci_list[:nci]
 
-        logger.info(
-            f"MT{self.number}: resolving NC LTY=0 from {nci} reactions: "
-            f"{list(zip(ci_list, mti_list))}"
-        )
-
-        resolving = (_resolving or set()) | {self.number}
-
-        # Step 1: fetch each contributing MT's self-covariance as a full
-        # matrix.  Uses the lite ``_self_covariance_matrix`` instead of
-        # the full ``to_xs_covmat`` because the latter materializes every
-        # subsection (cross-MT entries, MAT1≠0, ...) per contributor and
-        # we discard everything but the self-self block — for Fe-56 MT2
-        # with 54 contributors, that wasted work was the dominant cost.
-        cov_by_mt: Dict[int, Tuple[np.ndarray, List[float], bool]] = {}
-        for mt_i in mti_list:
-            if mt_i in resolving:
-                logger.warning(
-                    f"MT{self.number}: skipping MT{mt_i} (circular NC reference)"
-                )
-                continue
+        def self_block(mt_i, resolving):
             section_i = sibling_sections.get(mt_i)
             if section_i is None:
                 logger.debug(f"MT{self.number}: MT{mt_i} not in MF33, treating as zero")
-                continue
-
-            try:
-                bundle = section_i._self_covariance_matrix(
-                    sibling_sections=sibling_sections,
-                    _resolving=resolving,
-                    mf3_sections=mf3_sections,
-                )
-            except MF33NeedsCrossSections:
-                # A contributor that mixes absolute and relative components
-                # cannot be built without σ(E). Dropping it would make the
-                # derived covariance quietly smaller, so the caller hears it.
-                raise
-            except Exception as e:
-                logger.warning(f"MT{self.number}: failed to resolve MT{mt_i}: {e}")
-                continue
-
-            if bundle is None:
-                continue
-            mat, grid, is_rel = bundle
-            mat = np.asarray(mat, dtype=float)
-            if (grid is not None and mat.ndim == 2
-                    and mat.shape[0] == mat.shape[1]
-                    and mat.shape[0] == len(grid) - 1):
-                cov_by_mt[mt_i] = (mat, list(grid), bool(is_rel))
-
-        if not cov_by_mt:
-            logger.warning(f"MT{self.number}: no contributing MT covariances found")
-            return None
-
-        # Step 2: union energy grid from every contributing MT's own grid
-        all_energies: Set[float] = set()
-        for _, grid, _ in cov_by_mt.values():
-            all_energies.update(grid)
-        union_grid = sorted(all_energies)
-        if len(union_grid) < 2:
-            return None
-        m = len(union_grid) - 1
-
-        # Step 3: project each contributing matrix onto the union grid
-        proj_cov: Dict[int, np.ndarray] = {}
-        is_rel_by_mt: Dict[int, bool] = {}
-        for mt_i, (mat, grid, is_rel) in cov_by_mt.items():
-            is_rel_by_mt[mt_i] = is_rel
-            if grid == union_grid:
-                proj_cov[mt_i] = mat
-            else:
-                proj_cov[mt_i] = self._project_matrix_piecewise_constant(
-                    mat, grid, union_grid
-                )
-
-        have_xs = mf3_sections is not None
-        any_relative = any(is_rel_by_mt.get(mt, True) for mt in mti_list
-                           if mt in proj_cov)
-        if any_relative and not have_xs:
-            logger.warning(
-                f"MT{self.number}: NC LTY=0 sum rule requires cross-section data "
-                f"(mf3_sections) to convert relative covariances to absolute. "
-                f"Falling back to direct summation of relative covariances — "
-                f"result will be approximate."
+                return None
+            return section_i._self_covariance_matrix(
+                sibling_sections=sibling_sections, _resolving=resolving,
+                mf3_sections=mf3_sections,
             )
 
-        # Step 4: bin-averaged σ per contributing MT (for rel↔abs conversion)
-        xs_bin: Dict[int, np.ndarray] = {}
-        xs_d: Optional[np.ndarray] = None
-        if have_xs:
-            for mt_i in mti_list:
-                if mt_i in mf3_sections and mt_i in proj_cov:
-                    try:
-                        xs_bin[mt_i] = self._bin_average_xs(
-                            mf3_sections[mt_i], union_grid
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            f"MT{self.number}: bin-average σ failed for MT{mt_i}: {e}"
-                        )
-            # Derived σ: from MF3 if available, else from the sum rule
-            if self.number in mf3_sections:
-                try:
-                    xs_d = self._bin_average_xs(
-                        mf3_sections[self.number], union_grid
-                    )
-                except Exception as e:
-                    logger.warning(
-                        f"MT{self.number}: bin-average σ_derived failed: {e}"
-                    )
-                    xs_d = None
-            if xs_d is None:
-                xs_d = np.zeros(m)
-                for ii, mt_i in enumerate(mti_list):
-                    if mt_i in xs_bin:
-                        xs_d = xs_d + ci_list[ii] * xs_bin[mt_i]
-
-        # Step 5: cross-MT covariance matrices (projected to union grid).
-        # Pre-index every cross-MT NI bundle stored under any contributing
-        # MT's section so the (i,j) double loop becomes a dict lookup
-        # instead of a per-pair linear scan + NI decode through
-        # ``_get_cross_mt_matrix``.
-        mti_set = set(mti_list)
-        cross_index: Dict[
-            Tuple[int, int], Tuple[np.ndarray, List[float], bool]
-        ] = {}
-        for src_mt in mti_set:
-            sec = sibling_sections.get(src_mt)
-            if sec is None:
-                continue
-            for sub in sec._subsections:
-                tgt_mt = int(sub.mt1)
-                if tgt_mt == src_mt or tgt_mt not in mti_set:
+        def cross_blocks(mti_set):
+            index = {}
+            for src_mt in mti_set:
+                sec = sibling_sections.get(src_mt)
+                if sec is None:
                     continue
-                if not sub.ni_records:
-                    continue
-                bundle = sec._process_ni_records_to_matrix(
-                    sub.ni_records,
-                    mt_label=f"MT{src_mt}→MT{tgt_mt}",
-                    xs_row=_xs_section(mf3_sections, src_mt, sub.ni_records),
-                    xs_col=_xs_section(mf3_sections, tgt_mt, sub.ni_records),
-                )
-                if bundle is not None:
-                    cross_index[(src_mt, tgt_mt)] = bundle
-
-        cross_cov: Dict[Tuple[int, int], Tuple[np.ndarray, bool]] = {}
-        for ii in range(nci):
-            for jj in range(ii + 1, nci):
-                mt_i = mti_list[ii]
-                mt_j = mti_list[jj]
-                r = cross_index.get((mt_i, mt_j))
-                if r is None:
-                    r = cross_index.get((mt_j, mt_i))
-                if r is None:
-                    continue
-                cmat, cgrid, cis_rel = r
-                if cgrid == union_grid:
-                    proj_cross = cmat
-                else:
-                    proj_cross = self._project_matrix_piecewise_constant(
-                        cmat, cgrid, union_grid
-                    )
-                cross_cov[(mt_i, mt_j)] = (proj_cross, bool(cis_rel))
-
-        # Step 6: bilinear accumulation in ABSOLUTE covariance space
-        #   Cov(d,d)[g,g'] = Σ_i Σ_j c_i c_j Cov(i,j)[g,g']
-        cov_abs = np.zeros((m, m))
-
-        def _scale_rel_to_abs(mat_rel: np.ndarray, s_row: np.ndarray,
-                              s_col: np.ndarray) -> np.ndarray:
-            return mat_rel * np.outer(s_row, s_col)
-
-        for ii, mt_i in enumerate(mti_list):
-            c_i = ci_list[ii]
-            for jj, mt_j in enumerate(mti_list):
-                c_j = ci_list[jj]
-
-                if ii == jj:
-                    pair = proj_cov.get(mt_i)
-                    if pair is None:
+                for sub in sec._subsections:
+                    tgt_mt = int(sub.mt1)
+                    if tgt_mt == src_mt or tgt_mt not in mti_set or not sub.ni_records:
                         continue
-                    pair_is_rel = is_rel_by_mt.get(mt_i, True)
-                    if pair_is_rel and have_xs and mt_i in xs_bin:
-                        pair_abs = _scale_rel_to_abs(pair, xs_bin[mt_i], xs_bin[mt_i])
-                    else:
-                        pair_abs = pair  # already absolute or no σ available
-                else:
-                    entry = cross_cov.get((mt_i, mt_j))
-                    pair_transposed = False
-                    if entry is None:
-                        entry = cross_cov.get((mt_j, mt_i))
-                        pair_transposed = entry is not None
-                    if entry is None:
-                        continue  # unknown cross-MT cov → treat as zero
-                    pair, pair_is_rel = entry
-                    if pair_transposed:
-                        pair = pair.T
-                    if pair_is_rel and have_xs and mt_i in xs_bin and mt_j in xs_bin:
-                        pair_abs = _scale_rel_to_abs(pair, xs_bin[mt_i], xs_bin[mt_j])
-                    else:
-                        pair_abs = pair
+                    bundle = sec._process_ni_records_to_matrix(
+                        sub.ni_records,
+                        mt_label=f"MT{src_mt}→MT{tgt_mt}",
+                        xs_row=_xs_section(mf3_sections, src_mt, sub.ni_records),
+                        xs_col=_xs_section(mf3_sections, tgt_mt, sub.ni_records),
+                    )
+                    if bundle is not None:
+                        index[(src_mt, tgt_mt)] = bundle
+            return index
 
-                cov_abs = cov_abs + c_i * c_j * pair_abs
-
-        # Step 7: convert back to relative covariance when σ is available.
-        # Apply an inert-bin floor on σ̄ to suppress 1/σ̄ blow-ups in
-        # threshold-spanning bins and lumped-MT filler bins (the NC LTY=0
-        # union grid frequently inherits foreign threshold edges from
-        # contributing MTs, so xs_d can collapse to ~σ̄_max·1e-7 in a few
-        # bins while the absolute variance there is just placeholder).
-        if have_xs and xs_d is not None:
-            xs_max = float(np.max(xs_d)) if xs_d.size else 0.0
-            sigma_floor = max(1.0e-3 * xs_max, 1.0e-9)
-            xs_safe = np.where(xs_d > sigma_floor, xs_d, 0.0)
-            denom = np.outer(xs_safe, xs_safe)
-            with np.errstate(divide='ignore', invalid='ignore'):
-                cov_rel = np.where(denom > 0, cov_abs / np.where(denom > 0, denom, 1.0), 0.0)
-            # Clip negative DIAGONAL only — variance must be ≥ 0 but
-            # off-diagonal correlation sign is physically meaningful.
-            diag = np.diag(cov_rel).copy()
-            np.fill_diagonal(cov_rel, np.maximum(diag, 0.0))
-            final = cov_rel
-            is_relative_out = True
-        else:
-            # Fallback: no σ provided. cov_abs actually holds a direct sum
-            # of the relative matrices (no scaling), so flag as relative.
-            final = cov_abs
-            is_relative_out = True
-
-        # Symmetrize to kill any round-off asymmetry from the outer products
-        final = 0.5 * (final + final.T)
-
+        resolved = sum_rule_covariance(
+            self.number, list(zip(ci_list[:nci], mti_list)), self_block, cross_blocks,
+            xs=mf3_sections, resolving=_resolving, logger=logger,
+        )
+        if resolved is None:
+            return None
+        final, union_grid, is_relative_out = resolved
         isotope = int(round(self._za))
         result = CrossSectionCovariance(energy_unit=energy_unit)
         result.add_matrix(
@@ -1091,14 +675,6 @@ class MF33MT(MT):
             final,
             energy_grid=list(union_grid),
             is_relative=is_relative_out,
-        )
-
-        diag = np.diag(final)
-        diag_min = float(max(diag.min(), 0.0))
-        diag_max = float(diag.max())
-        logger.info(
-            f"MT{self.number}: NC LTY=0 resolved — {m} bins, "
-            f"sqrt(diag) range [{np.sqrt(diag_min):.4g}, {np.sqrt(diag_max):.4g}]"
         )
         return result
 
@@ -1209,49 +785,17 @@ class MF33MT(MT):
                 )
 
             # Step C: combine NC and NI (on a shared union grid) and emit
-            if nc_matrix is not None and ni_bundle is not None:
-                ni_mat, ni_grid, ni_is_rel = ni_bundle
-                # Many ENDF files carry an all-zero NI record alongside NC
-                # purely to extend the energy range; skip the warning in
-                # that case since the contribution is exactly zero.
-                ni_is_zero = not np.any(np.abs(ni_mat) > 0)
-                if nc_is_rel != ni_is_rel and not ni_is_zero:
-                    logger.warning(
-                        f"MT{self.number}→MT{mt1}: NC result is "
-                        f"{'relative' if nc_is_rel else 'absolute'} but NI "
-                        f"term is {'relative' if ni_is_rel else 'absolute'}; "
-                        f"adding in NC's space — NI noise term may be "
-                        f"mis-scaled."
-                    )
-                combined_grid = sorted(set(nc_grid or []) | set(ni_grid))
-                if len(combined_grid) < 2:
-                    continue
-                nc_proj = (nc_matrix if list(nc_grid) == combined_grid
-                           else self._project_matrix_piecewise_constant(
-                               nc_matrix, nc_grid, combined_grid))
-                ni_proj = (ni_mat if list(ni_grid) == combined_grid
-                           else self._project_matrix_piecewise_constant(
-                               ni_mat, ni_grid, combined_grid))
+            combined = combine_sum_and_explicit(
+                (nc_matrix, nc_grid, nc_is_rel) if nc_matrix is not None else None,
+                ni_bundle, label=f"MT{self.number}→MT{mt1}", logger=logger,
+            )
+            if combined is not None:
+                matrix, grid, is_rel = combined
                 result.add_matrix(
                     isotope, self.number, iso_col, mt1,
-                    nc_proj + ni_proj,
-                    energy_grid=combined_grid,
-                    is_relative=bool(nc_is_rel),
-                )
-            elif nc_matrix is not None:
-                result.add_matrix(
-                    isotope, self.number, iso_col, mt1,
-                    nc_matrix,
-                    energy_grid=nc_grid,
-                    is_relative=bool(nc_is_rel),
-                )
-            elif ni_bundle is not None:
-                ni_mat, ni_grid, ni_is_rel = ni_bundle
-                result.add_matrix(
-                    isotope, self.number, iso_col, mt1,
-                    ni_mat,
-                    energy_grid=ni_grid,
-                    is_relative=bool(ni_is_rel),
+                    matrix,
+                    energy_grid=grid,
+                    is_relative=bool(is_rel),
                 )
 
         return result
