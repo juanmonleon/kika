@@ -2058,6 +2058,39 @@ def _mtsOfCovariances(endfObj, mf):
     return sorted(mts)
 
 
+def _collapseComponentForms(covariances, endfObj, sourcePath, pendfSource, log):
+    """*covariances* with each multi-component MF31/MF33 section summed on its own grid (the samplers take one matrix)."""
+    import dataclasses
+
+    from kika.sampling.mf33_sampling import collapseComponentForms, needsCollapse
+    from kika.sampling.model_blocks import _is_endf_mf
+
+    sections = list(getattr(covariances, "covarianceSections", covariances) or [])
+    pending = [s for s in sections
+               if any(_is_endf_mf(s.rowData, m) for m in (31, 33)) and needsCollapse(s.form)]
+    if not pending:
+        return covariances
+
+    def mixed(form):
+        comps = [c for c in (getattr(form, "components", None) or [form])
+                 if getattr(c, "summands", None) is None]
+        kinds = {bool(getattr(c, "isRelative", False)) and not hasattr(c, "dependenceOnProcessedGroupWidth")
+                 for c in comps}
+        return len(kinds) > 1
+
+    mfs = sorted({m for s in pending for m in (31, 33) if _is_endf_mf(s.rowData, m)})
+    central = (_centralValuesForConversion(endfObj, sourcePath, mfs, pendfSource)
+               if any(mixed(s.form) for s in pending) else {})
+    collapsed, unresolved = collapseComponentForms(sections, central)
+    if unresolved:
+        log.warning(f"{len(unresolved)} covariance section(s) sum absolute and relative parts "
+                    f"and no central value was found to divide by; not drawn: {', '.join(unresolved)}",
+                    subject="absolute sections", sections=list(unresolved))
+    if dataclasses.is_dataclass(covariances):
+        return dataclasses.replace(covariances, covarianceSections=collapsed)
+    return collapsed
+
+
 def _relativiseAbsoluteSections(covariances, request, endfObj, sourcePath, *,
                                 grouping, onMissing, pendfSource,
                                 skipped, log):
@@ -3554,6 +3587,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
             resonanceNotes.append(note)
             log.warning(note, subject="MF2", code="resonance_background_only")
     log.stage = "request"
+    covariances = _collapseComponentForms(covariances, endfObj, sourcePath, pendfSource, log)
     expansionNotes: List[str] = []
     lumped, remainders = {}, {}
     if crossSectionSums:

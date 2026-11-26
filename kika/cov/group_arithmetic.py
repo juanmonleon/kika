@@ -18,6 +18,7 @@ __all__ = [
     "bin_average_xs",
     "project_piecewise_constant",
     "short_range_variance",
+    "matrix_form",
     "sum_block_components",
     "MixedKindsNeedCrossSections",
 ]
@@ -235,6 +236,22 @@ def form_states_sum(form) -> bool:
     if _is_sum(form):
         return True
     return any(_is_sum(c) for c in (getattr(form, "components", None) or ()))
+
+
+def matrix_form(form, label: str = ''):
+    """*form* as one ``CovarianceMatrix`` on its own grid: as it is, or a ``mixed`` collapsed by :func:`collapse_form`.
+
+    Needs no σ(E), so a ``mixed`` of absolute and relative parts raises
+    :class:`MixedKindsNeedCrossSections`; a ``sum`` raises :class:`CovarianceSumNotResolved`.
+    """
+    from kika.nuclear_data.model import CovarianceMatrix
+
+    if getattr(form, "matrix", None) is not None and not hasattr(form, "dependenceOnProcessedGroupWidth"):
+        return form
+    matrix, grid, relative = collapse_form(form, label=label)
+    grid = np.asarray(grid, dtype=float)
+    return CovarianceMatrix(matrix=np.asarray(matrix, dtype=float), rowGrid=grid, columnGrid=grid,
+                            isRelative=bool(relative))
 
 
 def collapse_form(form, xs_row=None, xs_col=None, label: str = '', logger=None

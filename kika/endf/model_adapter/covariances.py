@@ -1349,25 +1349,10 @@ def decodeCovarianceSuite(endf, report: Optional[ConversionReport] = None,
             from .mf33_structure import attachCovarianceSums, attachLumps
             retained = attachLumps(endf, reactionSuite, report)
             attachCovarianceSums(endf, reactionSuite, report)
-        from kika.endf.classes.mf33 import mixesAbsoluteAndRelative
-        mixed = [mt for mt in sorted(getattr(mf33, "mt", {}))
-                 if any(mixesAbsoluteAndRelative(sub.ni_records)
-                        for sub in mf33.mt[mt].subsections)]
-        xsSections = None
-        if mixed:
-            from kika.processing.njoy_pendf_cache import pointwise_cross_sections
-            xsSections, source = pointwise_cross_sections(
-                endf, why=f"MF33 MT{mixed}, whose blocks sum absolute (LB=0/8/9) "
-                          f"and relative components,")
-            report.warn(
-                f"MF33 MT{mixed}: absolute components (LB=0/8/9) were made "
-                f"relative with σ(E) from {source} before being summed with "
-                f"the relative ones"
-            )
         for mt in sorted(getattr(mf33, "mt", {})):
             if mt in retained:
                 continue  # represented by the companion lump's summands, not a member matrix
-            sections, report = decodeMF33MT(mf33.mt[mt], report, xsSections=xsSections)
+            sections, report = decodeMF33MT(mf33.mt[mt], report)
             suite.covarianceSections.extend(sections)
 
     mf34 = endf.mf.get(34) if hasattr(endf, "mf") else None
@@ -1428,8 +1413,7 @@ def decodeCovarianceSuite(endf, report: Optional[ConversionReport] = None,
     if reactionSuite is not None:
         from .mf33_structure import bindReactionLinks
         bindReactionLinks(suite, reactionSuite)
-    suite.covarianceChecks = (_attachLayer1(endf, suite, report, xsSections if mf33 is not None
-                                            else None) if checks else None)
+    suite.covarianceChecks = _attachLayer1(endf, suite, report) if checks else None
 
     # Both ways to the same object: the tuple is unchanged, and the
     # attribute is the one that survives `suite, _ = ...`. §11.4.

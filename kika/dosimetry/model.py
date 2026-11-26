@@ -43,7 +43,12 @@ def _diagonal_form(suite, mf: int, mt: int, label: Optional[str] = None):
             continue
         if label is not None and f"[@label='{label}']" not in (section.rowData.href or ""):
             continue
-        return require_single_matrix(section.form, f"the MF{mf} section {section.label!r}")
+        from kika.cov.group_arithmetic import matrix_form
+
+        where = f"the MF{mf} section {section.label!r}"
+        form = section.form
+        return require_single_matrix(
+            matrix_form(form, where) if getattr(form, "components", None) is not None else form, where)
     return None
 
 

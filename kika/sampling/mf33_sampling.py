@@ -714,6 +714,67 @@ def _lift_matrix_diag(form, union) -> np.ndarray:
     return np.einsum("ij,jk,ik->i", lift, np.asarray(form.matrix, dtype=float), lift)
 
 
+def needsCollapse(form) -> bool:
+    """Whether a section's form states more than one matrix (a ``mixed``, or a short-range variance)."""
+    if hasattr(form, "dependenceOnProcessedGroupWidth"):
+        return True
+    components = getattr(form, "components", None)
+    if components is None:
+        return False
+    explicit = [c for c in components if getattr(c, "summands", None) is None]
+    return len(explicit) > 1 or any(hasattr(c, "dependenceOnProcessedGroupWidth") for c in explicit)
+
+
+def collapseComponentForms(suite, central=None, *, mfs=(31, 33)):
+    """*suite*'s MF31/MF33 sections with each multi-component form summed into one matrix on its own grid.
+
+    The samplers take one matrix per section. A block the model keeps as its
+    components (an LB=8/9 term, or absolute beside relative) is summed here the
+    way ``MF33MT.to_xs_covmat`` sums its records, on the block's own grid, so
+    the draw is the one the tape path gives; a ``sum`` beside them is kept.
+    *central* maps ``mf -> {mt: σ(E)}`` and is read only where absolute and
+    relative parts meet. Returns ``(sections, unresolved)``: the new section
+    list and the labels of sections that needed σ(E) and had none (left out).
+    """
+    import dataclasses
+    from types import SimpleNamespace
+
+    from kika._covariance_forms import local_sections
+    from kika.cov.group_arithmetic import MixedKindsNeedCrossSections, collapse_form
+    from kika.endf.classes.mf33.mf33 import cross_section_or_sum
+    from kika.nuclear_data.model import CovarianceMatrix, Mixed
+    from kika.sampling.model_blocks import _endf_mt, _is_endf_mf
+
+    out, unresolved = [], []
+    for section in getattr(suite, "covarianceSections", suite):
+        form = getattr(section, "form", None)
+        mf = next((m for m in mfs if _is_endf_mf(section.rowData, m)), None)
+        if mf is None or form is None or not needsCollapse(form):
+            out.append(section)
+            continue
+        components = getattr(form, "components", None)
+        components = list(components) if components is not None else [form]
+        explicit = [c for c in components if getattr(c, "summands", None) is None]
+        sums = [c for c in components if getattr(c, "summands", None) is not None]
+        colData = section.columnData if section.columnData is not None else section.rowData
+        xs = (central or {}).get(mf) or None
+        try:
+            matrix, grid, relative = collapse_form(
+                SimpleNamespace(components=explicit),
+                xs_row=cross_section_or_sum(xs, _endf_mt(section.rowData)) if xs else None,
+                xs_col=cross_section_or_sum(xs, _endf_mt(colData)) if xs else None,
+                label=str(getattr(section, "label", "?")))
+        except MixedKindsNeedCrossSections:
+            unresolved.append(str(getattr(section, "label", "?")))
+            continue
+        grid = np.asarray(grid, dtype=float)
+        collapsed = CovarianceMatrix(matrix=np.asarray(matrix, dtype=float), rowGrid=grid,
+                                     columnGrid=grid, isRelative=bool(relative))
+        out.append(dataclasses.replace(
+            section, form=collapsed if not sums else Mixed(components=[collapsed] + sums, label="eval")))
+    return out, unresolved
+
+
 def loadCrossSectionBlocks(endfObj, mtList, centralSections, *, mf: int = 33,
                            isotope=None, union: str = "global", logger=None):
     """The MF33 (or MF31) joint covariance, assembled **from the model**.
@@ -770,6 +831,11 @@ def loadCrossSectionBlocks(endfObj, mtList, centralSections, *, mf: int = 33,
     suite, report = decodeCovarianceSuite(endfObj)
     if logger is not None and not report.isClean:
         logger.info(f"[MF{mf}] covariance decode: {report.summary()}")
+    suite, unresolvedForms = collapseComponentForms(
+        suite, {mf: dict(centralSections or {})}, mfs=(mf,))
+    if unresolvedForms and logger is not None:
+        logger.warning(f"[MF{mf}] {unresolvedForms}: absolute beside relative and no "
+                       f"central values to divide by; left out.")
 
     # The union grid, before any conversion: the conversion has to divide by a
     # central value binned on the grid the blocks will end up on, so the grid

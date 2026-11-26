@@ -599,10 +599,12 @@ class CrossSectionCovariance:
         ...     suite.covarianceSections[0], nuclide=92235)
         >>> plot_covariance_heatmap(band, nuclide=92235, mt=18)   # doctest: +SKIP
         """
+        from kika.cov.group_arithmetic import matrix_form
+
+        where = f"covariance section {getattr(section, 'label', '?')!r}"
+        form = getattr(section, 'form', None)
         form = require_single_matrix(
-            getattr(section, 'form', None),
-            f"covariance section {getattr(section, 'label', '?')!r}",
-        )
+            matrix_form(form, where) if getattr(form, 'components', None) is not None else form, where)
 
         matrix = np.asarray(form.matrix, dtype=float)
         grid = getattr(form, 'rowGrid', None)
