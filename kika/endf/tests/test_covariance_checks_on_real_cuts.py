@@ -224,6 +224,36 @@ def test_mf32_rml_widths_are_compared_channel_by_channel():
                                        "mf32": before, "mf2": 1.5 * before}]
 
 
+def _cl35_rml_groups():
+    endf = read_endf(str(DATA / "micro_cl35_mf32.endf"))
+    return endf, endf.files[32].mt[151].isotopes[0].energy_ranges[0].body.spin_groups
+
+
+def test_mf32_rml_lcomp2_nx_written_as_lines_is_a_count_mismatch():
+    """JEFF-4.0 O-16, Gd-155 and Gd-157 write N2 = 2*NRSA in the resonance LIST of
+    every spin group (MF2 counts lines there); §32.2.3.3 asks for N1 = 12*NX, N2 = NX.
+    Cl-35 written that way gives one finding naming every spin group."""
+    endf, groups = _cl35_rml_groups()
+    assert check_covariances(endf, mf=(32,)).by_check("count_mismatch") == ()
+    filled = [g for g in groups if g.nrsa > 0]
+    for group in filled:
+        group.resonances.n2 = 2 * group.nrsa
+    (f,) = check_covariances(endf, mf=(32,)).by_check("count_mismatch")
+    assert f.level == "defect" and f.location.range_index == 0
+    assert (f.evidence["n"], f.evidence["of"]) == (len(filled), len(groups))
+    first = f.evidence["groups"][0]
+    assert first["n1"] == 12 * first["nrsa"] and first["n2"] == 2 * first["nrsa"]
+
+
+def test_mf32_rml_lcomp2_nx_counts_lines_of_twelve_words():
+    """With NCH > 5 a resonance takes four lines, N1 = 24*NRSA, and NX = 2*NRSA is
+    what §32.2.3.3 asks for: the rule is N1 = 12*NX, not NX = NRSA."""
+    endf, groups = _cl35_rml_groups()
+    group = next(g for g in groups if g.nrsa > 0)
+    group.resonances.n1, group.resonances.n2 = 24 * group.nrsa, 2 * group.nrsa
+    assert check_covariances(endf, mf=(32,)).by_check("count_mismatch") == ()
+
+
 def test_u239_mf35_not_the_covariance_of_a_normalised_spectrum():
     """JEFF-4.0 U-239: 21 bands whose rows do not sum to zero, the first of them
     empty, and sigma(P) up to 2919 for a probability."""

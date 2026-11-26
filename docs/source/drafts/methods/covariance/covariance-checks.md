@@ -386,6 +386,14 @@ the rounding allowance is step 2 with $q = 10^{-\mathrm{NDIGIT}}$; otherwise it 
 - INTG records whose row or column lies outside the $\mathrm{NNN} \times \mathrm{NNN}$
   matrix (`correlation_index_out_of_range`, defect), and records the decoder skips
   (`decode_error`) or keeps without decoding (`not_decoded`, note);
+- for LRF=7 with LCOMP=2, the resonance LIST of each spin group must declare
+  $\mathrm{N1} = 12\,\mathrm{NX}$ with NX in N2 (ENDF-6 §32.2.3.3): NX is NRSA when
+  $\mathrm{NCH} \le 5$, and $2\,\mathrm{NRSA}$ when a resonance takes four lines
+  (`count_mismatch`, defect). An N2 that counts lines, as NX does in the MF 2 list, gives
+  $\mathrm{N2} = 2\,\mathrm{NRSA}$ for $\mathrm{NCH} \le 5$. kika reads the list by N1 and
+  is not affected; NJOY 2016.78 ERRORR takes N2 as the number of resonances, reads twice
+  as many as the list holds, and gives every later spin group the uncertainties of other
+  parameters;
 - agreement with MF 2: a range of the same limits (or, failing that, of the same LRU and
   overlapping) must exist (`range_not_in_mf2`, warning), with the same limits to a
   relative $10^{-5}$ (`range_limits_differ_from_mf2`, note) and the same formalism
@@ -567,6 +575,7 @@ committed cuts of real tapes, each a closed verbatim extract:
 | JENDL-5 Fe-56 MF 33 and 34 | only notes: 50 indefinite blocks, all explained by rounding | `::test_fe56_jendl5_the_clean_case_has_only_notes` |
 | JEFF-4.0 K-41 MF 32 | an INTG record at row 201 with NNN = 93 | `::test_k41_mf32_an_intg_record_outside_the_matrix` |
 | ENDF/B-VIII.1 Th-232 MF 32 | correlation matrix with $\lambda_\text{min}$ = −0.66, past its NDIGIT rounding | `::test_th232_mf32_a_correlation_matrix_that_cannot_be_sampled` |
+| ENDF/B-VIII.1 Cl-35 MF 32, N2 set to $2\,\mathrm{NRSA}$ in memory | one `count_mismatch` naming its 8 spin groups; none when N1 is also doubled, as for a resonance of four lines | `::test_mf32_rml_lcomp2_nx_written_as_lines_is_a_count_mismatch`, `::test_mf32_rml_lcomp2_nx_counts_lines_of_twelve_words` |
 | JEFF-4.0 U-239 MF 35 | 21 bands break the sum rule (residual above 0.9), $\sigma(P)$ up to 2.9·10³ | `::test_u239_mf35_not_the_covariance_of_a_normalised_spectrum` |
 | ENDF/B-VIII.1 Cf-252 MF 35 with MF 5 | nothing above a note; $r$ up to 1.4·10⁻⁴, $\delta_\sigma$ below 0.4 % | `::test_cf252_mf35_the_reference_spectrum_keeps_its_sum_rule_and_bound` |
 

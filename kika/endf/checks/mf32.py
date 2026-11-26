@@ -55,6 +55,7 @@ def check_mf32(ctx, mf_obj, out: List[CovarianceFinding]) -> None:
             for k, rng in enumerate(iso.energy_ranges):
                 loc = CovarianceLocation(mat=mat, mf=32, mt=mt, range_index=k)
                 readable[(i_iso, k)] = _intg_indices(rng, loc, out)
+                _rml_lcomp2_nx(rng, loc, out)
                 _spin_uncertainty(rng, loc, out)
                 if mf2_ranges is not None:
                     _against_mf2(rng, i_iso, k, mf2_ranges, loc, out)
@@ -130,6 +131,34 @@ def _intg_indices(rng, loc, out) -> bool:
             "parameter", loc, {"nnn": nnn, "ii_jj": [list(b) for b in bad[:_ITEMS]],
                                "n": len(bad)}))
     return not bad
+
+
+def _rml_lcomp2_nx(rng, loc, out) -> None:
+    """§32.2.3.3: each spin group's resonance LIST declares N1 = 12*NX and N2 = NX."""
+    from ..classes.mf32.mf32mt151 import LCOMP2RMLBody
+
+    if not isinstance(rng.body, LCOMP2RMLBody) or not rng.body.spin_groups:
+        return
+    groups = rng.body.spin_groups
+    bad = []
+    for index, group in enumerate(groups):
+        record = group.resonances
+        if record is None:
+            continue
+        n1, n2 = int(record.n1), int(record.n2)
+        if n1 != 12 * n2:
+            bad.append({"spin_group": index, "nrsa": int(group.nrsa), "nch": int(group.nch),
+                        "n1": n1, "n2": n2})
+    if bad:
+        first = bad[0]
+        out.append(CovarianceFinding(
+            "count_mismatch", DEFECT,
+            f"{len(bad)} of {len(groups)} spin groups declare an NX (N2) that is not N1/12 "
+            f"(spin group {first['spin_group']}: N1={first['n1']}, N2={first['n2']}, so "
+            f"NX={first['n1'] // 12} for NRSA={first['nrsa']}); a processor that takes NX "
+            "as the resonance count reads resonances that are not there and misplaces "
+            "every uncertainty after them", loc,
+            {"n": len(bad), "of": len(groups), "groups": bad[:_ITEMS]}))
 
 
 def _mf2_ranges(ctx):
