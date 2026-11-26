@@ -632,7 +632,17 @@ def _encodeIncoherentElastic(form: IncoherentElastic, book: dict):
                           temperatures=xs, w=ys)
 
 
-def _bArray(form: IncoherentInelastic, book: dict, report: ConversionReport) -> List[float]:
+def _neutronMass(suite) -> float:
+    """The evaluation's own neutron mass (its PoPs), in amu, else kika's constant."""
+    from .mf1_header import _massAmu
+
+    pops = getattr(suite, "PoPs", None)
+    neutron = _massAmu(pops.particles.get("n")) if pops is not None else None
+    return NEUTRON_MASS_AMU if neutron is None else neutron
+
+
+def _bArray(form: IncoherentInelastic, book: dict, report: ConversionReport,
+            neutronMass: float = NEUTRON_MASS_AMU) -> List[float]:
     """The B array: the source's digits where the model still holds what they say."""
     atoms = form.scatteringAtoms
     principal = form.principal
@@ -649,7 +659,7 @@ def _bArray(form: IncoherentInelastic, book: dict, report: ConversionReport) -> 
         return list(kept)
 
     def awr(atom):
-        return atom.mass.value / NEUTRON_MASS_AMU
+        return atom.mass.value / neutronMass
 
     a0 = awr(principal)
     m0 = float(principal.numberPerMolecule)
@@ -670,7 +680,8 @@ def _bArray(form: IncoherentInelastic, book: dict, report: ConversionReport) -> 
     return b
 
 
-def _encodeMT4(form: IncoherentInelastic, book: dict, provenance, mat, report):
+def _encodeMT4(form: IncoherentInelastic, book: dict, provenance, mat, report,
+               neutronMass: float = NEUTRON_MASS_AMU):
     from kika.endf.classes.mf7.inelastic import BetaBlock, EffectiveTemperature, MF7MT4
 
     kernel = form.principal.selfScatteringKernel.kernel
@@ -710,7 +721,7 @@ def _encodeMT4(form: IncoherentInelastic, book: dict, provenance, mat, report):
                      _mat=mat if mat is not None else provenance.mat, pad=_pad(book),
                      _lat=1 if form.calculatedAtThermal else 0, _lasym=lasym,
                      _lln=book.get("lln", 0), _ns=len(form.scatteringAtoms) - 1,
-                     b=_bArray(form, book, report), beta_interp=betaInterp,
+                     b=_bArray(form, book, report, neutronMass), beta_interp=betaInterp,
                      blocks=blocks, teff=teffs)
     return section
 
@@ -753,7 +764,7 @@ def _encodeMT451(suite, inelastic, anchor, mat, report: ConversionReport):
                 report.lost(f"MF7/MT451: {nuclide.pid} has no PoPs mass, so the "
                             f"section is not written")
                 return None
-            awri = particle.mass.convertedTo("amu").value / NEUTRON_MASS_AMU
+            awri = particle.mass.convertedTo("amu").value / _neutronMass(suite)
             sigma = bound.get(nuclide.pid)
             if sigma is None:
                 report.lost(f"MF7/MT451: no bound cross section for {nuclide.pid}, so "
@@ -825,5 +836,6 @@ def encodeMF7Sections(suite, mat: Optional[int], report: ConversionReport):
                                  if incoherent else None))
         sections.append((7, 2, mt2))
     if inelastic is not None:
-        sections.append((7, 4, _encodeMT4(inelastic[0], inelastic[1], inelastic[2], mat, report)))
+        sections.append((7, 4, _encodeMT4(inelastic[0], inelastic[1], inelastic[2], mat, report,
+                                          _neutronMass(suite))))
     return sections, report

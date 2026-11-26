@@ -154,6 +154,21 @@ def test_a_new_bound_cross_section_recomputes_the_b_array():
     assert any("B array is recomputed" in a for a in report.approximations)
 
 
+def test_the_b_array_awr_is_the_mass_over_the_files_own_neutron():
+    """FUDGE's files state the neutron as 1.00866491574 amu; kika's constant moves AWR by 2e-10."""
+    endf, suite, _report = _load("sch4")
+    _reaction, form = _form(suite, IncoherentInelastic)
+    neutron = 1.00866491574
+    suite.PoPs.particles.get("n").mass = PhysicalQuantity(neutron, "amu")
+    b = endf.mf[7].mt[4].b
+    secondary = next(a for a in form.scatteringAtoms if a is not form.principal)
+    form.principal.mass = PhysicalQuantity(b[2] * neutron, "amu")
+    secondary.mass = PhysicalQuantity(b[8] * neutron, "amu")
+    written, _report = _mf7(suite)
+    assert written[4].b[2] == pytest.approx(b[2], rel=1e-14)
+    assert written[4].b[8] == pytest.approx(b[8], rel=1e-14)
+
+
 def test_a_new_debye_waller_integral_is_written():
     _endf, suite, _report = _load("un_elastic")
     _reaction, form = _form(suite, IncoherentElastic)
