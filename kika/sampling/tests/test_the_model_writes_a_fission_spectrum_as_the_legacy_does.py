@@ -308,12 +308,17 @@ def test_a_rounded_correlation_is_drawn_as_the_legacy_draws_it(
         a, b = old.evaluate_at_incident(energy), new.evaluate_at_incident(energy)
         assert all(np.array_equal(x, y) for x, y in zip(a, b)), energy
 
-    (g0, gN), = [(grid[0], grid[-1]) for grid in band_grids(
-        build_pfns_covariance(read_endf(str(pu240_b71_tape), mf_numbers=[5, 35]), mt=18)[0])]
+    grid, = band_grids(build_pfns_covariance(
+        read_endf(str(pu240_b71_tape), mf_numbers=[5, 35]), mt=18)[0])
+    widths = np.diff(grid)
     (eOld, yOld), (eNew, yNew) = old.evaluate_at_incident(5e5), new.evaluate_at_incident(5e5)
-    extra = np.setdiff1d(eNew, eOld)
-    assert len(extra) == 2 and g0 * (1 - 1e-3) < extra[0] < g0 and gN < extra[1] < gN * (1 + 1e-3)
-    np.testing.assert_allclose(yNew[np.isin(eNew, eOld)], yOld, rtol=1e-5, atol=0)
+    np.testing.assert_allclose(np.setdiff1d(eNew, eOld),
+                               [grid[0] - 1e-3 * widths[0], grid[-1] + 1e-3 * widths[-1]],
+                               rtol=1e-12, atol=0)
+    exponent = np.floor(np.log10(np.abs(yOld[yOld != 0])))
+    lastDigit = 10.0 ** (exponent - np.where(np.abs(exponent) >= 10, 5, 6))
+    apart = np.abs(yNew[np.isin(eNew, eOld)] - yOld)[yOld != 0]
+    assert np.all(apart <= lastDigit * (1 + 1e-9)), "more than the last printed digit"
     assert any(not np.array_equal(x, y)
                for x, y in zip(old.evaluate_at_incident(2.5e5),
                                new.evaluate_at_incident(2.5e5))), \
