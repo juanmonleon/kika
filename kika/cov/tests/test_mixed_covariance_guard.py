@@ -7,6 +7,8 @@ met a §25.2 ``mixed`` the same way and answered differently:
 section carries two or three — and ``LegendreCovariance.from_covariance_suite``
 did ``continue``, dropping the section and handing back a carrier that looks
 complete. The silent one was on the MF34 path, which is the thesis path.
+The MF33 entry now sums a ``mixed`` and asks for σ(E) only when absolute and
+relative parts meet.
 
 **Two ways in, on purpose.** The MF33 case runs on a published file: F-19 is the
 smallest evaluation in ENDF/B-VIII.1-GNDS carrying a ``mixed``, it is committed,
@@ -22,6 +24,7 @@ import numpy as np
 import pytest
 
 from kika.cov.cross_section_covariance import CrossSectionCovariance
+from kika.cov.group_arithmetic import MixedKindsNeedCrossSections, matrix_form
 from kika.cov.legendre_covariance import LegendreCovariance
 from kika.gnds.covariances import readCovarianceSuite
 from kika.gnds.xpath import Document
@@ -64,16 +67,12 @@ def _mixed(*shapes):
 # MF33: the loud one, whose message was wrong
 # ---------------------------------------------------------------------------
 
-def test_the_message_says_how_many_components_there_are():
+def test_a_mixed_of_relative_components_is_read_as_their_sum():
     section = _Section(_mixed(3, 628), "33/1")
-    with pytest.raises(ValueError) as raised:
-        CrossSectionCovariance.from_covariance_section(section, nuclide=26056)
+    covariance = CrossSectionCovariance.from_covariance_section(section, nuclide=26056)
 
-    message = str(raised.value)
-    assert "<mixed> of 2 components" in message
-    assert "'eval'" in message, "the section is not named"
-    assert "shortRangeSelfScalingVariance" in message, "the reason is not given"
-    assert "form.components" in message, "nowhere to go"
+    expected = matrix_form(section.form, "eval")
+    assert np.array_equal(np.asarray(covariance.matrices[0]), expected.matrix)
 
 
 def test_a_sum_is_refused_as_a_sum_and_not_as_a_mixed():
@@ -86,8 +85,8 @@ def test_a_sum_is_refused_as_a_sum_and_not_as_a_mixed():
         CrossSectionCovariance.from_covariance_section(section, nuclide=26056)
 
 
-def test_f19s_own_mixed_sections_raise_rather_than_answering(gnds_data_dir):
-    """The published case, end to end through the GNDS reader."""
+def test_f19s_own_mixed_sections_ask_for_the_cross_sections(gnds_data_dir):
+    """The published case, end to end: each sums relative matrices and an absolute variance."""
     suite, _ = readCovarianceSuite(
         Document.parse(gnds_data_dir / "Covariances/n-009_F_019.endf.gnds-covar.xml")
     )
@@ -95,7 +94,7 @@ def test_f19s_own_mixed_sections_raise_rather_than_answering(gnds_data_dir):
     assert mixed, "F-19 lost its mixed sections"
 
     for section in mixed:
-        with pytest.raises(ValueError, match="components, not as one matrix"):
+        with pytest.raises(MixedKindsNeedCrossSections, match=r"Pass σ\(E\)"):
             CrossSectionCovariance.from_covariance_section(section, nuclide=9019)
 
 

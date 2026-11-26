@@ -190,6 +190,9 @@ PERMANENT_IMPORTERS = {
     "kika/sampling/mf35_sampling.py",
     "kika/sampling/endf_perturbation.py",
     "kika/sampling/mf33_sampling.py",
+    # MF31 from a model suite reads its nu-bar back through `encodeMF1MT452`
+    # and siblings; the adapter package imports `.multiplicity` itself.
+    "kika/sampling/mf31_sampling.py",
     # The model-side pipeline. It is on this list for the same reason the three
     # sampling modules above are -- a driver that perturbs the model has to
     # decode a tape into it and encode sections back out -- and it costs the

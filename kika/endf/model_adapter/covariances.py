@@ -277,7 +277,7 @@ def decodeMF33MT(mf33mt, report: Optional[ConversionReport] = None,
             provenance=provenance,
         ))
     order = {int(sub.mt1): i for i, sub in enumerate(mf33mt.subsections)}
-    sections.sort(key=lambda s: order.get(int(s.columnData.ENDF_MFMT.split("/")[1])
+    sections.sort(key=lambda s: order.get(s.columnData.ENDF_MT
                                           if s.columnData is not None else int(mf33mt.number), 0))
 
     sections += _crossMaterialSections(mf33mt, 33, provenance, report)
