@@ -393,6 +393,29 @@ class Hdf5Provenance(Provenance):
 
 _LEAVES = (str, bytes, int, float, complex, bool, type(None))
 
+_SKIP, _DICT, _SEQUENCE, _OTHER = "skip", "dict", "sequence", "other"
+_KINDS: Dict[type, object] = {}
+
+
+def _kind(cls: type):
+    """A dataclass is ``(has a provenance slot, fields to descend)``."""
+    kind = _KINDS.get(cls)
+    if kind is None:
+        if issubclass(cls, _LEAVES) or cls.__module__.startswith("numpy"):
+            kind = _SKIP
+        elif dataclasses.is_dataclass(cls):
+            names = [f.name for f in dataclasses.fields(cls)]
+            kind = ("provenance" in names,
+                    tuple(n for n in names if n not in ("provenance", "report")))
+        elif issubclass(cls, dict):
+            kind = _DICT
+        elif issubclass(cls, (list, tuple)):
+            kind = _SEQUENCE
+        else:
+            kind = _OTHER
+        _KINDS[cls] = kind
+    return kind
+
 
 def provenanceNodes(suite) -> Iterator[Tuple[str, object]]:
     """Every node under *suite* that has a ``provenance`` slot, with a stable path.
@@ -414,37 +437,43 @@ def provenanceNodes(suite) -> Iterator[Tuple[str, object]]:
                 return label
         return fallback
 
+    def visits(obj) -> bool:
+        return _kind(type(obj)) is not _SKIP and id(obj) not in seen
+
+    # Children are tested before the call: leaves and arrays then cost no generator and no path.
     def walk(obj, path):
-        if isinstance(obj, _LEAVES) or id(obj) in seen:
-            return
-        if type(obj).__module__.startswith("numpy"):
-            return
         seen.add(id(obj))
-        if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
-            if any(f.name == "provenance" for f in dataclasses.fields(obj)):
+        kind = _kind(type(obj))
+        if type(kind) is tuple:
+            hasProvenance, names = kind
+            if hasProvenance:
                 yield path, obj
-            for f in dataclasses.fields(obj):
-                if f.name in ("provenance", "report"):
-                    continue
-                yield from walk(getattr(obj, f.name), f"{path}.{f.name}")
-        elif isinstance(obj, dict):
+            for fieldName in names:
+                value = getattr(obj, fieldName)
+                if visits(value):
+                    yield from walk(value, f"{path}.{fieldName}")
+        elif kind is _DICT:
             for key, value in obj.items():
-                yield from walk(value, f"{path}[{key}]")
-        elif isinstance(obj, (list, tuple)):
+                if visits(value):
+                    yield from walk(value, f"{path}[{key}]")
+        elif kind is _SEQUENCE:
             for index, value in enumerate(obj):
-                yield from walk(value, f"{path}[{name(value, index)}]")
+                if visits(value):
+                    yield from walk(value, f"{path}[{name(value, index)}]")
         elif hasattr(obj, "__iter__") and hasattr(obj, "__len__"):
             try:
                 items = list(obj)
             except Exception:
                 return
             for index, value in enumerate(items):
-                yield from walk(value, f"{path}[{name(value, index)}]")
+                if visits(value):
+                    yield from walk(value, f"{path}[{name(value, index)}]")
             # `Sums` iterates its crossSectionSums and holds §21.1's other
             # child beside them: without this the nu-bars of MT452/455, which
             # are multiplicitySums, were never visited.
             extra = getattr(obj, "multiplicitySums", None)
-            if extra is not None:
+            if extra is not None and visits(extra):
                 yield from walk(extra, f"{path}.multiplicitySums")
 
-    yield from walk(suite, "suite")
+    if visits(suite):
+        yield from walk(suite, "suite")

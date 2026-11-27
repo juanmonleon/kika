@@ -174,6 +174,7 @@ def _lineFields(reaction, context, report, reactionPath, inMF6=False) -> Optiona
                     existing.summands.append(Add(href=f"{channelPath}/products/product"
                                                       f"[@label='{r['label']}']/multiplicity"))
                 context.suite.sums.multiplicitySums.append(existing)
+                context.addedNodes = True
                 report.approximated(f"MF{mf}/MT{mt}: the total photon multiplicity is not "
                                     f"in the suite; it is the sum of the photons', lin-lin "
                                     f"on the union of their grids (FUDGE recomputes it too)")
