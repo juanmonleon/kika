@@ -504,7 +504,59 @@ def pointwise_cross_sections(endf, *, tolerance: float = 0.001,
     return endf.pendf, f"kika's resonance reconstruction (tolerance {tolerance:g})"
 
 
-def pointwise_cross_sections_from_suite(suite, *, tolerance: float = 0.001
+_SUITE_CACHE_LAYOUT = 1
+
+
+def _suite_cache_path(source: Path, tolerance: float, max_points: int, cache_dir: Path) -> Path:
+    """The entry of *source*'s reconstructed tables: file bytes, kika and engine versions, tolerance, budget."""
+    from kika import __version__
+    from kika.processing.resonances import ENGINE_VERSION
+
+    return cache_dir / (f"{_sha256_of_file(source)}_suite{_SUITE_CACHE_LAYOUT}-kika{__version__}"
+                        f"-{ENGINE_VERSION}_{tolerance}_{max_points}.npz")
+
+
+def _read_suite_tables(target: Path):
+    import zipfile
+    from types import SimpleNamespace
+
+    import numpy as np
+
+    try:
+        with np.load(target, allow_pickle=False) as data:
+            tables = {int(mt): SimpleNamespace(
+                          energies=data[f"e{mt}"], values=data[f"v{mt}"],
+                          energy_interpolation=[(int(n), int(law)) for n, law in data[f"l{mt}"]])
+                      for mt in data["mts"]}
+            return tables, str(data["source"])
+    except (OSError, ValueError, KeyError, zipfile.BadZipFile):
+        return None
+
+
+def _write_suite_tables(target: Path, tables: Dict[int, object], source: str) -> None:
+    import warnings
+
+    import numpy as np
+
+    arrays = {"mts": np.array(list(tables), dtype=np.int64), "source": np.array(source)}
+    for mt, table in tables.items():
+        arrays[f"e{mt}"] = table.energies
+        arrays[f"v{mt}"] = table.values
+        arrays[f"l{mt}"] = np.array(table.energy_interpolation, dtype=np.int64).reshape(-1, 2)
+    fd, tmp = tempfile.mkstemp(prefix=target.stem + ".", suffix=".tmp", dir=target.parent)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            np.savez(handle, **arrays)
+        os.replace(tmp, target)
+    except OSError as failure:
+        Path(tmp).unlink(missing_ok=True)
+        if not target.is_file():
+            warnings.warn(f"σ(E) of the suite was not cached in {target.parent}: {failure}", stacklevel=3)
+
+
+def pointwise_cross_sections_from_suite(suite, *, tolerance: float = 0.001,
+                                        cache_dir: str | Path | None = None,
+                                        source_path: str | Path | None = None,
                                         ) -> tuple[Dict[int, object], str]:
     """σ(E) of every MT of a model ``ReactionSuite``, with its interpolation laws, and where it came from.
 
@@ -518,12 +570,25 @@ def pointwise_cross_sections_from_suite(suite, *, tolerance: float = 0.001
     whose form is not a table is left out. Each table is ``energies``/``values``/
     ``energy_interpolation`` (ENDF ``(NBT, INT)`` pairs), as an MF3 section reads.
 
+    With *cache_dir*, a reconstruction is kept there and read back by any later
+    call on the same file. The entry is keyed by the SHA256 of the file's bytes,
+    the kika version, the reconstruction engine's version, *tolerance* and the
+    point budget, and written atomically. The key is the file, not the object:
+    a suite edited in memory after it was read must not be passed with a cache.
+
     Parameters
     ----------
     suite
         A model ``ReactionSuite``, read from any format; it is not modified.
     tolerance
         Relative tolerance of the reconstruction, as a fraction.
+    cache_dir
+        Directory of the reconstruction cache, created if missing. None (unlike
+        :func:`pointwise_cross_sections`, where None is the default directory)
+        caches nothing.
+    source_path
+        The file the suite was read from; None takes ``suite.provenance.path``.
+        Without a file that exists, nothing is cached.
 
     Returns
     -------
@@ -542,10 +607,21 @@ def pointwise_cross_sections_from_suite(suite, *, tolerance: float = 0.001
     import numpy as np
 
     label, source = "eval", "the suite's evaluated cross sections (no resonance ranges)"
+    target = None
     resonances = getattr(suite, "resonances", None)
     if resonances is not None and (resonances.resolved or resonances.unresolved is not None):
         from kika.processing.resonances import DEFAULT_MAX_POINTS, ReconstructionOptions
         from kika.processing.resonances.suite import attach_reconstruction, reconstruct_suite
+
+        if source_path is None:
+            source_path = getattr(getattr(suite, "provenance", None), "path", None)
+        if cache_dir is not None and source_path is not None and Path(source_path).is_file():
+            cache = Path(cache_dir).expanduser()
+            cache.mkdir(parents=True, exist_ok=True)
+            target = _suite_cache_path(Path(source_path), tolerance, DEFAULT_MAX_POINTS, cache)
+            cached = _read_suite_tables(target) if target.is_file() else None
+            if cached is not None:
+                return cached
 
         taken = set(suite.styles.labels)
         label = next(c for c in ("recon", "kika-recon", *(f"kika-recon-{i}" for i in range(1, 100)))
@@ -569,6 +645,8 @@ def pointwise_cross_sections_from_suite(suite, *, tolerance: float = 0.001
                 energies, values, laws = reaction.crossSection[form].toEndfRegions()
                 tables[int(mt)] = SimpleNamespace(energies=np.asarray(energies, dtype=float),
                                                   values=np.asarray(values, dtype=float),
-                                                  energy_interpolation=list(laws))
+                                                  energy_interpolation=[(int(n), int(law)) for n, law in laws])
                 break
+    if target is not None:
+        _write_suite_tables(target, tables, source)
     return tables, source
