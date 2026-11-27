@@ -67,7 +67,7 @@ K_BOLTZMANN_MEV = 8.617333262e-11
 #: NJOY round-trips kT through a 5-digit field, which is ~0.01 K at 600 K.
 TEMP_TOL_K = 1.0
 
-DEFAULT_NJOY = "/soft_snc/NJOY/2016.78/bin/njoy"
+DEFAULT_NJOY = os.environ.get("NJOY_EXECUTABLE", "njoy")
 DEFAULT_NJOY_VERSION = "NJOY 2016.78"
 
 #: `<zaid>.<ext>` -- what the pipelines write when they are given an extension.

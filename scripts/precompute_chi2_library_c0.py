@@ -115,7 +115,7 @@ OUTPUT_PARQUET = "/share_snc/snc/JuanMonleon/chi2/chi2_data_library_c0_82.parque
 
 # ── NJOY-PENDF cache (only used to resolve MF33 NC LTY=0 sub-subsections, e.g.
 # JENDL). JEFF/This_work have no NC and skip NJOY entirely. ──
-NJOY_EXECUTABLE  = "/soft_snc/NJOY/2016.78/bin/njoy"
+NJOY_EXECUTABLE  = os.environ.get("NJOY_EXECUTABLE", "njoy")
 PENDF_TOLERANCE  = 0.005  # matches kika-app default
 PENDF_CACHE_DIR  = "/share_snc/snc/JuanMonleon/kika_pendf_cache"
 

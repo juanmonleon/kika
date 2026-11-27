@@ -197,7 +197,7 @@ PRE
 COMMON=(--endf "$ENDF" --out "$OUT" --seed 42
         --nprocs "${SLURM_CPUS_PER_TASK:-40}"
         --pendf-cache-dir /share_snc/snc/JuanMonleon/cache/kika_pendf_cache
-        --njoy-exe /soft_snc/NJOY/2016.78/bin/njoy
+        --njoy-exe "${NJOY_EXECUTABLE:-njoy}"
         --xsdir /share_snc/snc/JuanMonleon/xsdir_MCNPy/xsdir40-irdff2
         --temperatures 293.6 --library-name jeff40)
 
