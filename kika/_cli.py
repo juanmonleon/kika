@@ -9,6 +9,7 @@
     kika check n-026_Fe_056.endf                    # data and covariances
     kika check n-026_Fe_056.endf --what data --mf 3
     kika check endfb81/neutrons/ --library endfb81 -o reports/
+    kika check n-*.tendl --what covariances --format html json md
 
 ``kika process``: each evaluation goes through :func:`kika.process`; every file
 asked for is written into the output folder, and the report beside it
@@ -18,7 +19,8 @@ warnings included), 1 when any was incomplete or refused, 2 for a usage error.
 
 ``kika check``: each file, or each folder as a library, goes through
 :func:`kika.check`; the report is written into the output folder as one HTML
-page (``<name>.check.html``), the format every kika report is read in. One line
+page (``<name>.check.html``), the format every kika report is read in; ``--format``
+adds the same report as JSON (``report.to_dict``) or Markdown. One line
 per evaluation says what was found. The exit status is 1
 when any evaluation has a finding at ``--fail-on`` (``defect`` by default) or
 could not be checked, 0 otherwise, 2 for a usage error.
@@ -65,6 +67,9 @@ def main(argv=None) -> int:
     c.add_argument("-o", "--output", default=".", help="output folder (default: the current one)")
     c.add_argument("--level", choices=("note", "warn", "defect"), default="warn",
                    help="lowest level listed in the report (counts always cover every level)")
+    c.add_argument("--format", nargs="+", choices=("html", "json", "md"), default=["html"],
+                   metavar="FORMAT", dest="formats",
+                   help="report files to write: html (default), json (for programs), md (Markdown)")
     c.add_argument("--library", help="a name for a folder's report")
     c.add_argument("--workers", type=int, help="processes checking a folder's tapes at once "
                                                "(default: the machine's, as for processing)")
@@ -154,8 +159,7 @@ def _check(args) -> int:
         library = hasattr(report, "tapes")
         stem = (args.library or path.name) if library else path.stem
         if not args.no_report:
-            out.mkdir(parents=True, exist_ok=True)
-            report.to_html(out / f"{stem}.check.html", level=args.level)
+            _write_check_reports(report, out / stem, args.formats, args.level)
         elapsed = time.perf_counter() - t0
         if library:
             for tape in report.tapes:
@@ -170,6 +174,20 @@ def _check(args) -> int:
             status |= int(failing(counts))
             print(f"  {_mark(counts, True)}  {path.name}: {_tally(counts)} ({elapsed:.1f} s)")
     return status
+
+
+def _write_check_reports(report, base: Path, formats, level: str) -> None:
+    import json
+
+    base.parent.mkdir(parents=True, exist_ok=True)
+    for fmt in dict.fromkeys(formats):
+        path = Path(f"{base}.check.{fmt}")
+        if fmt == "html":
+            report.to_html(path, level=level)
+        elif fmt == "md":
+            report.to_markdown(path, level=level)
+        else:
+            path.write_text(json.dumps(report.to_dict(level=level), indent=1) + "\n", encoding="utf-8")
 
 
 def _mark(counts, ok) -> str:

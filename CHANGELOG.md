@@ -4,6 +4,8 @@
 
 ### Added
 
+- `kika check --format html json md`: the check report also as JSON (`to_dict`) and Markdown,
+  beside or instead of the HTML page, for a pipeline that reads the findings.
 - `kika.processing.heating.dpa`: displacements per atom from a displacement cross section
   (`EndfProcessing.displacements`, NRT or arc-dpa) folded with a neutron flux, pointwise or
   in groups. A flux gives dpa/s; a fluence gives dpa.
