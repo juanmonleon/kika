@@ -7,7 +7,7 @@
 - `kika.endf.writers.assemble.energyCovarianceTape(suite, covarianceSuite)`: the MF35 sections
   and the MF5 sections they are relative to, built in memory as `writeEndfTape` writes them, so
   `MF35MT` (bands, `relative_uncertainty`) works on a suite read from GNDS without a tape.
-  Bit-identical to the written and re-read tape; ENDF/B-VIII.1 U-235 takes 0.2 s instead of 8 s.
+  The result is bit-identical to the tape written and read back.
 - `kika check --format html json md`: the check report also as JSON (`to_dict`) and Markdown,
   beside or instead of the HTML page, for a pipeline that reads the findings.
 - `kika.processing.heating.dpa`: displacements per atom from a displacement cross section
