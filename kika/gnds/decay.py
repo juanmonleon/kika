@@ -304,7 +304,7 @@ def writePoPsDocument(pops: PoPs, report: Optional[ConversionReport] = None
         styles = Styles()
         for style in pops.styles:
             styles.add(style)
-        writeStyles(root, styles, number, report=report)
+        writeStyles(root, styles, number)
         # styles come first in a PoPs file (gnds.xsd PoPs_Type)
         node = root.find("styles")
         root.remove(node)

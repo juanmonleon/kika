@@ -225,13 +225,10 @@ def test_a_paired_entry_with_no_writer_fails_the_check():
     checker. It used to be ``("distributionForm", "KalbachMann")`` and moved
     when §18.6 landed.
 
-    ``("function3d", "regions3d")`` is immune, and not merely unimplemented.
-    ``gnds.xsd`` gives ``regions3d`` **no element declaration anywhere**, and
-    the two complexTypes that would reach one — ``function3ds_inRegions`` and
-    ``xData_regions_3d_primary`` — are referenced only by each other, so the
-    branch is unreachable from any document. The census agrees from the other
-    end: **0 occurrences in 2 950 ``XYs3d`` across 558 evaluations**. A schema
-    argument and a measurement, which is what makes it safe to build a test on.
+    ``("function3d", "regions3d")``: FUDGE 6.14 admits a ``regions3d`` only
+    inside the two Monte Carlo forms, and the census counts **0 occurrences in
+    2 950 ``XYs3d`` across 558 evaluations**. Nothing asks for it, which is
+    what makes it safe to build a test on.
     """
     from kika.gnds.nodes import NodeSpec
 

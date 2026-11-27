@@ -45,9 +45,9 @@ from kika.gnds.xpath import Document
 #: makes it a root in its own right and FUDGE ships it its own schema — so
 #: validating the sibling against the reaction schema fails with "no matching
 #: global declaration" and says nothing about the file.
-#: FUDGE 6.10.0's schemas. The cluster install by default; ``KIKA_FUDGE_DIR``
-#: points at another checkout (the directory holding ``fudge/gnds.xsd``), which
-#: is what lets the schema gates run on a workstation instead of skipping.
+#: ``KIKA_FUDGE_DIR`` is a checkout of FUDGE's latest release (the directory
+#: holding ``fudge/gnds.xsd``); ``test_capabilities.py`` fails when it no longer
+#: matches the committed census, so a new release is a reviewed step.
 _FUDGE_DIR = Path(os.environ.get("KIKA_FUDGE_DIR", "missing"))
 SCHEMA = _FUDGE_DIR / "fudge" / "gnds.xsd"
 COVARIANCE_SCHEMA = _FUDGE_DIR / "fudge" / "covariances" / "covariances.xsd"
@@ -344,6 +344,9 @@ def _schemaErrors(path: Path, schema: Path = SCHEMA):
         ["xmllint", "--noout", "--huge", "--schema", str(schema), str(path)],
         capture_output=True, text=True,
     )
+    # 3 is "does not validate"; a schema that does not compile lists no errors
+    # at all, which read as a pass for as long as nothing checked this.
+    assert result.returncode in (0, 3), result.stderr[-2000:]
     return [line.split("Schemas validity error : ")[1]
             for line in result.stderr.splitlines()
             if "Schemas validity error : " in line]
@@ -1156,7 +1159,7 @@ def test_an_xys3d_validates_against_the_schema(tmp_path):
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" '
         'elementFormDefault="qualified">\n'
-        f'  <xs:include schemaLocation="{SCHEMA}"/>\n'
+        f'  <xs:include schemaLocation="{SCHEMA.as_uri()}"/>\n'
         '  <xs:element name="XYs3d" type="xData_XYs3d_primary"/>\n'
         "</xs:schema>\n"
     )
@@ -1196,7 +1199,7 @@ def test_a_non_linlin_xys3d_cannot_be_written_valid_and_that_is_the_schema(tmp_p
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" '
         'elementFormDefault="qualified">\n'
-        f'  <xs:include schemaLocation="{SCHEMA}"/>\n'
+        f'  <xs:include schemaLocation="{SCHEMA.as_uri()}"/>\n'
         '  <xs:element name="XYs3d" type="xData_XYs3d_primary"/>\n'
         "</xs:schema>\n"
     )
@@ -1292,6 +1295,30 @@ def test_every_committed_covariance_fixture_can_be_written(
     path.write_bytes(serialise(tree))
 
     assert _schemaErrors(path, COVARIANCE_SCHEMA) == []
+
+
+def test_a_covariance_suite_keeps_nndcs_documentation_and_axis_order(
+        gnds_covariance_fixture):
+    """Runs without FUDGE: the two things kika once wrote to suit FUDGE 6.10's
+    ``covariances.xsd``, which rejects every covariance file NNDC distributes."""
+    from kika.gnds.covariances import readCovarianceSuite
+    from kika.gnds.encode import writeCovarianceSuite
+
+    suite, _ = readCovarianceSuite(Document.parse(gnds_covariance_fixture))
+    written = writeCovarianceSuite(suite, "2.0")[0].getroot()
+    theirs = ET.parse(gnds_covariance_fixture).getroot()
+
+    def documentation(root):
+        node = root.find("styles/evaluated/documentation")
+        return [(child.tag, (child.text or "").strip(), sorted(child.attrib.items()))
+                for child in node.iter()]
+
+    def axisOrder(root):
+        return [[(child.tag, child.get("index")) for child in axes]
+                for axes in root.iter("axes")]
+
+    assert documentation(written) == documentation(theirs)
+    assert axisOrder(written) == axisOrder(theirs)
 
 
 #: The two committed covariance files whose whole content is §25.3. Si-32 has

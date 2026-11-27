@@ -1,19 +1,18 @@
-"""Every node ``gnds.xsd`` and ``covariances.xsd`` declare, written to a file
-this repository carries.
+"""Every node FUDGE's ``gnds.xsd``, ``covariances.xsd`` and ``xData.xsd``
+declare, written to a file this repository carries.
 
-**Why the list is committed rather than read at test time.** The two schemas
-ship with FUDGE (``$KIKA_FUDGE_DIR``), which exists on one of the two
-machines this repository is worked from. A gate that parses them directly is
-not a gate on the other machine — it is a ``pytest.skip``, which is exactly the
-failure ``build_micro_fe56_gnds.py`` already has and says so about. So the
-extraction runs *here*, by hand, and its output is the fixed point that
-``test_capabilities.py`` measures the capability table against. A second test,
-marked ``tape``, re-runs this extraction where the schemas exist and fails on
-drift; skipping *that* leaves nothing unchecked.
+**Why the list is committed rather than read at test time.** The schemas ship
+with FUDGE (``$KIKA_FUDGE_DIR``, a checkout of its latest release), which not
+every machine has. A gate that parses them directly is not a gate there — it is
+a ``pytest.skip``. So the extraction runs where FUDGE is, by hand, and its
+output is the fixed point that ``test_capabilities.py`` measures the capability
+table against. A second test re-runs this extraction where the schemas exist
+and fails on drift, which is how a new FUDGE release arrives:
+re-run this script, read the diff and give every new node a capability row.
 
 **Why it parses XML instead of grepping.** ``xs:element`` declarations do not
 put ``name`` first. A regex ``xs:element name="…"`` misses twelve of the three
-hundred — ``resolved``, ``unresolved``, ``spinGroup``, ``isotope``,
+hundred of FUDGE 6.10 — ``resolved``, ``unresolved``, ``spinGroup``, ``isotope``,
 ``isotopes``, ``atomic``, ``J``, ``L``, ``configuration``,
 ``averageProductEnergy``, ``resonanceReaction``, ``weighted`` — every one of
 them because ``minOccurs`` precedes ``name`` on that line. Four of those twelve
@@ -52,14 +51,15 @@ HERE = Path(__file__).resolve().parent
 #: so this costs the published package nothing.
 CENSUS = HERE / "gnds_schema_nodes.json"
 
-#: FUDGE 6.10.0's schemas. Two files and not one: ``covarianceSuite`` has no
-#: global declaration in ``gnds.xsd`` at all — §25.1.1 makes it a root in its
-#: own right — which is the same reason ``test_encode.py:46-48`` carries both
-#: paths.
-FUDGE = Path(os.environ.get("KIKA_FUDGE_DIR", "missing")) / "fudge"
+#: ``covarianceSuite`` has no global declaration in ``gnds.xsd`` (§25.1.1 makes
+#: it a root in its own right), and since FUDGE 6.11 both schemas take their
+#: shared types from ``xData.xsd``. Paths are relative to the checkout, so the
+#: committed file names no machine.
+FUDGE = Path(os.environ.get("KIKA_FUDGE_DIR", "missing"))
 SCHEMAS = (
-    ("gnds.xsd", FUDGE / "gnds.xsd"),
-    ("covariances.xsd", FUDGE / "covariances" / "covariances.xsd"),
+    ("gnds.xsd", Path("fudge/gnds.xsd")),
+    ("covariances.xsd", Path("fudge/covariances/covariances.xsd")),
+    ("xData.xsd", Path("xData/xData.xsd")),
 )
 
 #: The GNDS version these schemas describe. ``gnds.xsd``'s own header lists 2.0
@@ -98,9 +98,17 @@ def declaredNodes(path: Path) -> Dict[str, int]:
     return located
 
 
+def fudgeVersion() -> str:
+    text = (FUDGE / "fudge" / "fudgeVersion.py").read_text(encoding="utf-8")
+    major, minor = (re.search(rf"^FUDGE_{part}VERSION\s*=\s*(\d+)", text, re.M).group(1)
+                    for part in ("MAJOR", "MINOR"))
+    return f"{major}.{minor}"
+
+
 def extract() -> dict:
     """The whole census, as it is written to disk. Sorted, so a diff is a diff."""
-    missing = [str(path) for _, path in SCHEMAS if not path.exists()]
+    missing = [str(FUDGE / path) for _, path in SCHEMAS
+               if not (FUDGE / path).exists()]
     if missing:
         raise FileNotFoundError(
             "the FUDGE schemas are not on this machine: " + ", ".join(missing) +
@@ -110,21 +118,21 @@ def extract() -> dict:
 
     nodes: Dict[str, Tuple[str, int]] = {}
     schemas = {}
-    for label, path in SCHEMAS:
+    for label, relative in SCHEMAS:
+        path = FUDGE / relative
         raw = path.read_bytes()
         schemas[label] = {
-            "path": str(path),
+            "path": relative.as_posix(),
             "bytes": len(raw),
             "sha256": hashlib.sha256(raw).hexdigest(),
         }
         for name, line in declaredNodes(path).items():
-            # A name declared in both files keeps its first schema. None are
-            # today; the tie-break is written down so a future one is not a
-            # silent reordering of the file.
+            # A name declared in two files keeps the first in SCHEMAS order.
             nodes.setdefault(name, (label, line))
 
     return {
         "gndsVersion": GNDS_VERSION,
+        "fudgeVersion": fudgeVersion(),
         "schemas": schemas,
         "nodeCount": len(nodes),
         "nodes": {name: list(where) for name, where in sorted(nodes.items())},
@@ -161,7 +169,8 @@ def check() -> int:
     for problem in problems:
         print(f"[drift] {problem}")
     if not problems:
-        print(f"[ok] {live['nodeCount']} nodes, both schemas byte-identical")
+        print(f"[ok] {live['nodeCount']} nodes, FUDGE {live['fudgeVersion']}, "
+              f"every schema byte-identical")
     return 1 if problems else 0
 
 
