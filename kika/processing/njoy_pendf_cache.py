@@ -557,6 +557,46 @@ def _write_suite_tables(target: Path, tables: Dict[int, object], source: str) ->
             warnings.warn(f"σ(E) of the suite was not cached in {target.parent}: {failure}", stacklevel=3)
 
 
+def _suite_cache_entry(suite, tolerance: float, cache_dir, source_path) -> Optional[Path]:
+    """Where *suite*'s reconstruction is cached, or None when nothing is (no cache, no file, no resonances)."""
+    from kika.processing.resonances import DEFAULT_MAX_POINTS
+
+    resonances = getattr(suite, "resonances", None)
+    if resonances is None or not (resonances.resolved or resonances.unresolved is not None):
+        return None
+    if source_path is None:
+        source_path = getattr(getattr(suite, "provenance", None), "path", None)
+    if cache_dir is None or source_path is None or not Path(source_path).is_file():
+        return None
+    return _suite_cache_path(Path(source_path), tolerance, DEFAULT_MAX_POINTS, Path(cache_dir).expanduser())
+
+
+def suite_reconstruction_cached(suite, *, cache_dir: str | Path, tolerance: float = 0.001,
+                                source_path: str | Path | None = None) -> bool:
+    """Whether :func:`pointwise_cross_sections_from_suite` with the same arguments reads its tables from *cache_dir*.
+
+    Parameters
+    ----------
+    suite
+        A model ``ReactionSuite``.
+    cache_dir
+        Directory of the reconstruction cache.
+    tolerance
+        Relative tolerance of the reconstruction, as a fraction.
+    source_path
+        The file the suite was read from; None takes ``suite.provenance.path``.
+
+    Returns
+    -------
+    bool
+        True when an entry for this file, tolerance, point budget and engine is
+        on disk. A suite without resonance ranges needs no reconstruction and
+        gives False.
+    """
+    target = _suite_cache_entry(suite, tolerance, cache_dir, source_path)
+    return target is not None and target.is_file()
+
+
 def pointwise_cross_sections_from_suite(suite, *, tolerance: float = 0.001,
                                         cache_dir: str | Path | None = None,
                                         source_path: str | Path | None = None,
@@ -616,14 +656,10 @@ def pointwise_cross_sections_from_suite(suite, *, tolerance: float = 0.001,
         from kika.processing.resonances import DEFAULT_MAX_POINTS, ReconstructionOptions
         from kika.processing.resonances.suite import attach_reconstruction, reconstruct_suite
 
-        if source_path is None:
-            source_path = getattr(getattr(suite, "provenance", None), "path", None)
-        if cache_dir is not None and source_path is not None and Path(source_path).is_file():
-            target = _suite_cache_path(Path(source_path), tolerance, DEFAULT_MAX_POINTS,
-                                       Path(cache_dir).expanduser())
-            cached = _read_suite_tables(target) if target.is_file() else None
-            if cached is not None:
-                return cached
+        target = _suite_cache_entry(suite, tolerance, cache_dir, source_path)
+        cached = _read_suite_tables(target) if target is not None and target.is_file() else None
+        if cached is not None:
+            return cached
 
         taken = set(suite.styles.labels)
         label = next(c for c in ("recon", "kika-recon", *(f"kika-recon-{i}" for i in range(1, 100)))

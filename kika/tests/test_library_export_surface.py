@@ -166,6 +166,7 @@ APP_NAMES = (
     ("kika.processing.njoy_reconstruct", "njoy_reconstruct"),
     ("kika.processing.njoy_reconstruct", "njoy_reconstruct_stream"),
     ("kika.processing.njoy_pendf_cache", "pointwise_cross_sections_from_suite"),
+    ("kika.processing", "suite_reconstruction_cached"),
     ("kika.sampling.mf31_sampling", "build_mf31_covariance"),
     ("kika.sampling.mf31_sampling", "build_mf31_covariance_from_suite"),
     ("kika.sampling.mf33_sampling", "build_mf33_covariance_from_suite"),

@@ -139,3 +139,15 @@ def test_a_cache_that_cannot_be_written_only_warns(cached, tmp_path):
         again, _ = pointwise_cross_sections_from_suite(kika.read(str(gnds), covariances=False),
                                                        tolerance=0.05, cache_dir=blocked)
     assert list(again) == list(tables)
+
+
+def test_whether_a_reconstruction_is_cached_is_told_without_reconstructing(cached, no_reconstruction, tmp_path):
+    from kika.processing import suite_reconstruction_cached
+
+    gnds, cache, _ = cached
+    suite = kika.read(str(gnds), covariances=False)
+    assert suite_reconstruction_cached(suite, cache_dir=cache, tolerance=0.05)
+    assert not suite_reconstruction_cached(suite, cache_dir=cache, tolerance=0.02)
+    assert not suite_reconstruction_cached(suite, cache_dir=tmp_path / "empty", tolerance=0.05)
+    hydrogen = kika.read(str(GNDS / "n-001_H_001.endf.gnds.xml"), covariances=False)
+    assert not suite_reconstruction_cached(hydrogen, cache_dir=cache)

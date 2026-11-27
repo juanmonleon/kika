@@ -38,6 +38,7 @@ from .njoy_pendf_cache import (
     find_njoy_executable,
     pointwise_cross_sections,
     pointwise_cross_sections_from_suite,
+    suite_reconstruction_cached,
     mf33_needs_pendf,
     get_or_create_pendf,
     read_pendf_mf3_sections,
@@ -70,4 +71,5 @@ __all__ = [
     "find_njoy_executable",
     "pointwise_cross_sections",
     "pointwise_cross_sections_from_suite",
+    "suite_reconstruction_cached",
 ]
