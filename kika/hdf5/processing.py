@@ -1132,14 +1132,8 @@ def _processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMA
                         "perturbation run's unperturbed evaluation); they are factors on "
                         "this realisation's smooth cross sections")
     else:
-        from kika.processing.resonances.probability_tables import purrGrid, purrInputs, competitionFlags
-        energyURR = purrGrid(work.resonances.unresolved)
-        _, competingURR = purrInputs(work, energyURR, form=_evaluated)
-        inelasticURR, _ = competitionFlags(competingURR)
-        transportXS = {float(kelvin): _urrTransportXS(out, T, energyURR, inelasticURR)
-                       for kelvin, T in zip(temperatures, styleKT)}
         byKelvin = urrTablesOf(work, temperatures, context=context, workers=workers,
-                              report=report, transportXS=transportXS)
+                              report=report, transportXS=urrTransportXS(work, broadened, temperatures))
         urrTables = {T: byKelvin[float(t)] for t, T in zip(temperatures, styleKT)}
     if urrTables:
         _attachURR(out, urrTables)
@@ -2135,41 +2129,53 @@ def _fission(work, out, report):
 
 
 
-def _urrTransportXS(out, T, grid, inelastic):
-    """Smooth XS used by OpenMC's URR reader, on the probability-table grid.
+def urrTransportXS(work, broadened, temperatures) -> Dict[float, np.ndarray]:
+    """``{kelvin: (nE, 4)}``: the smooth cross sections OpenMC multiplies a URR table by.
 
-    Capture in the reader denotes all non-fission disappearance, not MT102
-    alone. Redundant sums are excluded from absorption and fission.
+    Elastic, fission, all non-fission disappearance and the competing reaction, on
+    PURR's grid, from the leaves of *work* (a suite with its 0 K forms): broadened
+    below the ceiling of ``broadened = {kelvin: (forms, ceiling)}``, 0 K above it or
+    where ``broadened`` is ``None``, negatives clipped as OpenMC clips them. The
+    statistical stopping rule of :func:`urrTablesOf` is measured on them; processSuite
+    and ``process_endf`` both take them from here, so their tables are the same.
     """
-    values = {}
-    result = np.zeros((len(grid), 4))
-    for container in (out.reactions, out.fissionComponents, out.sums):
-        for reaction in container:
-            mt = reaction.ENDF_MT
-            form = reaction.crossSection.forms.get(heatedLabel(T))
-            if mt is None or form is None:
-                continue
-            x = np.interp(grid, form.xs, form.ys, left=0., right=float(form.ys[-1]))
-            values[mt] = x
-            attributes = getattr(reaction.provenance, "attributes", {}) or {}
-            if attributes.get("redundant", 0):
-                continue
+    from kika.processing.resonances.probability_tables import competitionFlags, purrGrid, purrInputs
+
+    energies = purrGrid(work.resonances.unresolved)
+    _, competing = purrInputs(work, energies, form=_evaluated)
+    inelastic, _ = competitionFlags(competing)
+    leaves = [(container, reaction) for container in ("reactions", "fissionComponents")
+              for reaction in getattr(work, container)
+              if reaction.ENDF_MT is not None and reaction.ENDF_MT not in NEVER
+              and reaction.ENDF_MT not in GAS_MTS]
+    if {r.ENDF_MT for _, r in leaves} & {19, 20, 21, 38}:
+        leaves = [(c, r) for c, r in leaves if not (r.ENDF_MT == 18 and c == "reactions")]
+    out = {}
+    for temperature in temperatures:
+        forms, hi = broadened[temperature] if broadened is not None else ({}, -np.inf)
+        values = {}
+        for _, reaction in leaves:
+            cold = _onGrid(reaction.crossSection[RECON_LABEL], energies)
+            hot = _onGrid(forms[reaction.label], energies) if reaction.label in forms else cold
+            values[reaction.ENDF_MT] = np.maximum(np.where(energies <= hi, hot, cold), 0.0)
+        result = np.zeros((len(energies), 4))
+        for mt, x in values.items():
             if mt == 2:
                 result[:, 0] += x
             elif mt in FISSION_MTS:
                 result[:, 1] += x
-            elif (101 <= mt <= 117 or 600 <= mt <= 849
-                  or mt in (118, 119, 120, 121, 122, 124)):
+            elif 102 <= mt <= 117 or 600 <= mt <= 849 or mt in (118, 119, 120, 121, 122, 124):
                 result[:, 2] += x
-    if inelastic > 0:
-        if inelastic in values:
-            result[:, 3] = values[inelastic]
-        elif inelastic == 4:
-            result[:, 3] = sum((x for mt, x in values.items() if 51 <= mt <= 91),
-                               np.zeros(len(grid)))
-        else:
-            raise ValueError(f"URR competing MT{inelastic} has no processed smooth cross section")
-    return result
+        if inelastic > 0:
+            if inelastic in values:
+                result[:, 3] = values[inelastic]
+            elif inelastic == 4:
+                result[:, 3] = sum((x for mt, x in values.items() if 51 <= mt <= 91),
+                                   np.zeros(len(energies)))
+            else:
+                raise ValueError(f"URR competing MT{inelastic} has no smooth cross section")
+        out[float(temperature)] = result
+    return out
 
 
 def _totalOn(out, T, grid):

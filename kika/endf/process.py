@@ -1821,8 +1821,9 @@ def _broaden(rec, plan, report):
         heated, thnmax, work, broadened
 
 
-def _urr(rec, plan, unresolved, report):
-    """``(StageReport, {T: ProbabilityTables})``; never raises."""
+def _urr(rec, plan, unresolved, report, work=None, broadened=None):
+    """``(StageReport, {T: ProbabilityTables})``; never raises. ``work`` and ``broadened``
+    are the broadening stage's, ``None`` when it did not run."""
     if not plan.urr:
         return StageReport("urr", "skipped", summary="not requested"), {}
     if unresolved is None:
@@ -1831,7 +1832,7 @@ def _urr(rec, plan, unresolved, report):
     if not plan.temperatures:
         return StageReport("urr", "skipped", category="urr-no-temperature",
                            summary=PROCESSING_REJECTION_CATEGORIES["urr-no-temperature"]), {}
-    from kika.hdf5.processing import urrTablesOf
+    from kika.hdf5.processing import urrTablesOf, urrTransportXS
     from kika.processing.resonances import UnsupportedResonanceError
     from kika.processing.resonances.probability_tables import ProbabilityTableOptions
     t0 = time.perf_counter()
@@ -1840,8 +1841,11 @@ def _urr(rec, plan, unresolved, report):
                    range_eV=unresolved["range_eV"])
     try:
         options = ProbabilityTableOptions(bins=plan.urr_bins, ladders=plan.urr_ladders)
+        if work is None:
+            work, _ = _working_suite(rec)
         tables = urrTablesOf(rec.suite, plan.temperatures, context=rec.context, workers=plan.workers,
-                             options=options)
+                             options=options,
+                             transportXS=urrTransportXS(work, broadened, plan.temperatures))
     except Exception as error:
         category = "urr-unsupported" if isinstance(error, UnsupportedResonanceError) else "urr-failed"
         details["error"] = "".join(traceback.format_exception_only(type(error), error)).strip()
@@ -2198,7 +2202,7 @@ def _finish(rec, plan, report, source_format, decode_details=None, aside=None):
         stage = StageReport("broaden", "skipped", summary="not requested" + (
             "" if plan.temperatures else " (0 K only)"))
     stages.append(stage)
-    stage, urr_tables = _urr(rec, plan, unresolved, report)
+    stage, urr_tables = _urr(rec, plan, unresolved, report, work, raw)
     stages.append(stage)
     run = EndfProcessing(rec, plan, stages, heated, thnmax, urr_tables, broadened=raw,
                          source_format=source_format)
