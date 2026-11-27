@@ -102,10 +102,13 @@ kika check n-094_Pu_243.endf                       # data and covariances
 kika check n-026_Fe_056.endf --what data --mf 3 4
 kika check endfb81/neutrons/ --library endfb81 -o reports/ --workers 4
 kika check n-092_U_235.endf --deep --level note    # list the notes too
+kika check n-*.tendl --what covariances --format html json md
 ```
 
 Each file, or each folder as a library, gets one HTML page in the output folder
-(`<name>.check.html`). One line per evaluation says what was found. The exit status is 1
+(`<name>.check.html`). `--format` chooses the files written: `html` (the default), `json`
+(the report's `to_dict`, for a pipeline or an agent to read) and `md` (Markdown), together if
+several are given. One line per evaluation says what was found. The exit status is 1
 when any evaluation has a finding at `--fail-on` (`defect` by default; `warn`, `note` or
 `never`) or could not be checked, 0 otherwise, 2 for a usage error, so a script or a CI job
 can stop on a defective evaluation.

@@ -220,6 +220,24 @@ def test_cli_writes_one_html_page_and_fails_on_defects(tmp_path, capsys):
                  "--no-report"]) == 0
 
 
+def test_cli_writes_json_and_markdown_beside_the_html(tmp_path):
+    import json
+
+    import kika
+    from kika._cli import main
+
+    tape = DATA / "micro_cs134_jeff40_mt102.endf"
+    assert main(["check", str(tape), "--what", "data", "--mf", "3", "-o", str(tmp_path),
+                 "--format", "json", "md", "html"]) == 1
+    stem = tmp_path / "micro_cs134_jeff40_mt102"
+    data = json.loads(stem.with_name(stem.name + ".check.json").read_text(encoding="utf-8"))
+    expected = json.loads(json.dumps(kika.check(tape, what="data", mf=[3]).to_dict(level="warn")))
+    assert data["totals"] == expected["totals"] and data["findings"] == expected["findings"]
+    assert data["totals"]["defect"] == 1
+    assert "Defect" in stem.with_name(stem.name + ".check.md").read_text(encoding="utf-8")
+    assert stem.with_name(stem.name + ".check.html").is_file()
+
+
 def test_workers_change_nothing_but_the_time():
     serial = check_library(DATA, what="data", patterns=("micro_*.endf",), progress=False, workers=1)
     pooled = check_library(DATA, what="data", patterns=("micro_*.endf",), progress=False, workers=2)
