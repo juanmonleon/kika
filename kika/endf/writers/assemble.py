@@ -49,7 +49,7 @@ from ..utils import (format_endf_fend_record, format_endf_mend_record,
                      format_endf_tend_record)
 
 __all__ = ["MF_WRITE_ORDER", "PENDF_SECTIONS", "TAPE_ID_MAT", "DEFAULT_TAPE_ID",
-           "encodeTapeSections", "assembleTape", "writeEndfTape",
+           "encodeTapeSections", "assembleTape", "writeEndfTape", "energyCovarianceTape",
            "writeEndfTapes", "writeReconstructedEndfTape", "writeHeatedEndfTape"]
 
 #: The MF numbers an encoder exists for, in the order ENDF-6 puts them on the
@@ -808,6 +808,62 @@ def writeEndfTape(suite, path, mat: Optional[int] = None,
             "set it."
         )
     return report
+
+
+def energyCovarianceTape(suite, covarianceSuite=None, report=None):
+    """MF35 and the MF5 sections it is relative to, as :func:`writeEndfTape` writes them, in memory.
+
+    Only the reactions those sections are about are derived, so a suite read
+    from GNDS costs a fraction of a whole tape. Neither argument is changed.
+
+    Parameters
+    ----------
+    suite : ReactionSuite
+        The evaluation the MF5 sections come from.
+    covarianceSuite : CovarianceSuite, optional
+        Where the MF35 sections come from; ``suite.covarianceSuite`` by default.
+    report : ConversionReport, optional
+        Appended to, as :func:`encodeTapeSections` does.
+
+    Returns
+    -------
+    ENDF, ConversionReport
+        The ENDF holds MF35 and the MF5 sections of the same MTs, the objects
+        ``MF35MT.relative_uncertainty`` reads, and the MAT they carry.
+    """
+    import copy
+    import dataclasses
+
+    from kika.nuclear_data.model.reactions import (FissionComponents, IncompleteReactions,
+                                                   OrphanProducts, Productions, Reactions, Sums)
+
+    from ..classes.endf import ENDF
+    from ..classes.mf import MF
+
+    if covarianceSuite is None:
+        covarianceSuite = getattr(suite, "covarianceSuite", None)
+    mf35 = [section for section in getattr(covarianceSuite, "covarianceSections", ())
+            if getattr(getattr(section, "rowData", None), "ENDF_MF", None) == 35]
+    mts = sorted({int(section.rowData.ENDF_MT) for section in mf35})
+    # MF5/MT455's precursor families hang on the fission reaction (§18.4).
+    kept = set(mts) | ({18} if 455 in mts else set())
+
+    view = copy.copy(suite)
+    view.reactions = Reactions([r for r in suite.reactions if r.ENDF_MT in kept])
+    view.sums = Sums([r for r in suite.sums if r.ENDF_MT in kept],
+                     multiplicitySums=list(suite.sums.multiplicitySums))
+    view.orphanProducts, view.fissionComponents = OrphanProducts(), FissionComponents()
+    view.productions, view.incompleteReactions = Productions(), IncompleteReactions()
+    view.resonances = None
+    view.covarianceSuite = (None if covarianceSuite is None else dataclasses.replace(
+        covarianceSuite, covarianceSections=mf35, parameterCovariances=[]))
+
+    files = [(mf, mt) for mt in mts for mf in (5, 35)]
+    sections, report, mat = encodeTapeSections(view, report=report, files=files)
+    tape = ENDF(mat=mat)
+    for mf, _mt, section in sections:
+        tape.files.setdefault(mf, MF(number=mf)).add_section(section)
+    return tape, report
 
 
 def writeEndfTapes(suites, path, mats: Optional[Sequence[Optional[int]]] = None,
