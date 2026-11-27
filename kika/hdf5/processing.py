@@ -2158,24 +2158,29 @@ def urrTransportXS(work, broadened, temperatures) -> Dict[float, np.ndarray]:
             cold = _onGrid(reaction.crossSection[RECON_LABEL], energies)
             hot = _onGrid(forms[reaction.label], energies) if reaction.label in forms else cold
             values[reaction.ENDF_MT] = np.maximum(np.where(energies <= hi, hot, cold), 0.0)
-        result = np.zeros((len(energies), 4))
-        for mt, x in values.items():
-            if mt == 2:
-                result[:, 0] += x
-            elif mt in FISSION_MTS:
-                result[:, 1] += x
-            elif 102 <= mt <= 117 or 600 <= mt <= 849 or mt in (118, 119, 120, 121, 122, 124):
-                result[:, 2] += x
-        if inelastic > 0:
-            if inelastic in values:
-                result[:, 3] = values[inelastic]
-            elif inelastic == 4:
-                result[:, 3] = sum((x for mt, x in values.items() if 51 <= mt <= 91),
-                                   np.zeros(len(energies)))
-            else:
-                raise ValueError(f"URR competing MT{inelastic} has no smooth cross section")
-        out[float(temperature)] = result
+        out[float(temperature)] = _transportColumns(values, len(energies), inelastic)
     return out
+
+
+def _transportColumns(values, n, inelastic) -> np.ndarray:
+    """``(n, 4)`` from ``{MT: sigma}`` of leaves: elastic, fission, all non-fission
+    disappearance (OpenMC's "capture"), and the competing MT (4: the sum of 51-91)."""
+    result = np.zeros((n, 4))
+    for mt, x in values.items():
+        if mt == 2:
+            result[:, 0] += x
+        elif mt in FISSION_MTS:
+            result[:, 1] += x
+        elif 102 <= mt <= 117 or 600 <= mt <= 849 or mt in (118, 119, 120, 121, 122, 124):
+            result[:, 2] += x
+    if inelastic > 0:
+        if inelastic in values:
+            result[:, 3] = values[inelastic]
+        elif inelastic == 4:
+            result[:, 3] = sum((x for mt, x in values.items() if 51 <= mt <= 91), np.zeros(n))
+        else:
+            raise ValueError(f"URR competing MT{inelastic} has no smooth cross section")
+    return result
 
 
 def _totalOn(out, T, grid):

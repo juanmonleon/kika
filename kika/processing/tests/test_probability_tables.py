@@ -302,20 +302,12 @@ def test_transport_diagnostics_do_not_change_fixed_count_tables():
     assert np.isfinite(new_stats[0]['shieldingSigma']).all()
 
 
-def test_processed_transport_absorption_excludes_redundant_sums():
-    from types import SimpleNamespace
-    from kika.nuclear_data import model as m
-    from kika.hdf5.processing import _urrTransportXS
-    from kika.hdf5.names import heatedLabel
+def test_transport_columns_take_leaves_and_build_the_competing_sum():
+    from kika.hdf5.processing import _transportColumns
 
-    label = heatedLabel('294K')
-    def reaction(mt, xs, redundant=0):
-        return SimpleNamespace(ENDF_MT=mt,
-            crossSection=SimpleNamespace(forms={label: m.XYs1d(xs=[1., 2.], ys=[xs, xs])}),
-            provenance=SimpleNamespace(attributes={'redundant': redundant}))
-    suite = SimpleNamespace(reactions=[reaction(2, 10.), reaction(102, 2.),
-                                      reaction(600, 3.), reaction(51, 4.), reaction(52, 5.)],
-                            fissionComponents=[reaction(19, 6.)],
-                            sums=[reaction(103, 3., 1), reaction(18, 6., 1)])
-    values = _urrTransportXS(suite, '294K', np.array([.5, 1.5]), 4)
-    np.testing.assert_array_equal(values, [[0., 0., 0., 0.], [10., 6., 5., 9.]])
+    one = np.ones(2)
+    values = {2: 10. * one, 102: 2. * one, 600: 3. * one, 51: 4. * one, 52: 5. * one, 19: 6. * one}
+    np.testing.assert_array_equal(_transportColumns(values, 2, 4), [[10., 6., 5., 9.]] * 2)
+    np.testing.assert_array_equal(_transportColumns(values, 2, 0)[:, 3], [0., 0.])
+    with pytest.raises(ValueError, match="MT16"):
+        _transportColumns(values, 2, 16)
