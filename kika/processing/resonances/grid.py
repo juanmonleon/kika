@@ -62,6 +62,15 @@ class ReconstructionConvergenceError(RuntimeError):
         self.category=category
 
 
+#: Point budget of a whole-material reconstruction (``reconstruct_endf``, a
+#: model suite's cross sections). ``ReconstructionOptions`` keeps its
+#: conservative 200 000 for direct callers; a whole evaluated actinide needs
+#: more (ENDF/B-VIII.1 U-238 stores 1.66 M points, ~1.9 GB peak). Reaching the
+#: budget rejects the material with category ``budget-exhausted``; it never
+#: relaxes the tolerance.
+DEFAULT_MAX_POINTS = 4_000_000
+
+
 @dataclass(frozen=True)
 class ReconstructionOptions:
     """Strict mixed error in barns; limits never relax tolerances.

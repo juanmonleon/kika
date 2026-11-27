@@ -32,12 +32,7 @@ from typing import Callable
 
 import numpy as np
 
-#: Point budget of :func:`reconstruct_endf`. ``ReconstructionOptions`` keeps its
-#: conservative 200 000 for direct callers; a whole evaluated actinide needs
-#: more (ENDF/B-VIII.1 U-238 stores 1.66 M points, ~1.9 GB peak). Reaching the
-#: budget rejects the material with category ``budget-exhausted``; it never
-#: relaxes the tolerance.
-DEFAULT_MAX_POINTS = 4_000_000
+from kika.processing.resonances import DEFAULT_MAX_POINTS
 
 Progress = Callable[[str, "float | None"], None]
 
