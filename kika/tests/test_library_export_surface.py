@@ -127,6 +127,7 @@ APP_NAMES = (
     ("kika.endf.remote.exceptions", "LibraryNotFoundError"),
     ("kika.endf.remote.exceptions", "NetworkError"),
     ("kika.endf.utils", "parse_endf_id"),
+    ("kika.endf.writers.assemble", "energyCovarianceTape"),
     ("kika.endf.writers.section_ops", "remove_sections"),
     ("kika.endf.writers.update_directory", "update_mf1_directory"),
     ("kika.energy_grids", "equal_lethargy_grid"),

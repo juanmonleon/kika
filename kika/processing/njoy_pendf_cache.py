@@ -543,13 +543,16 @@ def _write_suite_tables(target: Path, tables: Dict[int, object], source: str) ->
         arrays[f"e{mt}"] = table.energies
         arrays[f"v{mt}"] = table.values
         arrays[f"l{mt}"] = np.array(table.energy_interpolation, dtype=np.int64).reshape(-1, 2)
-    fd, tmp = tempfile.mkstemp(prefix=target.stem + ".", suffix=".tmp", dir=target.parent)
+    tmp = None
     try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix=target.stem + ".", suffix=".tmp", dir=target.parent)
         with os.fdopen(fd, "wb") as handle:
             np.savez(handle, **arrays)
         os.replace(tmp, target)
     except OSError as failure:
-        Path(tmp).unlink(missing_ok=True)
+        if tmp is not None:
+            Path(tmp).unlink(missing_ok=True)
         if not target.is_file():
             warnings.warn(f"σ(E) of the suite was not cached in {target.parent}: {failure}", stacklevel=3)
 
@@ -616,9 +619,8 @@ def pointwise_cross_sections_from_suite(suite, *, tolerance: float = 0.001,
         if source_path is None:
             source_path = getattr(getattr(suite, "provenance", None), "path", None)
         if cache_dir is not None and source_path is not None and Path(source_path).is_file():
-            cache = Path(cache_dir).expanduser()
-            cache.mkdir(parents=True, exist_ok=True)
-            target = _suite_cache_path(Path(source_path), tolerance, DEFAULT_MAX_POINTS, cache)
+            target = _suite_cache_path(Path(source_path), tolerance, DEFAULT_MAX_POINTS,
+                                       Path(cache_dir).expanduser())
             cached = _read_suite_tables(target) if target.is_file() else None
             if cached is not None:
                 return cached

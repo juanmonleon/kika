@@ -109,3 +109,33 @@ def test_without_a_cache_dir_the_cache_is_not_consulted(cached, no_reconstructio
     monkeypatch.setattr(module, "_read_suite_tables", untouched)
     with pytest.raises(Reconstructed):
         pointwise_cross_sections_from_suite(kika.read(str(cached[0]), covariances=False), tolerance=0.05)
+
+
+def test_a_cache_folder_removed_during_the_reconstruction_is_made_again(cached, monkeypatch, tmp_path):
+    import shutil
+
+    import kika.processing.resonances.suite as suite_module
+
+    gnds, _, (tables, _) = cached
+    cache = tmp_path / "cache"
+    original = suite_module.reconstruct_suite
+
+    def reconstruct_while_the_folder_goes(*args, **kwargs):
+        shutil.rmtree(cache, ignore_errors=True)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(suite_module, "reconstruct_suite", reconstruct_while_the_folder_goes)
+    again, _ = pointwise_cross_sections_from_suite(kika.read(str(gnds), covariances=False),
+                                                   tolerance=0.05, cache_dir=cache)
+    assert list(again) == list(tables)
+    assert [p.suffix for p in cache.iterdir()] == [".npz"]
+
+
+def test_a_cache_that_cannot_be_written_only_warns(cached, tmp_path):
+    gnds, _, (tables, _) = cached
+    blocked = tmp_path / "not-a-folder"
+    blocked.write_text("")
+    with pytest.warns(UserWarning, match="not cached"):
+        again, _ = pointwise_cross_sections_from_suite(kika.read(str(gnds), covariances=False),
+                                                       tolerance=0.05, cache_dir=blocked)
+    assert list(again) == list(tables)
