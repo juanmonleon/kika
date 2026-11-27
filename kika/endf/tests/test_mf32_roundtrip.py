@@ -74,11 +74,18 @@ def reemit(lines: list[str]) -> list[str]:
 
 
 def roundtrip(path) -> str:
-    """Parse the MF32 section of *path* and report how its bytes differ."""
+    """Parse the MF32 section of *path* and report how its bytes differ.
+
+    NS is compared up to 99999 only: past it each writer has its own rule
+    (``test_the_sequence_number_wraps_rather_than_widening``).
+    """
     source = mf32_lines(path)
     width = source_width(source)
-    return first_difference([line[:width].rstrip() for line in source],
-                            reemit(source))
+
+    def comparable(lines):
+        return [line[:width if k < 99999 else 75].rstrip() for k, line in enumerate(lines)]
+
+    return first_difference(comparable(source), comparable(reemit(source)))
 
 
 # ---------------------------------------------------------------------------
@@ -124,24 +131,21 @@ def test_every_real_evaluation_round_trips(tape, request):
 def test_the_sequence_number_wraps_rather_than_widening(pu239_jendl_tape):
     """Pu-239's MF32 is 190 445 lines. NS is five characters wide.
 
-    The record after 99999 is numbered 1, not 100000, and the tape says so:
-    ``f"{100000:5d}"`` is six characters, so getting this wrong writes an
-    81-column line and everything downstream that assumes 80 breaks. JENDL-5
-    rather than Ta-181 because ENDF/B-VIII.1 is distributed without the
-    sequence number at all, so only a JENDL tape can show the wrap.
-
-    Asserted on the lines themselves as well as through the gate: the gate
-    reports this as an ordinary byte difference, and it is worth naming.
+    ``f"{100000:5d}"`` is six characters, so a writer that does not wrap writes
+    an 81-column line and everything downstream that assumes 80 breaks.
+    ENDF-102 says nothing past 99999 (NS is obsolete since CSEWG 2013), and the
+    writers differ: JAEA keeps the last five digits (``00000``), kika restarts
+    at 1 as NJOY 2016 does. JENDL-5 rather than Ta-181 because ENDF/B-VIII.1
+    is distributed without the sequence number at all.
     """
     lines = mf32_lines(pu239_jendl_tape)
     assert len(lines) > 99999, "Pu-239's MF32 got smaller; pick another tape"
     assert {len(line) for line in lines} == {80}
-    assert lines[99998][75:80] == "99999"
-    assert lines[99999][75:80] == "    1"
+    assert [line[75:80] for line in lines[99998:100001]] == ["99999", "00000", "00001"]
 
     reemitted = reemit(lines)
-    assert reemitted[99998][75:80] == "99999"
-    assert reemitted[99999][75:80] == "    1"
+    assert {len(line) for line in reemitted} == {80}
+    assert [line[75:80] for line in reemitted[99998:100001]] == ["99999", "    1", "    2"]
 
 
 # ---------------------------------------------------------------------------
