@@ -3,14 +3,14 @@
 ``kika/gnds/tests/test_nodes.py`` tests that what the registry *declares*
 matches what the code *does*. Nothing tested that the declaration **covers the
 format** — and it does not: the registry names 58 forms at 12 choice points and
-the schema declares 300 nodes. A profile built on the registry would not say
+FUDGE's schemas declare 325 (6.14). A profile built on the registry would not say
 ``thermalNeutronScatteringLaw`` is unsupported, it would say nothing about it,
 and "nothing" is the one answer a support profile may not give.
 
 So the tests here are chosen for what they would catch:
 
 1. a node the schema declares and the table forgot — **the gate**, and its
-   mirror for the twelve names kika uses that the schema does not have;
+   mirror for the names kika uses that the schema does not have;
 2. a reason that cites nothing, or cites a line that has since rotted away;
 3. the registry and the table disagreeing about a node both name — with the
    join written as a **bound**, because ``NODES`` bounds a capability and does
@@ -78,7 +78,7 @@ def _ceiling(tag):
 # ---------------------------------------------------------------------------
 
 def test_every_schema_node_appears_with_a_status():
-    """**The gate.** A node ``gnds.xsd`` or ``covariances.xsd`` declares and
+    """**The gate.** A node FUDGE's schemas declare and
     this table does not is exactly the under-declaration the whole module
     exists to prevent — the failure of saying *nothing* about a node rather
     than saying no."""
@@ -94,9 +94,10 @@ def test_every_schema_node_appears_with_a_status():
 def test_every_node_kika_names_appears_with_a_status():
     """The mirror, and the one the gate above cannot see.
 
-    Twelve of the names ``NODES`` declares are not ``xs:element``\\ s of this
-    schema at all — eight styles ``RS_StylesType`` does not admit, and four
-    functional forms. The schema is not a superset of what kika writes, so a
+    Two of the names ``NODES`` declares are not ``xs:element``\\ s of these
+    schemas at all — the ``angularDistributionReconstructed`` style and the
+    ``URR_probabilityTables1d`` form. The schema is not a superset of what kika
+    writes, so a
     table keyed only on it would drop, in silence, precisely the nodes where
     kika is most likely to hand somebody a file their reader rejects.
     """
@@ -122,10 +123,10 @@ def test_no_row_names_a_node_from_neither_source():
     )
 
 
-def test_the_twelve_unbridged_names_are_marked_as_such():
+def test_the_unbridged_names_are_marked_as_such():
     """They are in the table and they are **not** counted as GNDS nodes.
 
-    A row called ``realization`` inside a count of "nodes GNDS has" would
+    A row called ``angularDistributionReconstructed`` inside a count of "nodes GNDS has" would
     mis-state the format. The count and the rendering both key on ``where``,
     so this is what keeps the two facts apart.
     """
@@ -133,7 +134,7 @@ def test_the_twelve_unbridged_names_are_marked_as_such():
         f"NOT_IN_SCHEMA is {sorted(NOT_IN_SCHEMA)} and the registry tags the "
         f"schema does not declare are {UNBRIDGED}"
     )
-    assert cap.SCHEMA_NODE_COUNT == len(SCHEMA_NODES) == 300
+    assert cap.SCHEMA_NODE_COUNT == len(SCHEMA_NODES) == SCHEMA["nodeCount"]
     for node in NOT_IN_SCHEMA:
         assert CAPABILITIES[node].where == "not in gnds.xsd"
 
@@ -258,14 +259,12 @@ def test_the_registry_bounds_the_capability():
 def test_the_bridge_joined_something():
     """The empty-room guard for the bridge itself. Every assertion above is
     worthless if ``BRIDGED`` came out empty because a key shape changed."""
-    assert len(BRIDGED) == 54, (
-        f"{len(BRIDGED)} registry tags are schema nodes; the two tables were "
-        f"written against 42, the thermal-scattering nodes added ten and the "
-        f"photo-atomic forms (coherent/incoherentPhotonScattering) two"
+    assert len(BRIDGED) == 66, (
+        f"{len(BRIDGED)} registry tags are schema nodes; 54 against FUDGE 6.10, "
+        f"and FUDGE 6.14 declares twelve more of kika's (seven styles and "
+        f"Ys1d, gridded1d, regions3d, xs_pdf_cdf1d, energyAngularMC)"
     )
-    # Twelve, and two more since: xs_pdf_cdf1d and energyAngularMC,
-    # which FUDGE writes and its 6.10.0 schema does not declare.
-    assert len(UNBRIDGED) == 14
+    assert len(UNBRIDGED) == 2
 
 
 def test_a_paired_entry_turned_neither_fails_the_bridge():
@@ -304,7 +303,7 @@ def test_a_paired_entry_turned_neither_fails_the_bridge():
 # ---------------------------------------------------------------------------
 
 def test_the_table_is_not_a_room_of_one_status():
-    """A table of 300 ``unsupported`` rows passes every gate above and asserts
+    """A table of only ``unsupported`` rows passes every gate above and asserts
     nothing. Pinned by **bounds** rather than by counts, so this stays a guard
     and does not become a second copy of the table."""
     counted = [e for e in CAPABILITIES.values()
@@ -331,7 +330,7 @@ def test_a_group_is_one_coverage():
 
 
 def test_the_silent_drops_are_pinned_by_count():
-    """Seventeen nodes vanish with nothing said. **Each repair lowers this
+    """Seven nodes vanish with nothing said. **Each repair lowers this
     number and this test is what notices** — the shape ``KNOWN_DEFECTS`` has
     next door.
 
@@ -343,10 +342,13 @@ def test_the_silent_drops_are_pinned_by_count():
     ``unorthodox`` particle a thermal-scattering target is. The photo-atomic
     reader took it from 17 to 11: the atomic relaxation data (``atomic``,
     ``configurations``, ``configuration``, ``bindingEnergy``) and the leptons of
-    a photo-atomic suite are read and written.
+    a photo-atomic suite are read and written. FUDGE 6.14's schema took it to
+    7: ``Ys1d``, ``gridded1d`` and ``regions3d`` became nodes a valid file can
+    hold, the readers already reported them, and ``function3ds`` hangs off
+    ``regions3d``.
     """
     silent = sorted(e.node for e in cap.capabilities().silent)
-    assert len(silent) == 11, silent
+    assert len(silent) == 7, silent
     assert "targetInfo" not in silent and "unorthodox" not in silent
     for node in silent:
         assert CAPABILITIES[node].why
@@ -445,9 +447,9 @@ def test_asking_what_kika_supports_does_not_wake_the_model():
 # 6. drift, where the schema is installed
 # ---------------------------------------------------------------------------
 
-@pytest.mark.tape
 def test_the_census_matches_the_live_schema():
-    """The committed census against FUDGE's own files.
+    """The committed census against FUDGE's own files: how a new FUDGE release
+    is noticed, on any machine or runner with ``KIKA_FUDGE_DIR`` set.
 
     This is the only test here that can be skipped, and skipping it leaves
     nothing unchecked — the gate above reads the committed census and runs
@@ -458,7 +460,7 @@ def test_the_census_matches_the_live_schema():
     """
     from kika.gnds.tests.data import build_schema_census as builder
 
-    if not all(path.exists() for _, path in builder.SCHEMAS):
+    if not all((builder.FUDGE / path).exists() for _, path in builder.SCHEMAS):
         pytest.skip("FUDGE's schemas are not on this machine")
     live = builder.extract()
     assert set(live["nodes"]) == set(SCHEMA_NODES), (
@@ -467,5 +469,6 @@ def test_the_census_matches_the_live_schema():
     )
     for label, meta in live["schemas"].items():
         assert meta["sha256"] == SCHEMA["schemas"][label]["sha256"], (
-            f"{label} changed under the census"
+            f"{label} changed under the census (FUDGE {live['fudgeVersion']}, "
+            f"census {SCHEMA['fudgeVersion']}); re-run build_schema_census.py"
         )

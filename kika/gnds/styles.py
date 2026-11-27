@@ -163,18 +163,13 @@ def readStyles(element: ET.Element, path: str, report: ConversionReport,
 
 @writes("style", *WRITABLE_STYLES)
 def writeStyles(root: ET.Element, styles: Styles, number,
-                documentation: bool = True, report=None) -> ET.Element:
+                targetInfo: bool = True) -> ET.Element:
     """The model → ``<styles>``. ``number`` formats a float, from the encoder.
 
-    **The two schemas disagree about ``documentation``, and that is what the
-    flag is for.** ``gnds.xsd``'s ``RS_EvaluatedType`` makes the element
-    *mandatory* on a reactionSuite's ``evaluated``; ``covariances.xsd``'s own
-    ``evaluated`` does not admit it at all. Writing the same style node into
-    both roots therefore cannot be right, and the first version that tried
-    produced a covariance file rejected on its fifth line.
-
-    What is written is what was read (``documentation.py``: texts, authors,
-    dates); a style read with none gets none, and kika invents nothing.
+    Every ``evaluated`` carries a ``documentation``, which both roots require:
+    what was read (``documentation.py``), or an empty element when nothing was,
+    so kika invents no text. ``targetInfo`` is False for a ``covarianceSuite``,
+    whose ``evaluated`` has no slot for it.
     """
     # Validate mutable Heated metadata before changing the output tree.
     for style in styles:
@@ -189,13 +184,8 @@ def writeStyles(root: ET.Element, styles: Styles, number,
             if value is not None:
                 element.attrib[name] = value
         if style.documentation is not None:
-            if not documentation:
-                if report is None:
-                    raise ValueError("this root does not admit style documentation")
-                report.lost("covariance style documentation cannot be represented in this schema")
-            else:
-                from .documentation import writeDocumentation
-                writeDocumentation(element, style.documentation)
+            from .documentation import writeDocumentation
+            writeDocumentation(element, style.documentation)
         if isinstance(style, Heated):
             temperature = _heatedTemperature(style)
             node = ET.SubElement(element, "temperature")
@@ -217,8 +207,8 @@ def writeStyles(root: ET.Element, styles: Styles, number,
             node.attrib["min"] = number(domain.min)
             node.attrib["max"] = number(domain.max)
             node.attrib["unit"] = domain.unit
-        if documentation and style.targetInfo is not None:
+        if targetInfo and style.targetInfo is not None:
             writeTargetInfo(element, style.targetInfo, number)
-        if documentation and style.documentation is None:
+        if style.documentation is None:
             ET.SubElement(element, "documentation")
     return container

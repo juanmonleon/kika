@@ -41,7 +41,7 @@ shift
 
 SCRIPTS_DIR="${KIKA_SCRIPTS_DIR:-/share_snc/snc/JuanMonleon/EXFOR/scripts}"
 VENV="${KIKA_VENV:-/work/monleon-de-la-jan/myenv}"
-NJOY="${KIKA_NJOY:-/soft_snc/NJOY/2016.78/bin/njoy}"
+NJOY="${KIKA_NJOY:-${NJOY_EXECUTABLE:-njoy}}"
 
 # --- preflight: fallar en los primeros segundos, no a la hora 6 -------------
 [[ -d "$SET" ]]                    || { echo "[preflight] ⛔ no existe el conjunto: $SET"; exit 1; }

@@ -83,7 +83,7 @@ DEFAULT_ENDF = (f"{SHARE}/ENDF_samples/ENTREGABLE_Fe56_MF4_MF34_20260824/"
 DEFAULT_OUT = ("/SCRATCH/users/monleon-de-la-jan/MCNPy_LIB/"
                "Fe56_a0cross_ens512_20260824")
 DEFAULT_PENDF_CACHE = f"{SHARE}/cache/kika_pendf_cache"
-DEFAULT_NJOY = "/soft_snc/NJOY/2016.78/bin/njoy"
+DEFAULT_NJOY = os.environ.get("NJOY_EXECUTABLE", "njoy")
 DEFAULT_XSDIR = f"{SHARE}/xsdir_MCNPy/xsdir40-irdff2"
 
 

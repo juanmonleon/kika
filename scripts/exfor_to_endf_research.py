@@ -881,7 +881,7 @@ SAMPLING_METHOD = "random"                       # "sobol" | "lhs" | "random"
 # ACE / NJOY
 # =============================================================================
 ACE_TEMPERATURES = [293.6]                       # Kelvin
-ACE_NJOY_EXE = "/soft_snc/NJOY/2016.78/bin/njoy"
+ACE_NJOY_EXE = os.environ.get("NJOY_EXECUTABLE", "njoy")
 ACE_LIBRARY_NAME = "jeff40"
 ACE_NJOY_VERSION = "NJOY 2016.78"
 ACE_XSDIR_FILE = "/share_snc/snc/JuanMonleon/xsdir_MCNPy/xsdir40-irdff2"

@@ -13,31 +13,32 @@ criterion its own docstring defends, and it **deliberately omits** the members
 a census counted zero times — five of §18.1.1's twelve among them. A profile
 built on it would not say ``thermalNeutronScatteringLaw`` is unsupported; it
 would say *nothing at all* about it, which is the one failure a support profile
-may not have. So the column is every ``xs:element`` FUDGE's ``gnds.xsd`` and
-``covariances.xsd`` declare — **300 of them** — extracted by
-``tests/data/build_schema_census.py`` and pinned in
+may not have. So the column is every ``xs:element`` the schemas of FUDGE's
+latest release declare (``gnds.xsd``, ``covariances.xsd`` and ``xData.xsd``;
+**325** at FUDGE 6.14), extracted by ``tests/data/build_schema_census.py`` and
+pinned, with the release and each file's sha256, in
 ``tests/data/gnds_schema_nodes.json``. The schema says what *exists*; the
 census of the 558 distributed evaluations says what is *exercised*. They are
 different columns and this one is the first.
 
-**Twelve more rows that the schema does not declare.** Cross the 300 against
-``NODES`` and twelve of the names kika itself uses are not ``xs:element``\\ s of
-that schema at all — eight styles, and four functional forms. The schema is
-therefore *not* a superset of what kika writes, and a table keyed only on it
-would drop, in silence, the nodes where kika is most likely to produce a file
-somebody else's reader rejects. They are here, marked
-:data:`NOT_IN_SCHEMA` and rendered apart, because that is the single most
-useful thing this module can tell a user who is about to hand a kika-written
-file to FUDGE.
+**Two more rows that the schema does not declare.** Cross the census against
+``NODES`` and two of the names kika itself uses are not ``xs:element``\\ s of
+it: the ``angularDistributionReconstructed`` style and the
+``URR_probabilityTables1d`` form. The schema is therefore *not* a superset of
+what kika writes, and a table keyed only on it would drop, in silence, the
+nodes where kika is most likely to produce a file somebody else's reader
+rejects. They are here, marked :data:`NOT_IN_SCHEMA` and rendered apart.
 
-**Which schema.** FUDGE 6.10.0 ships the **2.0** schema — its own header's
-newest entry is *"version 2.0, November 2021"* — while
-:mod:`kika.gnds.version` accepts 2.0 and 2.1 through one path, because for
-everything kika models they are the same format. A node absent from the column
-is absent from *that* file; where a name is a 2.1 addition the reason says so
-rather than implying the format never had it.
+**Which schema.** The latest FUDGE release, because FUDGE is still moving and
+its schema is the external check kika's writer is measured against. Its
+header's newest entry is *"version 2.0, November 2021"*, yet the file admits
+some later additions too (``calculateChannelRadius`` on ``tabulatedWidths``,
+which FUDGE writes only for GNDS 2.2), so validating says a file is
+well-formed, not that every node in it is 2.0. :mod:`kika.gnds.version`
+accepts 2.0 and 2.1 through one path, because for everything kika models they
+are the same format.
 
-**The three words, and the one rule that makes all 300 decidable.**
+**The three words, and the one rule that makes every node decidable.**
 
 ``full``
     kika reads the node into the model and writes it back from the model. A
@@ -143,9 +144,9 @@ class Capability:
     #: The ``xs:element`` name, verbatim. Unique across the table, and the key.
     node: str
     #: Which schema declares it: ``"gnds.xsd"``, ``"covariances.xsd"``,
-    #: ``"gnds.xsd + covariances.xsd"`` for the thirteen both do, or
-    #: ``"not in gnds.xsd"`` for the twelve names kika uses and FUDGE 6.10.0's
-    #: schema does not have. The *line* is in the committed census under
+    #: ``"gnds.xsd + covariances.xsd"`` for the thirteen both do, ``"xData.xsd"``,
+    #: or ``"not in gnds.xsd"`` for the names kika uses and FUDGE's schemas do
+    #: not have. The *line* is in the committed census under
     #: ``tests/data/`` rather than here, so three hundred magic numbers cannot
     #: rot in this file; the ``.xsd:line`` a reader wants is in ``why``, where
     #: the rule already forces a citation.
@@ -201,6 +202,16 @@ _IN_BOTH = frozenset("""
 #: trusted.
 _FAMILIES: Dict[str, Tuple[str, ...]] = {
     "CoulombPlusNuclearElastic": ("crossSectionForm",),
+    "CoulombPlusNuclearElasticMuCutoff": ("style",),
+    "MonteCarlo_cdf": ("style",),
+    "SnElasticUpScatter": ("style",),
+    "URR_probabilityTables": ("style",),
+    "Ys1d": ("function1d",),
+    "gridded1d": ("function1d",),
+    "griddedCrossSection": ("style",),
+    "heatedMultiGroup": ("style",),
+    "realization": ("style",),
+    "regions3d": ("function3d",),
     "KalbachMann": ("distributionForm",),
     "energyAngularMC": ("distributionForm",),
     "xs_pdf_cdf1d": ("function1d",),
@@ -566,8 +577,7 @@ _group("analyticSpectra", Coverage.FULL, None,
        "ENDF MF5 LF=5/7/9/11/12 and NK>1 reach them; MT455's NK "
        "subsections are per-family spectra and go on the delayedNeutron "
        "products instead. Watt and MadlandNix have no ENDF witness on "
-       "this machine and are gated on their closed forms. FUDGE 6.10's "
-       "schema admits only evaporation inside weighted",
+       "this machine and are gated on their closed forms",
        """
        evaporation generalEvaporation simpleMaxwellianFission Watt
        MadlandNix weightedFunctionals weighted U theta g b EFL EFH T_M
@@ -677,19 +687,16 @@ _group("fissionProductYields", Coverage.FULL, None,
        """)
 
 
-_group("averageProductEnergy", Coverage.UNSUPPORTED, 'averageProductEnergy',
-       "§17.4 (gnds.xsd:1606) is a processed quantity and kika reads "
-       "evaluated data",
-       """
-       averageProductEnergy
-       """)
+for _quantity in ("averageProductEnergy", "averageProductMomentum",
+                  "availableEnergy", "availableMomentum"):
+    _one(_quantity, Coverage.UNSUPPORTED, _quantity, "processedQuantities",
+         "§17.4's processed quantities of a product, and their reaction-level "
+         "counterparts: kika reads evaluated data, and decode.py's "
+         "_processedQuantities reports each one it meets")
 
-_group("function3ds", Coverage.UNSUPPORTED, None,
-       "**unreachable, not unscheduled.** Its only container is the "
-       "complexType xData_regions_3d_primary (gnds.xsd:2286) and no "
-       "xs:element anywhere in the schema is of it, so no valid GNDS-2.0 "
-       "file can contain one and nothing can report meeting it. This row "
-       "is permanent -- the same standing nodes.py:227 gives regions3d",
+_group("function3ds", Coverage.UNSUPPORTED, "regions3d",
+       "§6.5's children of a regions3d, which kika does not read and "
+       "reports (see that row)",
        """
        function3ds
        """)
@@ -764,88 +771,94 @@ _group("covarianceBackLink", Coverage.UNSUPPORTED, None,
        covariance listOfCovariances
        """)
 
-# -- the twelve kika names that this schema does not declare ---------------
-#
-# Not a footnote. Eight of them are styles `RS_StylesType` (gnds.xsd:86-93)
-# does not admit -- it admits four and kika can write twelve -- so a suite
-# decoded from ACE and written with `kika.write` produces a file FUDGE's own
-# schema rejects. nodes.py:383-387 already says this of `griddedCrossSection`;
-# what was missing is anywhere a *user* could find it out. The other four are
-# forms the model declares and no valid GNDS-2.0 document can carry.
-#
-# They are rendered apart from the 300 and never counted with them: a row
-# called `realization` inside a list of GNDS nodes would mis-state what the
-# format has. `where` says so on every one.
+# -- processed styles and forms --------------------------------------------
 
-_NOT_IN_SCHEMA_WHY = (
-    "kika can write this style and FUDGE 6.10.0's gnds.xsd declares no such "
-    "element -- RS_StylesType (gnds.xsd:86-93) admits four styles and kika "
-    "models twelve. An ACE-decoded suite written with kika.write therefore "
-    "carries a node the reference implementation's schema rejects, and "
-    "kika's own reader will not take it back either"
+_WRITE_ONLY_STYLE_WHY = (
+    "§9's processed styles: kika writes the element with its label, "
+    "derivedFrom and date, and the model holds none of its children (FUDGE "
+    "6.14's RS_StylesType gives heatedMultiGroup a required transportables, "
+    "flux and inverseSpeed, for instance), so the node is written incomplete. "
+    "No distributed evaluation carries one; styles.py's reader reports it and "
+    "skips it"
 )
 
-for _style in ("realization", "angularDistributionReconstructed",
-               "CoulombPlusNuclearElasticMuCutoff",
-               "griddedCrossSection",
-               "heatedMultiGroup", "SnElasticUpScatter"):
-    _one(_style, Coverage.PARTIAL, None, "notInSchemaStyles",
-         _NOT_IN_SCHEMA_WHY,
-         where="not in gnds.xsd")
+for _style in ("realization", "CoulombPlusNuclearElasticMuCutoff",
+               "griddedCrossSection", "heatedMultiGroup", "SnElasticUpScatter"):
+    _one(_style, Coverage.PARTIAL, _style, "writeOnlyStyles",
+         _WRITE_ONLY_STYLE_WHY)
+
+_group("multiGroupContent", Coverage.UNSUPPORTED, "heatedMultiGroup",
+       "§9's multigroup definitions inside a heatedMultiGroup style, which "
+       "the model does not hold",
+       """
+       transportables transportable group flux inverseSpeed
+       """)
 
 for _style in ("MonteCarlo_cdf", "URR_probabilityTables"):
     _one(_style, Coverage.FULL, None, "processedStyles",
-         "§9.4.3/§9.4.5, read and written. Not in FUDGE 6.10.0's "
-         "RS_StylesType, which this census follows; FUDGE's current gnds.xsd "
-         "(2026-09-30, gnds.xsd:111-113) declares both, with label, date and "
-         "derivedFrom",
-         where="not in gnds.xsd")
+         "§9.4.3/§9.4.5, read and written, with label, date and derivedFrom "
+         "(styles.py)")
 
 _one("xs_pdf_cdf1d", Coverage.FULL, None, "processedForms",
      "§9.4.3's MonteCarlo_cdf table, read and written in FUDGE's spelling "
-     "(xData/xs_pdf_cdf.py: xs, pdf, cdf). FUDGE writes it and neither its "
-     "6.10.0 nor its current gnds.xsd declares it. A table's leading discrete "
-     "lines go to applicationData KIKA::processed",
-     where="not in gnds.xsd")
+     "(xData/xs_pdf_cdf.py: xs, pdf, cdf). A table's leading discrete lines "
+     "go to applicationData KIKA::processed",
+     where="xData.xsd")
+for _column in ("xs", "pdf", "cdf"):
+    _one(_column, Coverage.FULL, None, "processedForms",
+         "a column of an xs_pdf_cdf1d (§9.4.3), read and written with it "
+         "(primitives.py)",
+         where="xData.xsd")
 _one("energyAngularMC", Coverage.FULL, None, "processedForms",
      "the Monte Carlo energy-angle form (§18.1.1), read and written as FUDGE's "
-     "energyAngularMC.py spells it; FUDGE's current gnds.xsd:1516 declares it, "
-     "6.10.0's does not",
-     where="not in gnds.xsd")
+     "energyAngularMC.py spells it")
+for _form in ("angularEnergyMC", "multiGroup3d"):
+    _one(_form, Coverage.UNSUPPORTED, _form, "unreadForms",
+         "§18.1.1's processed distribution forms; distributions.py reports "
+         "one as a law kika declares and does not implement")
 
-_one("Ys1d", Coverage.UNSUPPORTED, None, "notInSchemaForms",
-     "modelled, and gnds.xsd declares no <Ys1d> at all -- §6.2.5 is a 2.1 "
-     "addition this 2.0 schema predates, and no distributed neutron "
-     "evaluation carries one, which is the reason nodes.py:217-219 gives for "
-     "leaving it unread",
-     where="not in gnds.xsd")
-_one("gridded1d", Coverage.UNSUPPORTED, None, "notInSchemaForms",
-     "modelled; §6.2.6 is a processed representation, kika reads evaluated "
-     "data, and this schema declares no such element (nodes.py:220-222)",
-     where="not in gnds.xsd")
-_one("regions3d", Coverage.UNSUPPORTED, None, "notInSchemaForms",
-     "**unreachable, and permanently so.** gnds.xsd:2286 defines the type "
-     "xData_regions_3d_primary and no xs:element anywhere is of it, so no "
-     "valid GNDS-2.0 file can contain a regions3d — which is exactly why "
-     "test_nodes.py:232 builds its planted-failure ratchet on this entry",
+_one("Ys1d", Coverage.UNSUPPORTED, "Ys1d", "unreadForms",
+     "modelled and not read: §6.2.5, which FUDGE 6.14 admits in a "
+     "crossSection, and no distributed neutron evaluation carries one "
+     "(nodes.py gives the same reason); the function1d dispatch reports it")
+_one("gridded1d", Coverage.UNSUPPORTED, "gridded1d", "unreadForms",
+     "modelled and not read: §6.2.6 is a processed representation and kika "
+     "reads evaluated data (nodes.py); the function1d dispatch reports it")
+_one("regions3d", Coverage.UNSUPPORTED, "regions3d", "unreadForms",
+     "modelled and not read (§6.5): FUDGE 6.14 admits it only inside the two Monte "
+     "Carlo forms, and the census counts 0 in 2 950 XYs3d of the 558 "
+     "evaluations (test_nodes.py builds its planted-failure ratchet on this "
+     "entry); distributions.py reports it")
+
+# -- the names kika uses that FUDGE's schemas do not declare ---------------
+#
+# Rendered apart from the census and never counted with it: a row called
+# `angularDistributionReconstructed` inside a list of GNDS nodes would
+# mis-state what the format has. `where` says so on each.
+
+_one("angularDistributionReconstructed", Coverage.PARTIAL, None,
+     "notInSchemaStyles",
+     "§9.3's style, written by kika (styles.py) and declared by no FUDGE "
+     "schema: RS_StylesType has no such element, so a file carrying one does "
+     "not validate, and kika's own reader does not take it back",
      where="not in gnds.xsd")
 _one("URR_probabilityTables1d", Coverage.UNSUPPORTED, None, "notInSchemaForms",
      "modelled, and **produced live** by kika/ace/model_adapter/decode.py:284 "
      "— so an ACE-decoded suite already holds one that neither half of "
-     "kika/gnds can move, and this schema has no element to write it as. "
-     "§16.1.1 admits it in GNDS 2.1; this is the 2.0 file",
+     "kika/gnds can move, and no FUDGE schema has an element to write it as. "
+     "§16.1.1 admits it in GNDS 2.1",
      where="not in gnds.xsd")
 
 #: Every row, keyed by node name.
 CAPABILITIES: Dict[str, Capability] = dict(sorted(_TABLE.items()))
 
-#: The twelve rows whose node the schema does not declare. Never counted with
-#: the 300; see the comment above.
+#: The rows whose node no FUDGE schema declares. Never counted with the census;
+#: see the comment above.
 NOT_IN_SCHEMA: Tuple[str, ...] = tuple(
     node for node, entry in CAPABILITIES.items()
     if entry.where == "not in gnds.xsd")
 
-#: How many nodes ``gnds.xsd`` and ``covariances.xsd`` declare between them.
+#: How many nodes FUDGE's schemas declare between them.
 #: The census under ``tests/data/`` is the authority; this is the number the
 #: gate compares against, stated here so a reader of this module sees it.
 SCHEMA_NODE_COUNT = len(CAPABILITIES) - len(NOT_IN_SCHEMA)
@@ -919,10 +932,10 @@ class Capabilities:
         read — a silent loss would put it in a list whose whole point is data
         that vanishes with nobody told.
 
-        It spans **whatever view it is asked of**, the twelve names the schema
-        does not declare included, so on the whole table it is four longer than
-        the number :meth:`summary` quotes — that one counts GNDS's own nodes
-        and nothing else.
+        It spans **whatever view it is asked of**, the names no FUDGE schema
+        declares included, so on the whole table it can be longer than the
+        number :meth:`summary` quotes — that one counts GNDS's own nodes and
+        nothing else.
         """
         return self._filter(lambda e: e.coverage is Coverage.UNSUPPORTED
                             and e.reportedVia is None)

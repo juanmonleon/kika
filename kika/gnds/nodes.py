@@ -235,8 +235,7 @@ NODES: Dict[Tuple[str, str], NodeSpec] = dict([
     _spec("Legendre", "function1d", "§6.2.4", Legendre, Status.PAIRED),
     _spec("polynomial1d", "function1d", "§6.2.3", Polynomial1d, Status.PAIRED),
     _spec("Ys1d", "function1d", "§6.2.5", Ys1d, Status.NEITHER,
-          "modelled; no distributed neutron evaluation carries one, and "
-          "gnds.xsd:1206 does not admit it at any choice point kika reads"),
+          "modelled (§6.2.5); no distributed neutron evaluation carries one"),
     _spec("gridded1d", "function1d", "§6.2.6", Gridded1d, Status.NEITHER,
           "modelled; §6.2.6 is a processed representation and kika reads "
           "evaluated data"),
@@ -245,10 +244,8 @@ NODES: Dict[Tuple[str, str], NodeSpec] = dict([
     _spec("regions2d", "function2d", "§6.4.3", Regions2d, Status.PAIRED),
     _spec("XYs3d", "function3d", "§6.5", XYs3d, Status.PAIRED),
     _spec("regions3d", "function3d", "§6.5", Regions3d, Status.NEITHER,
-          "unreachable, not unscheduled: gnds.xsd:2286 defines the type "
-          "xData_regions_3d_primary and no xs:element anywhere in the schema "
-          "is of it, so no valid GNDS-2.1 file can contain a regions3d. This "
-          "entry stays NEITHER permanently"),
+          "§6.5; FUDGE 6.14 admits it only inside the two Monte Carlo forms, and no "
+          "distributed evaluation carries one (0 in 2 950 XYs3d)"),
 
     # -- §16.1.1 crossSection forms. gnds.xsd:1206, an xs:choice.
     #    XYs1d and regions1d are also legal here and are delegated to the

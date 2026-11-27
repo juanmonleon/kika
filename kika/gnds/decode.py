@@ -443,6 +443,8 @@ class _SuiteReader:
             from .thermal_scattering import readDoubleDifferentialCrossSection
             reaction.doubleDifferentialCrossSection = readDoubleDifferentialCrossSection(
                 ddcs, here, self.resolve, self.report)
+        self._processedQuantities(element, here, ("availableEnergy",
+                                                  "availableMomentum"))
         return reaction
 
     # -- crossSection ------------------------------------------------------
@@ -669,12 +671,15 @@ class _SuiteReader:
             # §17.2.1's recursion: a product that breaks up or decays carries
             # its own channel. The model has the slot; nothing else is special.
             product.outputChannel = self.readOutputChannel(channel, here)
-        if element.find("averageProductEnergy") is not None:
-            self.unsupported(
-                "averageProductEnergy", here,
-                "a processed quantity; kika reads evaluated data"
-            )
+        self._processedQuantities(element, here, ("averageProductEnergy",
+                                                  "averageProductMomentum"))
         return product
+
+    def _processedQuantities(self, element, here, tags) -> None:
+        for tag in tags:
+            if element.find(tag) is not None:
+                self.unsupported(tag, here,
+                                 "a processed quantity; kika reads evaluated data")
 
     @reads("multiplicityForm", "constant1d", "reference", "unspecified", "branching1d")
     def readMultiplicity(self, element: ET.Element, path: str) -> Multiplicity:

@@ -610,6 +610,10 @@ _SPECTRUM_PARAMETERS = {
     SimpleMaxwellianFission: ("theta",), Watt: ("a", "b"), MadlandNix: ("T_M",),
 }
 
+#: The parameters whose wrapper is still ``XYs1dWrapperType``, one ``XYs1d``;
+#: ``theta`` and ``g`` take a ``regions1d`` too (``OneDFunctionWrapperType``).
+_ONE_XYS1D_PARAMETERS = frozenset({"a", "b", "T_M"})
+
 
 def _functionUncertainty(element: ET.Element, form, report: ConversionReport,
                          where: str) -> None:
@@ -795,7 +799,7 @@ class _SuiteWriter:
                  checksum=entry.checksum, algorithm=entry.algorithm)
 
     def styles(self, root: ET.Element) -> None:
-        writeStyles(root, self.suite.styles, _number, documentation=True)
+        writeStyles(root, self.suite.styles, _number)
 
     def pops(self, root: ET.Element) -> None:
         from .encode_pops import writePoPs
@@ -1461,31 +1465,20 @@ class _SuiteWriter:
 
         Each is an ``xs:sequence``: the ``U`` (or ``EFL``/``EFH``) as a
         ``PhysicalQuantity``, then each parameter wrapped in its own element
-        around one primary ``XYs1d`` (``XYs1dWrapperType``) -- the wrapper the
-        model drops, put back. A parameter held as a ``regions1d`` of several
-        regions has no place in the wrapper and is reported; FUDGE's reader
-        refuses those outright.
+        around one function -- the wrapper the model drops, put back. Watt's
+        ``a``/``b`` and Madland-Nix's ``T_M`` hold one ``XYs1d``, so one held as
+        a ``regions1d`` of several regions is written and reported.
         """
         tag = _SPECTRUM_TAGS[type(form)]
         element = ET.SubElement(parent, tag)
         here = f"{where} {tag}"
         if isinstance(form, WeightedFunctionals):
-            # `weighted` is (XYs1d weight, functional). FUDGE 6.10's schema
-            # admits only `evaporation` as the functional (gnds.xsd:1761);
-            # what ENDF writes there -- LF=9 on every NK>1 of ENDF/B-VIII.1 --
-            # fits it. Another law is written and reported, not dropped.
             for index, term in enumerate(form.weighted):
                 weighted = ET.SubElement(element, "weighted")
                 _set(weighted, index=str(index))
                 if term.weight is not None:
                     _function(weighted, term.weight, self.report, here)
                 functional = term.functional
-                if not isinstance(functional, Evaporation):
-                    self.report.unsupportedNode(
-                        f"{here}: weighted[{index}] is a "
-                        f"{type(functional).__name__}; gnds.xsd admits only "
-                        f"evaporation there, so this file does not validate"
-                    )
                 if isinstance(functional, tuple(_SPECTRUM_TAGS)):
                     self._analyticSpectrum(weighted, functional, here)
                 elif functional is not None:
@@ -1506,7 +1499,8 @@ class _SuiteWriter:
             if table is None:
                 self.report.lost(f"{here}: no {name}, so <{name}> is empty")
                 continue
-            if isinstance(table, Regions1d) and len(table.function1ds) > 1:
+            if (name in _ONE_XYS1D_PARAMETERS and isinstance(table, Regions1d)
+                    and len(table.function1ds) > 1):
                 self.report.unsupportedNode(
                     f"{here}: {name} has {len(table.function1ds)} interpolation "
                     f"regions and XYs1dWrapperType holds one XYs1d; written as a "
@@ -1740,8 +1734,7 @@ def writeCovarianceSuite(covarianceSuite, format: str,
     # one is synthesised from the evaluation name rather than the element being
     # omitted, and the report says which happened.
     if covarianceSuite.styles is not None and len(covarianceSuite.styles):
-        writeStyles(root, covarianceSuite.styles, _number,
-                    documentation=False, report=report)
+        writeStyles(root, covarianceSuite.styles, _number, targetInfo=False)
     else:
         from kika.nuclear_data.model import (Evaluated, PhysicalQuantity,
                                              RangeQuantity, Styles)
@@ -1753,7 +1746,7 @@ def writeCovarianceSuite(covarianceSuite, format: str,
             temperature=PhysicalQuantity(value=0.0, unit="K"),
             projectileEnergyDomain=RangeQuantity(min=1e-5, max=2e7, unit="eV"),
         ))
-        writeStyles(root, synthetic, _number, documentation=False)
+        writeStyles(root, synthetic, _number, targetInfo=False)
         report.approximated(
             "the covarianceSuite carried no styles and §25.1.1 requires one, so "
             "an `evaluated` style was synthesised: label 'eval', temperature "
@@ -1943,17 +1936,20 @@ def _covarianceMatrix(parent: ET.Element, tag: str, form, report,
          type="relative" if form.isRelative else "absolute")
     gridded = ET.SubElement(element, "gridded2d")
     axes = ET.SubElement(gridded, "axes")
-    # §25.2.2's axis order: 2 is the row grid, 1 the column grid, 0 the matrix.
-    _set(ET.SubElement(axes, "axis"), index="0", label="matrix_elements", unit="")
-    for index, values, label in ((1, form.columnGrid, "column_energy_bounds"),
-                                 (2, form.rowGrid, "row_energy_bounds")):
+    # §25.2.2: 2 is the row grid, 1 the column grid, 0 the matrix. Every
+    # `grid` precedes every `axis` (xData.xsd GridAxesType), as NNDC writes them.
+    bare = []
+    for index, values, label in ((2, form.rowGrid, "row_energy_bounds"),
+                                 (1, form.columnGrid, "column_energy_bounds")):
         if values is None:
-            _set(ET.SubElement(axes, "axis"), index=str(index), label=label,
-                 unit="eV")
+            bare.append((index, label))
             continue
         grid = ET.SubElement(axes, "grid")
         _set(grid, index=str(index), label=label, unit="eV", style="boundaries")
         _values(grid, values)
+    for index, label in bare:
+        _set(ET.SubElement(axes, "axis"), index=str(index), label=label, unit="eV")
+    _set(ET.SubElement(axes, "axis"), index="0", label="matrix_elements", unit="")
 
     _array(gridded, form.matrix)
     return element
