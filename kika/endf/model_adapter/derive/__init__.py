@@ -55,6 +55,8 @@ class DerivationContext:
     #: The sections the tape will hold (``deriveEndfProvenance``'s ``files``),
     #: or ``None`` for all.
     files: Optional[Collection] = None
+    #: Set by a deriver that adds nodes to the suite, so the next one walks it again.
+    addedNodes: bool = False
 
 
 #: ``(name, applies, derive)``: ``applies(node)`` says whether the deriver is for
@@ -155,13 +157,16 @@ def deriveEndfProvenance(suite, report=None, *, mat: Optional[int] = None,
         return files is not None and kept is not None \
             and not any(sectionSelected(mf, mt, files) for mf, mt in kept)
 
+    nodes = list(provenanceNodes(suite))
     for name, applies, derive in _inRunOrder():
-        for path, node in provenanceNodes(suite):
+        for path, node in nodes:
             if hasEndfProvenance(node) or not applies(node) or outside(path, node):
                 continue
             provenance = derive(node, path, context, report)
             if provenance is not None:
                 node.provenance = provenance
+        if context.addedNodes:
+            nodes, context.addedNodes = list(provenanceNodes(suite)), False
     from ..tape_block import apply
     apply(suite, report)
 
@@ -173,7 +178,7 @@ def deriveEndfProvenance(suite, report=None, *, mat: Optional[int] = None,
     nubars = set(nubarMts)
     underived = Counter()
     reaction = None
-    for path, node in provenanceNodes(suite):
+    for path, node in nodes:
         if isinstance(node, Reaction):
             reaction = node
         if hasEndfProvenance(node) or not _carriesData(node, nubars) or outside(path, node):
