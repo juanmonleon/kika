@@ -120,7 +120,9 @@ def extract() -> dict:
     schemas = {}
     for label, relative in SCHEMAS:
         path = FUDGE / relative
-        raw = path.read_bytes()
+        # LF, as FUDGE's repository stores them: a Windows checkout with
+        # core.autocrlf has CRLF, and the hash must not depend on the machine.
+        raw = path.read_bytes().replace(b"\r\n", b"\n")
         schemas[label] = {
             "path": relative.as_posix(),
             "bytes": len(raw),

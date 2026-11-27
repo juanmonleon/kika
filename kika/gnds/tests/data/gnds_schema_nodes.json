@@ -4,18 +4,18 @@
   "schemas": {
     "gnds.xsd": {
       "path": "fudge/gnds.xsd",
-      "bytes": 83127,
-      "sha256": "73731aee96061abbe0250c95348206cfff7d20c67ba09f48e0c557fdab400511"
+      "bytes": 81225,
+      "sha256": "2fa07939ee43f364d2a0f506254e210c657fb09ca94040f18b1b6e87bac9540f"
     },
     "covariances.xsd": {
       "path": "fudge/covariances/covariances.xsd",
-      "bytes": 8743,
-      "sha256": "4552b41a89ebe96df25927fdf66240ba28ffa38c27d558c4d02079bf78109cdd"
+      "bytes": 8532,
+      "sha256": "0813389bd070c0841fcc61adefdc70bc26a492bbceba083d6fd6ad57cb707b04"
     },
     "xData.xsd": {
       "path": "xData/xData.xsd",
-      "bytes": 31434,
-      "sha256": "123a0438acf84453313f358f4d813b8586d4bf7feac29c632115a1e404e37dff"
+      "bytes": 30633,
+      "sha256": "ac26d7da32dd198432953a88adf1a54cce1ec34e0a07a5a5b84df5c709057408"
     }
   },
   "nodeCount": 325,
