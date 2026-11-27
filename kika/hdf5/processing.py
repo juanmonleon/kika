@@ -890,11 +890,7 @@ def _processSuite(suite, temperatures=None, *, report=None, thnmax=DEFAULT_THNMA
     styleKT = {}
     heated: Dict[str, Dict[int, Tuple[np.ndarray, int]]] = {}
     grids: Dict[str, np.ndarray] = {}
-    if thnmax == "njoy":
-        # The thresholds MF3 states (the 0 K forms may start lower, with zeros).
-        thresholds = [_reactionRange(leaf.reaction)[0] for leaf in leaves
-                      if (reactionQI(leaf.reaction, work) or 0.0) < 0]
-        thnmax = njoyThnmax(work, min(thresholds) if thresholds else None)
+    thnmax = _ceiling(work, thnmax)
     if broadened is None:
         broadened = _broadenAll(work, temperatures, float(thnmax), doppler or dopplerOptions(thinning),
                                 workers)
@@ -2129,6 +2125,46 @@ def _fission(work, out, report):
 
 
 
+def _leafReactions(work) -> list:
+    """``[(container, reaction)]`` processSuite tabulates: no sums, no stated gas production,
+    and MT18 left out where its chances are given."""
+    leaves = [(container, reaction) for container in ("reactions", "fissionComponents")
+              for reaction in getattr(work, container)
+              if reaction.ENDF_MT is not None and reaction.ENDF_MT not in NEVER
+              and reaction.ENDF_MT not in GAS_MTS]
+    if {r.ENDF_MT for _, r in leaves} & {19, 20, 21, 38}:
+        leaves = [(c, r) for c, r in leaves if not (r.ENDF_MT == 18 and c == "reactions")]
+    return leaves
+
+
+def _ceiling(work, thnmax):
+    """The broadening's ceiling: *thnmax*, or NJOY's rule from the thresholds MF3 states
+    (the 0 K forms may start lower, with zeros)."""
+    if thnmax != "njoy":
+        return thnmax
+    thresholds = [_reactionRange(reaction)[0] for _, reaction in _leafReactions(work)
+                  if (reactionQI(reaction, work) or 0.0) < 0]
+    return njoyThnmax(work, min(thresholds) if thresholds else None)
+
+
+def urrTablesFor(suite, temperatures, *, context=None, thnmax=DEFAULT_THNMAX,
+                 thinning: Optional[float] = 1.0e-3, workers=None, report=None):
+    """``{kelvin: ProbabilityTables}`` of an evaluation as :func:`processSuite` makes them.
+
+    Reconstructed, broadened with the same ceiling and thinning, then :func:`urrTablesOf`
+    on :func:`urrTransportXS`: the tables a perturbation run computes once and hands to
+    every sample's processing.
+    """
+    report = report if report is not None else _m().ConversionReport()
+    temperatures = [float(t) for t in temperatures]
+    work = _reconstructed(suite, context, report, workers)
+    _linearised(work, report)
+    broadened = _broadenAll(work, temperatures, float(_ceiling(work, thnmax)),
+                            dopplerOptions(thinning), workers)
+    return urrTablesOf(work, temperatures, context=context, workers=workers, report=report,
+                       transportXS=urrTransportXS(work, broadened, temperatures))
+
+
 def urrTransportXS(work, broadened, temperatures) -> Dict[float, np.ndarray]:
     """``{kelvin: (nE, 4)}``: the smooth cross sections OpenMC multiplies a URR table by.
 
@@ -2136,20 +2172,16 @@ def urrTransportXS(work, broadened, temperatures) -> Dict[float, np.ndarray]:
     PURR's grid, from the leaves of *work* (a suite with its 0 K forms): broadened
     below the ceiling of ``broadened = {kelvin: (forms, ceiling)}``, 0 K above it or
     where ``broadened`` is ``None``, negatives clipped as OpenMC clips them. The
-    statistical stopping rule of :func:`urrTablesOf` is measured on them; processSuite
-    and ``process_endf`` both take them from here, so their tables are the same.
+    statistical stopping rule of :func:`urrTablesOf` is measured on them; processSuite,
+    ``process_endf`` and :func:`urrTablesFor` all take them from here, so their tables
+    are the same.
     """
     from kika.processing.resonances.probability_tables import competitionFlags, purrGrid, purrInputs
 
     energies = purrGrid(work.resonances.unresolved)
     _, competing = purrInputs(work, energies, form=_evaluated)
     inelastic, _ = competitionFlags(competing)
-    leaves = [(container, reaction) for container in ("reactions", "fissionComponents")
-              for reaction in getattr(work, container)
-              if reaction.ENDF_MT is not None and reaction.ENDF_MT not in NEVER
-              and reaction.ENDF_MT not in GAS_MTS]
-    if {r.ENDF_MT for _, r in leaves} & {19, 20, 21, 38}:
-        leaves = [(c, r) for c, r in leaves if not (r.ENDF_MT == 18 and c == "reactions")]
+    leaves = _leafReactions(work)
     out = {}
     for temperature in temperatures:
         forms, hi = broadened[temperature] if broadened is not None else ({}, -np.inf)

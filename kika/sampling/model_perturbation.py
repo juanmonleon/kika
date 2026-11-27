@@ -2781,24 +2781,30 @@ def _emitHdf5(suite, pset, sampleDir: Path, ctx, log, number: int) -> Dict[str, 
     return files
 
 
-def _hdf5Pieces(options, suite, tape, log):
+def _hdf5Pieces(options, suite, tape, log, computed=None):
     """What every sample shares, computed once on the unperturbed
-    evaluation: ``{"urr": {kelvin: tables}}``."""
-    shared = {}
+    evaluation: ``{"urr": {kelvin: tables}}``. *computed* is another emitter's
+    pieces, reused when they were made with the same temperatures, ceiling and
+    thinning."""
     unresolved = suite.resonances is not None and suite.resonances.unresolved is not None
-    if "urr" not in options.omit and unresolved:
-        from kika.hdf5.processing import urrTablesOf
+    if "urr" in options.omit or not unresolved:
+        return None
+    key = (tuple(float(t) for t in options.temperatures), options.thnmax, options.thinning)
+    if computed is not None and computed.get("key") == key:
+        return computed
+    from kika.hdf5.processing import urrTablesFor
 
-        context = None
-        if tape is not None:
-            from kika.endf.read_endf import read_endf
-            from kika.endf.reconstruction import context_from_endf
+    context = None
+    if tape is not None:
+        from kika.endf.read_endf import read_endf
+        from kika.endf.reconstruction import context_from_endf
 
-            context, _ = context_from_endf(read_endf(str(tape), mf_numbers=[1, 2]), suite)
-        with log.timed("note", "URR probability tables for the hdf5 emitter (unperturbed)",
-                       subject="hdf5"):
-            shared["urr"] = urrTablesOf(suite, list(options.temperatures), context=context)
-    return shared or None
+        context, _ = context_from_endf(read_endf(str(tape), mf_numbers=[1, 2]), suite)
+    with log.timed("note", "URR probability tables for the hdf5 and ace emitters (unperturbed, "
+                   "reconstructed and broadened as each sample is)", subject="hdf5"):
+        tables = urrTablesFor(suite, list(options.temperatures), context=context,
+                              thnmax=options.thnmax, thinning=options.thinning)
+    return {"urr": tables, "key": key}
 
 
 def _processSample(number: int, drawn: Mapping[Hashable, np.ndarray],
@@ -3758,6 +3764,10 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
     if stem.endswith(".gnds"):
         stem = stem[:-5]
     emitTapes = outputDir is not None and not dryRun
+    hdf5Pieces = (_hdf5Pieces(hdf5, suite, originalSourcePath or sourcePath, log)
+                  if ("hdf5" in formats and emitTapes) else None)
+    acePieces = (_hdf5Pieces(ace, suite, originalSourcePath or sourcePath, log, hdf5Pieces)
+                 if ("ace" in formats and emitTapes and ace.engine == "kika") else None)
     context = _SampleContext(
         sourcePath=sourcePath, sourceFormat=sourceFormat, index=index,
         labelPrefix=labelPrefix, seed=seed, space=space, grouping=grouping,
@@ -3769,10 +3779,7 @@ def perturbFromModel(source, request, nSamples: int = 1, *, seed: int = 0,
         originalSourcePath=originalSourcePath, pendfPath=pendfPath, resonanceTape=resonanceTape,
         angularPositivity=angularPositivity,
         hdf5=hdf5 if "hdf5" in formats else None,
-        hdf5Pieces=_hdf5Pieces(hdf5, suite, originalSourcePath or sourcePath, log)
-        if ("hdf5" in formats and emitTapes) else None,
-        acePieces=_hdf5Pieces(ace, suite, originalSourcePath or sourcePath, log)
-        if ("ace" in formats and emitTapes and ace.engine == "kika") else None)
+        hdf5Pieces=hdf5Pieces, acePieces=acePieces)
 
     parallel = nWorkers > 1 and nSamples > 1 and emitTapes
     if nWorkers > 1 and not parallel:
