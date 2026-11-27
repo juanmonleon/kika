@@ -20,3 +20,23 @@ def test_a_suite_without_resonance_ranges_gives_its_evaluated_tables_with_their_
         np.testing.assert_array_equal(tables[mt].energies, energies)
         np.testing.assert_array_equal(tables[mt].values, values)
         assert tables[mt].energy_interpolation == list(laws)
+
+
+def test_a_suite_with_resonance_ranges_is_reconstructed_under_the_tape_paths_point_budget(monkeypatch):
+    import pytest
+
+    import kika.processing.resonances.suite as suite_module
+    from kika.endf.reconstruction import DEFAULT_MAX_POINTS
+
+    seen = {}
+
+    def capture(suite, label, options):
+        seen["options"] = options
+        raise RuntimeError("captured")
+
+    monkeypatch.setattr(suite_module, "reconstruct_suite", capture)
+    suite = kika.read(str(GNDS / "micro_fe56.gnds.xml"), covariances=False)
+    with pytest.raises(RuntimeError, match="captured"):
+        pointwise_cross_sections_from_suite(suite, tolerance=0.002)
+    assert seen["options"].max_points == DEFAULT_MAX_POINTS
+    assert seen["options"].rtol == 0.002

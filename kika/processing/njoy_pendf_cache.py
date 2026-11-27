@@ -544,13 +544,14 @@ def pointwise_cross_sections_from_suite(suite, *, tolerance: float = 0.001
     label, source = "eval", "the suite's evaluated cross sections (no resonance ranges)"
     resonances = getattr(suite, "resonances", None)
     if resonances is not None and (resonances.resolved or resonances.unresolved is not None):
+        from kika.endf.reconstruction import DEFAULT_MAX_POINTS
         from kika.processing.resonances import ReconstructionOptions
         from kika.processing.resonances.suite import attach_reconstruction, reconstruct_suite
 
         taken = set(suite.styles.labels)
         label = next(c for c in ("recon", "kika-recon", *(f"kika-recon-{i}" for i in range(1, 100)))
                      if c not in taken)
-        result = reconstruct_suite(suite, label=label, options=ReconstructionOptions(rtol=tolerance))
+        result = reconstruct_suite(suite, label=label, options=ReconstructionOptions(rtol=tolerance, max_points=DEFAULT_MAX_POINTS))
         suite = copy.deepcopy(suite)
         attach_reconstruction(suite, result)
         label, source = result.label, f"kika's resonance reconstruction (tolerance {tolerance:g})"
