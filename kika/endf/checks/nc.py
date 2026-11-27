@@ -6,6 +6,8 @@ quantity remain additive residual components. No clipping or PSD repair occurs.
 """
 from __future__ import annotations
 
+import itertools
+
 import numpy as np
 
 from ..classes.mf33.mf33 import MF33MT, bin_average_xs
@@ -33,10 +35,9 @@ class NCAssembler:
         self.ctx, self.mf = ctx, mf
         self.sections, self.usable = sections, usable
         self._central_cache = {}
-        # check_nc asks for the same blocks once per MT of a connected set
-        # (O-16 B-VIII.1: 4 901 primitives for a few hundred distinct ones).
+        # Bounded: on a union grid every entry is dense (O-16 B-VIII.1: 1641 bins,
+        # 21 MB each, 4 901 primitives for its 48 connected MTs).
         self._primitives = {}
-        self._blocks = {}
         self.rules = {}
         for mt, sec in sections.items():
             self.rules[mt] = [n for s in sec.subsections
@@ -177,6 +178,8 @@ class NCAssembler:
     def primitive(self, a, b, grid, active_a, active_b):
         key = (a, b, grid.tobytes(), active_a.tobytes(), active_b.tobytes())
         if key not in self._primitives:
+            if len(self._primitives) >= 64:
+                self._primitives.clear()
             self._primitives[key] = self._primitive(a, b, grid, active_a, active_b)
         return self._primitives[key]
 
@@ -224,12 +227,6 @@ class NCAssembler:
         return total
 
     def block(self, a, b, grid):
-        key = (a, b, grid.tobytes())
-        if key not in self._blocks:
-            self._blocks[key] = self._block(a, b, grid)
-        return self._blocks[key].copy()
-
-    def _block(self, a, b, grid):
         wa,wb = self.weights(a,grid),self.weights(b,grid)
         total = np.zeros((len(grid)-1,len(grid)-1))
         for i,ci in wa.items():
@@ -240,6 +237,29 @@ class NCAssembler:
         if not np.all(np.isfinite(total)):
             raise NotEvaluable("nonfinite propagated covariance")
         return total
+
+
+class _OnDemand(dict):
+    """``{key: block}`` whose blocks are computed on each read and not kept.
+
+    The dense blocks of a connected set do not fit together (O-16 B-VIII.1: 1176
+    blocks of 1641 x 1641, 25 GB); ``_joint_psd`` reads each one a few times.
+    """
+
+    def __init__(self, keys, compute):
+        super().__init__((key, None) for key in keys)
+        self._compute = compute
+
+    def __getitem__(self, key):
+        if not dict.__contains__(self, key):
+            raise KeyError(key)
+        return self._compute(key)
+
+    def values(self):
+        return (self[key] for key in self)
+
+    def items(self):
+        return ((key, self[key]) for key in self)
 
 
 def check_nc(ctx, mf, sections, usable, out):
@@ -261,8 +281,6 @@ def check_nc(ctx, mf, sections, usable, out):
             n = len(grid)-1
             joint_key = (tuple(nodes),grid.tobytes())
             new_joint = joint_key not in checked_joint
-            selfs = {mt:matrix} if new_joint else {}
-            cross = {}
             for other in nodes:
                 if other == mt:
                     continue
@@ -270,17 +288,23 @@ def check_nc(ctx, mf, sections, usable, out):
                 pair = engine.block(mt,other,grid)
                 crossloc = CovarianceLocation(mat=loc.mat,mf=mf,mt=mt,mat1=0,mt1=other)
                 _check_cross_block(pair,np.diag(matrix),np.diag(own),grid,crossloc,out,None)
-                if new_joint:
-                    selfs[other] = own
-                    cross[min(mt,other),max(mt,other)] = pair if mt<other else pair.T
             if new_joint:
-                # Fill every constituent cross block: omitting them would invent
-                # a joint matrix inconsistent with the propagated derived row.
-                for i,a in enumerate(nodes):
-                    for b in nodes[i+1:]:
-                        if (a,b) not in cross:
-                            cross[a,b] = engine.block(a,b,grid)
-                if any(np.any(v) for v in [*selfs.values(),*cross.values()]):
+                selfs = _OnDemand([mt]+[m for m in nodes if m!=mt],
+                                  lambda m: matrix if m==mt else engine.block(m,m,grid))
+                # Every constituent cross block: omitting them would invent a
+                # joint matrix inconsistent with the propagated derived row.
+                pairs = [(min(mt,o),max(mt,o)) for o in nodes if o!=mt]
+                pairs += [(a,b) for i,a in enumerate(nodes) for b in nodes[i+1:] if mt not in (a,b)]
+
+                def pairBlock(key):
+                    a,b = key
+                    if mt not in key:
+                        return engine.block(a,b,grid)
+                    other = b if a==mt else a
+                    pair = engine.block(mt,other,grid)
+                    return pair if mt<other else pair.T
+                cross = _OnDemand(pairs, pairBlock)
+                if any(np.any(v) for v in itertools.chain(selfs.values(),cross.values())):
                     _joint_psd(nodes,{m:grid for m in nodes},selfs,cross,
                                lambda ms:", ".join(f"MT{m}" for m in ms),lambda ms:loc,out)
                 checked_joint[joint_key] = mt

@@ -1666,10 +1666,10 @@ def _joint_reduced(members, grids, selfs, cross):
             change[1:] |= np.any(np.diff(s, axis=0) != 0, axis=1)
             change[1:] |= np.any(np.diff(s.T, axis=0) != 0, axis=1)
         live = np.any(s != 0, axis=1) | np.any(s != 0, axis=0)
-        for (a, b), block in cross.items():
+        for a, b in cross:
             if a not in members or b not in members or (a != m and b != m):
                 continue
-            rows = np.asarray(block) if a == m else np.asarray(block).T
+            rows = np.asarray(cross[a, b]) if a == m else np.asarray(cross[a, b]).T
             if k > 1:
                 change[1:] |= np.any(np.diff(rows, axis=0) != 0, axis=1)
             live |= np.any(rows != 0, axis=1)
@@ -1687,9 +1687,9 @@ def _joint_reduced(members, grids, selfs, cross):
     for m in members:
         o, i = offsets[m], idx[m]
         joint[o:o + i.size, o:o + i.size] = np.asarray(selfs[m])[np.ix_(i, i)]
-    for (a, b), block in cross.items():
+    for a, b in cross:
         if a in offsets and b in offsets:
-            sub = np.asarray(block)[np.ix_(idx[a], idx[b])]
+            sub = np.asarray(cross[a, b])[np.ix_(idx[a], idx[b])]
             oa, ob = offsets[a], offsets[b]
             joint[oa:oa + sub.shape[0], ob:ob + sub.shape[1]] = sub
             joint[ob:ob + sub.shape[1], oa:oa + sub.shape[0]] = sub.T
