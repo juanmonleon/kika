@@ -398,8 +398,7 @@ _KINDS: Dict[type, object] = {}
 
 
 def _kind(cls: type):
-    """How :func:`provenanceNodes` treats instances of *cls*; a dataclass is
-    ``(has a provenance slot, fields to descend)``."""
+    """A dataclass is ``(has a provenance slot, fields to descend)``."""
     kind = _KINDS.get(cls)
     if kind is None:
         if issubclass(cls, _LEAVES) or cls.__module__.startswith("numpy"):
@@ -441,8 +440,7 @@ def provenanceNodes(suite) -> Iterator[Tuple[str, object]]:
     def visits(obj) -> bool:
         return _kind(type(obj)) is not _SKIP and id(obj) not in seen
 
-    # The tests on a child are made before descending into it, so that the
-    # leaves and arrays, most of what a suite holds, cost no generator and no path.
+    # Children are tested before the call: leaves and arrays then cost no generator and no path.
     def walk(obj, path):
         seen.add(id(obj))
         kind = _kind(type(obj))
