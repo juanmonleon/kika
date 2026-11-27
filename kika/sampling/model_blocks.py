@@ -262,7 +262,7 @@ def assemble_joint(entries, atol: float = 1e-12,
     return keys, joint, stride
 
 
-def _za_of(suite, section) -> int:
+def covariance_za(suite, section) -> int:
     """The ZA a covariance section is about, from the section or from the suite.
 
     An ENDF-decoded section carries it in its provenance. A GNDS-decoded one
@@ -431,7 +431,7 @@ def _mf34_entries(suite, mt=None, orders=None, relative=None):
         ):
             continue
 
-        za = _za_of(suite, section)
+        za = covariance_za(suite, section)
         rowGrid = np.asarray(form.rowGrid, dtype=float)
         colGrid = (rowGrid if form.columnGrid is None
                    else np.asarray(form.columnGrid, dtype=float))
@@ -479,7 +479,7 @@ def mf34_frames(suite) -> Dict[Tuple[int, int], str]:
         colData = rowData if colData is None else colData
         frame = normaliseFrame(getattr(getattr(section, "form", None),
                                        "productFrame", None))
-        za = _za_of(suite, section)
+        za = covariance_za(suite, section)
         for link in (rowData, colData):
             seen.setdefault((za, _endf_mt(link)), set()).add(frame)
     frames = {}
@@ -535,7 +535,7 @@ def _mf35_sections(suite, mt=None, bands=None):
         rowData = section.rowData
         if not _is_endf_mf(rowData, 35):
             continue
-        za = _za_of(suite, section)
+        za = covariance_za(suite, section)
         section_mt = _endf_mt(rowData)
         index = counters.get((za, section_mt), 0)
         counters[(za, section_mt)] = index + 1
@@ -808,7 +808,7 @@ def _cross_section_entries(suite, mf: int = 33, mt=None, relative=None):
         if relative is not None and bool(form.isRelative) != bool(relative):
             continue
 
-        za = _za_of(suite, section)
+        za = covariance_za(suite, section)
         rowGrid = np.asarray(form.rowGrid, dtype=float)
         colGrid = (rowGrid if form.columnGrid is None
                    else np.asarray(form.columnGrid, dtype=float))

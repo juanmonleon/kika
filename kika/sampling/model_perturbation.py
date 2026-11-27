@@ -1307,9 +1307,9 @@ def _matOf(suite) -> Optional[int]:
     default.
     """
     from kika._constants import ZAID_TO_ENDF_MAT, ZAID_TO_ENDF_MAT_ISOMER
-    from kika.sampling.model_blocks import _za_of
+    from kika.sampling.model_blocks import covariance_za
 
-    za = _za_of(suite, None)
+    za = covariance_za(suite, None)
     if not za:
         return None
     target = str(getattr(suite, "target", "") or "")

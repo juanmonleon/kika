@@ -302,7 +302,7 @@ def per_mt_covariances_from_suite(
     ``declined``: the tape path would sum relative matrices directly there.
     """
     from kika.cov.group_arithmetic import MixedKindsNeedCrossSections
-    from kika.sampling.model_blocks import _endf_mfmt, _za_of
+    from kika.sampling.model_blocks import _endf_mfmt, covariance_za
 
     rows: Dict[int, Dict[int, object]] = {}
     other_material: List[str] = []
@@ -335,7 +335,7 @@ def per_mt_covariances_from_suite(
                 if block is None:
                     continue
                 matrix, grid, is_relative = block
-                za = _za_of(suite, section)
+                za = covariance_za(suite, section)
                 cov.add_matrix(za, mt, za, mt1, matrix, energy_grid=grid,
                                is_relative=bool(is_relative))
         except MixedKindsNeedCrossSections as why:
@@ -662,7 +662,7 @@ def relativiseOnAssemblyGrids(suite, central, gridOf, *, mfs=(31, 33), mts=None)
     covariance there is zero.
     """
     from kika._covariance_forms import require_single_matrix
-    from kika.sampling.model_blocks import _endf_mt, _is_endf_mf, _stated_matrix, _za_of
+    from kika.sampling.model_blocks import _endf_mt, _is_endf_mf, _stated_matrix, covariance_za
 
     out, converted, unresolved, inertBins = [], [], [], {}
     for section in local_sections(suite):
@@ -688,7 +688,7 @@ def relativiseOnAssemblyGrids(suite, central, gridOf, *, mfs=(31, 33), mts=None)
         if table.get(mtRow) is None or table.get(mtCol) is None:
             unresolved.append(label)
             continue
-        za = _za_of(suite, section)
+        za = covariance_za(suite, section)
         rowUnion, colUnion = gridOf(za, mf, mtRow), gridOf(za, mf, mtCol)
         rowCentral = binAveragedCentral(table[mtRow], rowUnion)
         colCentral = binAveragedCentral(table[mtCol], colUnion)

@@ -170,11 +170,11 @@ def test_a_short_range_variance_grows_as_the_group_narrows_and_lb9_vanishes_on_i
 
 
 def test_a_metastable_target_keys_its_blocks_by_its_ground_state_za():
-    from kika.sampling.model_blocks import _za_of
+    from kika.sampling.model_blocks import covariance_za
 
     bare = types.SimpleNamespace(provenance=None)
-    assert _za_of(types.SimpleNamespace(target="Am242_m1"), bare) == 95242
-    assert _za_of(types.SimpleNamespace(target="U235_e1"), bare) == 92235
+    assert covariance_za(types.SimpleNamespace(target="Am242_m1"), bare) == 95242
+    assert covariance_za(types.SimpleNamespace(target="U235_e1"), bare) == 92235
 
 
 def test_a_sum_is_not_collapsed_on_its_own():
