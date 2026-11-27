@@ -2,7 +2,7 @@
 this repository carries.
 
 **Why the list is committed rather than read at test time.** The two schemas
-ship with FUDGE and live under ``/soft_snc``, which exists on one of the two
+ship with FUDGE (``$KIKA_FUDGE_DIR``), which exists on one of the two
 machines this repository is worked from. A gate that parses them directly is
 not a gate on the other machine — it is a ``pytest.skip``, which is exactly the
 failure ``build_micro_fe56_gnds.py`` already has and says so about. So the
@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import sys
 import xml.etree.ElementTree as ET
@@ -55,7 +56,7 @@ CENSUS = HERE / "gnds_schema_nodes.json"
 #: global declaration in ``gnds.xsd`` at all — §25.1.1 makes it a root in its
 #: own right — which is the same reason ``test_encode.py:46-48`` carries both
 #: paths.
-FUDGE = Path("/soft_snc/FUDGE/6.10.0/fudge/fudge")
+FUDGE = Path(os.environ.get("KIKA_FUDGE_DIR", "missing")) / "fudge"
 SCHEMAS = (
     ("gnds.xsd", FUDGE / "gnds.xsd"),
     ("covariances.xsd", FUDGE / "covariances" / "covariances.xsd"),

@@ -21,13 +21,14 @@ VIII.1); the yield 0.9997041 is the same in both.
 """
 from __future__ import annotations
 
-import os
 from collections import defaultdict
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
+
+from kika._nuclear_data import nuclear_data
 
 from kika.ace.classes.angular_distribution.distributions import (
     EquiprobableAngularDistribution, IsotropicAngularDistribution)
@@ -225,7 +226,7 @@ _REPO = Path(__file__).resolve().parents[4]
 
 
 def _aceTable(name):
-    roots = [Path(os.environ["KIKA_TAPES"]) / "ace"] if os.environ.get("KIKA_TAPES") else []
+    roots = [nuclear_data("_kika-tests", "tapes", "ace")] if nuclear_data() else []
     roots.append(_REPO.parent / "kika-files" / "ace")
     for root in roots:
         if (root / name).is_file():

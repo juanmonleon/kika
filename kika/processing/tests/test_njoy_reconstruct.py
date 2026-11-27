@@ -6,7 +6,7 @@ available, which keeps CI green on machines without NJOY while still
 guarding the wrapper on development workstations.
 
 The ``njoy_exe``, ``fe56_host_tape`` and ``u238_tape`` fixtures come from the
-root ``conftest.py``; see there for ``$KIKA_TAPES``, ``$NJOY_EXECUTABLE`` and
+root ``conftest.py``; see there for ``$KIKA_NUCLEAR_DATA``, ``$NJOY_EXECUTABLE`` and
 the ``--deep`` flag.
 """
 from __future__ import annotations

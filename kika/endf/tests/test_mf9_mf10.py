@@ -7,8 +7,8 @@ writes non-canonically comes back canonical with the same value.
 **Where it runs.** On the two committed activation cuts
 (``ACTIVATION_FIXTURES`` in ``test_micro_tape_regen.py``), and -- ``slow``,
 needing the shared libraries -- on every MF9/MF10 section of ENDF/B-VIII.1,
-JEFF-4.0 and JENDL-5. At home the three libraries sit under
-``NuclearData/endf``: point ``KIKA_LIB_TAPES`` there. The full sweep (2026-10-14)
+JEFF-4.0 and JENDL-5. The three libraries sit under
+``$KIKA_NUCLEAR_DATA/endf``. The full sweep (2026-10-14)
 caught one section, In-115 MF9/MT102 of B-VIII.1, whose 8-digit fixed-point QM
 the TAB1 header rounded to 7.
 """

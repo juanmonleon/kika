@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import os
 import struct
 from pathlib import Path
 
 import numpy as np
 import pytest
+
+from kika._nuclear_data import nuclear_data
 
 from kika.cov import (
     read_boxer,
@@ -177,11 +178,7 @@ def test_coverx_binary_uses_standard_hollerith_and_xs_record_lengths(tmp_path):
 
 
 REAL_SCALE44 = Path(
-    os.environ.get(
-        "KIKA_TEST_SCALE44_COVERX",
-        "/share_snc/projets/INSIDER/SENSIBILITE/"
-        "Covariances_scale_6.2.3_binary/scale.rev05.44groupcov",
-    )
+    nuclear_data("cov", "scale", "scale.rev05.44groupcov") or "missing"
 )
 
 
@@ -243,16 +240,10 @@ def test_covfil_coverx_boxer_cross_format_chain(tmp_path):
 
 
 REAL_MF33 = Path(
-    os.environ.get(
-        "KIKA_TEST_FE56_MF33_GENDF",
-        "/share_snc/snc/JuanMonleon/COV/cov/50/600/260560_50.06.xs.gendf",
-    )
+    nuclear_data("_kika-tests", "env-gated", "260560_50.06.xs.gendf") or "missing"
 )
 REAL_MF34 = Path(
-    os.environ.get(
-        "KIKA_TEST_FE56_MF34_GENDF",
-        "/share_snc/snc/JuanMonleon/COV/mf34_processing/JEFF-4.0/tape21",
-    )
+    nuclear_data("_kika-tests", "env-gated", "mf34_JEFF-4.0_tape21") or "missing"
 )
 
 

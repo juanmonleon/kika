@@ -6,7 +6,7 @@ Three jobs, and nothing else:
    paths and three private ``_resolve_*`` helpers that disagreed with each
    other. Everything that needs a real ENDF/ACE tape, a Serpent input or an
    NJOY binary now goes through the fixtures defined here, which look under a
-   single root: ``$KIKA_TAPES`` (default ``/share_snc/snc/JuanMonleon``).
+   single root: ``$KIKA_NUCLEAR_DATA`` (see ``kika/_nuclear_data.py``).
 
 2. **Markers.** ``tape``, ``njoy``, ``gnds`` and ``slow`` are applied
    *automatically* from the fixtures a test requests, so the marker can never
@@ -32,7 +32,7 @@ Typical use::
     pytest -m njoy                          # the ones that spawn NJOY
     pytest -m "not tape and not njoy"       # what CI runs
     pytest --deep                           # workstation: prove nothing skipped
-    KIKA_TAPES=/other/root pytest --deep
+    KIKA_NUCLEAR_DATA=/other/root pytest --deep
 """
 from __future__ import annotations
 
@@ -43,45 +43,27 @@ from typing import Dict, Optional, Sequence, Tuple
 
 import pytest
 
+from kika._nuclear_data import nuclear_data
+
 REPO_ROOT = Path(__file__).resolve().parent
 
 # --------------------------------------------------------------------------
 # Where tapes are looked for
 # --------------------------------------------------------------------------
 
-#: Root of the shared data tree. Everything in ``_TAPES`` is relative to one of
-#: the roots returned by :func:`_search_roots`.
-_DEFAULT_TAPE_ROOT = "/share_snc/snc/JuanMonleon"
-
-#: The shared *library* tree, one level up from the personal one: whole
-#: evaluated libraries as distributed, in per-library directories
-#: (``endfb81/``, ``jeff40/``, ``jendl5/`` …). The personal root holds working
-#: copies and grafts; this one holds the pristine originals, and the PFNS work
-#: is the first to need a tape that exists only here (ENDF/B-VIII.1 has no
-#: counterpart under ``JuanMonleon/``). Kept as a second root rather than
-#: reached by ``../../lib/endf`` from the first, which would break the moment
-#: ``KIKA_TAPES`` points somewhere else.
-_DEFAULT_LIB_ROOT = "/share_snc/lib/endf"
-#: Where the same libraries sit on the WSL workstation, one directory deeper
-#: (``<lib>/neutrons/``). ``/share_snc/lib/endf`` does not exist there
-#: (measured 2026-10-05), so without this root every library-only tape skips
-#: on the one machine the PFNS gates are run from.
-_SOFT_LIB_ROOT = "/soft_snc/lib/endf"
-
-
 def _search_roots() -> Tuple[Path, ...]:
     """Directories searched for tapes, most specific first.
 
-    ``KIKA_ENDF_FILES`` and ``<repo>/files/endf`` are kept because several test
-    modules already documented them; they are now additional roots instead of
-    competing resolvers.
+    Under ``$KIKA_NUCLEAR_DATA``: the test tapes (working copies and grafts),
+    then the evaluated libraries as distributed (``endf/<lib>/``). ``KIKA_ENDF_FILES``
+    and ``<repo>/files`` point at a checkout's own files, for worktrees.
     """
-    roots = [Path(os.environ.get("KIKA_TAPES", _DEFAULT_TAPE_ROOT))]
+    roots = [nuclear_data("_kika-tests", "tapes")] if nuclear_data() else []
     env_endf = os.environ.get("KIKA_ENDF_FILES")
     if env_endf:
         roots.append(Path(env_endf))
-    roots.append(Path(os.environ.get("KIKA_LIB_TAPES", _DEFAULT_LIB_ROOT)))
-    roots.append(Path(_SOFT_LIB_ROOT))
+    if nuclear_data():
+        roots.append(nuclear_data("endf"))
     roots.append(_downloadCacheRoot())
     roots.append(REPO_ROOT / "files" / "endf")
     roots.append(REPO_ROOT / "files")
@@ -232,7 +214,7 @@ _TAPES: Dict[str, Sequence[str]] = {
     "fe56_gnds": (
         "ENDF-B-VIII.1-GNDS/ENDF-B-VIII.1-GNDS/neutrons/n-026_Fe_056.endf.gnds.xml",
         "ENDF-B-VIII.1-GNDS/neutrons/n-026_Fe_056.endf.gnds.xml",
-        # NuclearData's layout (gnds/endfb81 beside endf/), from KIKA_LIB_TAPES.
+        # NuclearData's layout (gnds/endfb81 beside endf/).
         "../gnds/endfb81/n-026_Fe_056.endf.gnds.xml",
     ),
     # The same evaluation as ``fe56_gnds`` below, in ENDF-6. This pair is the
@@ -371,8 +353,7 @@ _TAPES: Dict[str, Sequence[str]] = {
     # fixtures are small and the full-size witnesses are reached from here.
     #
     # ENDF/B-VIII.1, one per format branch that needs a full-size witness. The
-    # second path is NuclearData's layout (tsl/endfb81 beside endf/), reached
-    # from KIKA_LIB_TAPES.
+    # second path is NuclearData's layout (tsl/endfb81 beside endf/).
     "tsl_h_h2o": ("endfb81/tsl/tsl-HinH2O.endf",        # 94 temperatures, NS=1
                  "../tsl/endfb81/tsl-HinH2O.endf"),
     "tsl_ortho_h": ("endfb81/tsl/tsl-ortho-H.endf",     # the only LASYM=1
@@ -436,9 +417,9 @@ def resolve_tape(name: str) -> Optional[Path]:
 
 
 #: G4NDL libraries are *directories* — a tree of per-isotope files — so they
-#: get their own resolver rather than a ``_TAPES`` entry. ``KIKA_G4NDL`` names
-#: the directory the libraries were unpacked into; a ``G4NDL/`` folder under
-#: any tape root is tried after it. Each candidate is the unpacked library
+#: get their own resolver rather than a ``_TAPES`` entry, under
+#: ``$KIKA_NUCLEAR_DATA/g4ndl``; a ``G4NDL/`` folder under any tape root is
+#: tried after it. Each candidate is the unpacked library
 #: root, recognised by having ``Elastic/FS`` inside it.
 _G4NDL_LIBRARIES: Dict[str, Sequence[str]] = {
     # The IAEA translation of JEFF-4.0 (Mendoza & Cano-Ott), as unpacked from
@@ -453,9 +434,7 @@ _G4NDL_LIBRARIES: Dict[str, Sequence[str]] = {
 
 def resolve_g4ndl(name: str) -> Optional[Path]:
     """Return the root of G4NDL library *name*, or ``None`` if not reachable."""
-    roots = []
-    if os.environ.get("KIKA_G4NDL"):
-        roots.append(Path(os.environ["KIKA_G4NDL"]))
+    roots = [nuclear_data("g4ndl")] if nuclear_data() else []
     roots += [root / name for root in _search_roots() for name in ("g4ndl", "G4NDL")]
     for root in roots:
         for rel in _G4NDL_LIBRARIES[name]:
@@ -559,9 +538,7 @@ _GNDS_FIXTURES = frozenset({
 #: explicit ``-m``, so nothing about what *gets* verified changes — only what a
 #: no-argument invocation defaults to.
 #:
-#: The alternative was the ``KIKA_TAPES=`` trick, and it is worse: ``Path("")``
-#: is ``PosixPath('.')``, so an empty value makes the search root the *current
-#: directory* rather than nowhere, and it leaves ``KIKA_LIB_TAPES`` and the
+#: The alternative was unsetting the data root, and it is worse: it leaves the
 #: download cache resolving ~23 tapes anyway. A mark is deterministic.
 _EXPENSIVE_MARKS = frozenset({"njoy", "slow", "perf", "tape"})
 
@@ -621,7 +598,7 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config) -> None:
         return
     terminalreporter.section("kika: unresolved external data")
     terminalreporter.write_line(
-        f"KIKA_TAPES={os.environ.get('KIKA_TAPES', _DEFAULT_TAPE_ROOT)}"
+        f"KIKA_NUCLEAR_DATA={os.environ.get('KIKA_NUCLEAR_DATA', '(unset)')}"
     )
     for what, detail in sorted(_UNRESOLVED.items()):
         terminalreporter.write_line(f"  {what}: {detail}")
@@ -656,7 +633,7 @@ def _g4ndl_fixture(name: str):
         path = resolve_g4ndl(name)
         if path is None:
             _missing(request, f"g4ndl:{name}",
-                     "set KIKA_G4NDL to the directory holding "
+                     "set KIKA_NUCLEAR_DATA; g4ndl/ under it must hold "
                      + " or ".join(_G4NDL_LIBRARIES[name]))
         return path
 
@@ -781,13 +758,13 @@ def neutron_libraries(request: pytest.FixtureRequest) -> Dict[str, Path]:
 
     All three or nothing: a census over two of them would report a different
     set of numbers and look like a regression. At home the libraries are under
-    ``NuclearData/endf``; point ``KIKA_LIB_TAPES`` there.
+    ``$KIKA_NUCLEAR_DATA/endf``.
     """
     found = {name: resolve_library(name) for name in NEUTRON_LIBRARIES}
     missing = [name for name, path in found.items() if path is None]
     if missing:
         _missing(request, "libraries:" + ",".join(missing),
-                 "set KIKA_LIB_TAPES to the directory holding "
+                 "set KIKA_NUCLEAR_DATA; endf/ under it must hold "
                  + ", ".join(f"{m}/" for m in NEUTRON_LIBRARIES))
     return found
 
@@ -827,7 +804,7 @@ def njoy_exe(request: pytest.FixtureRequest) -> Path:
 @pytest.fixture(scope="session")
 def tape_root() -> Path:
     """The configured tape root itself, for tests that build their own paths."""
-    return Path(os.environ.get("KIKA_TAPES", _DEFAULT_TAPE_ROOT))
+    return nuclear_data("_kika-tests", "tapes") or REPO_ROOT / "missing-KIKA_NUCLEAR_DATA"
 
 
 # --------------------------------------------------------------------------

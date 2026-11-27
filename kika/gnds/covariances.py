@@ -8,7 +8,7 @@ a statement about the data rather than about the specification.
 **Array storage is transcribed from FUDGE, not inferred.** ``array`` has three
 storage modes and getting any of them subtly wrong yields a plausible matrix
 rather than an error, so each is written against
-``/soft_snc/FUDGE/6.10.0/fudge/xData/xDataArray.py`` — the code that *wrote*
+FUDGE 6.10's ``xData/xDataArray.py`` — the code that *wrote*
 these files — with the class and method named in the comment. The one that
 cannot be guessed from the data is ``flattened``: its ``starts`` are flat
 indices into the **full** ``n*m`` array even when ``symmetry="lower"`` is also

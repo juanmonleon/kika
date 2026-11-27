@@ -17,8 +17,8 @@ perturbs has to be the deliverable's own, or the ensemble is centred on a
 different evaluation than the covariance describes.
 
 ⚠ Not an optimisation with a fallback. A run that "just uses the big tape"
-fills the share; `/share_snc` was at 93 % with 589 GB free when this was
-written.
+fills the disk: the old shared tree was at 93 % with 589 GB free when this
+was written.
 """
 from __future__ import annotations
 

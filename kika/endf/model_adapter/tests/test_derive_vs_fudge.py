@@ -15,8 +15,7 @@ again 2026-10-20 with kika's writer writing the closest legal field: where
 kika's field carries more digits than FUDGE's seven significant ones
 (``3.967130999`` against ``3.967131+0``), it rounds to FUDGE's.
 
-``KIKA_GNDS_LIB`` points at the folder of NNDC's ``n-*.endf.gnds.xml`` files;
-by default ``NuclearData/gnds/endfb81`` beside ``KIKA_LIB_TAPES``.
+NNDC's ``n-*.endf.gnds.xml`` files are read from ``$KIKA_NUCLEAR_DATA/gnds/endfb81``.
 """
 from __future__ import annotations
 
@@ -24,6 +23,8 @@ import os
 from pathlib import Path
 
 import pytest
+
+from kika._nuclear_data import nuclear_data
 
 import kika
 from kika.endf import read_endf
@@ -41,11 +42,7 @@ CASES = {
 
 
 def _library() -> Path:
-    stated = os.environ.get("KIKA_GNDS_LIB")
-    if stated:
-        return Path(stated)
-    tapes = os.environ.get("KIKA_LIB_TAPES")
-    return Path(tapes).parent / "gnds" / "endfb81" if tapes else Path("missing")
+    return nuclear_data("gnds", "endfb81") or Path("missing")
 
 
 def _fields(line):

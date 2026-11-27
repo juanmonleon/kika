@@ -48,7 +48,7 @@ from kika.gnds.xpath import Document
 #: FUDGE 6.10.0's schemas. The cluster install by default; ``KIKA_FUDGE_DIR``
 #: points at another checkout (the directory holding ``fudge/gnds.xsd``), which
 #: is what lets the schema gates run on a workstation instead of skipping.
-_FUDGE_DIR = Path(os.environ.get("KIKA_FUDGE_DIR", "/soft_snc/FUDGE/6.10.0/fudge"))
+_FUDGE_DIR = Path(os.environ.get("KIKA_FUDGE_DIR", "missing"))
 SCHEMA = _FUDGE_DIR / "fudge" / "gnds.xsd"
 COVARIANCE_SCHEMA = _FUDGE_DIR / "fudge" / "covariances" / "covariances.xsd"
 

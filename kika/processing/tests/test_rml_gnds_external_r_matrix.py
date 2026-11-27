@@ -10,31 +10,27 @@ could not be processed while its ENDF could. Measured 2026-10-16 once routed:
 the PENDF of NNDC's GNDS has the ENDF route's MTs and agrees to 1e-6 (median
 8e-8, the GNDS file's digits).
 
-``KIKA_GNDS_LIB`` points at the folder of NNDC's ``n-*.endf.gnds.xml`` files;
-by default ``NuclearData/gnds/endfb81`` beside ``KIKA_LIB_TAPES``.
+NNDC's ``n-*.endf.gnds.xml`` files are read from ``$KIKA_NUCLEAR_DATA/gnds/endfb81``.
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
+
+from kika._nuclear_data import nuclear_data
 
 pytestmark = pytest.mark.tape
 
 
 def _library() -> Path:
-    stated = os.environ.get("KIKA_GNDS_LIB")
-    if stated:
-        return Path(stated)
-    tapes = os.environ.get("KIKA_LIB_TAPES")
-    return Path(tapes).parent / "gnds" / "endfb81" if tapes else Path("missing")
+    return nuclear_data("gnds", "endfb81") or Path("missing")
 
 
 def test_nndc_sr88_external_r_matrix_takes_the_rml_route():
     path = _library() / "n-038_Sr_088.endf.gnds.xml"
     if not path.is_file():
-        pytest.skip(f"{path} not found (set KIKA_GNDS_LIB)")
+        pytest.skip(f"{path} not found (set KIKA_NUCLEAR_DATA)")
     from kika.endf.process import _context_from_model
     from kika.gnds.decode import readReactionSuite
     from kika.gnds.xpath import Document

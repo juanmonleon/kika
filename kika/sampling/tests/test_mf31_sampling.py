@@ -23,7 +23,7 @@ from kika.sampling.mf31_sampling import (
 )
 
 # The U-235 / Th-232 / Pu-241 tapes are resolved by the root conftest through
-# $KIKA_TAPES; see the ``u235_tape`` / ``th232_tape`` / ``pu241_tape`` fixtures.
+# $KIKA_NUCLEAR_DATA; see the ``u235_tape`` / ``th232_tape`` / ``pu241_tape`` fixtures.
 
 # Shared synthetic grid: 3 covariance bins.
 BINS = [1.0e-5, 1.0e3, 1.0e6, 2.0e7]

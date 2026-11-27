@@ -11,7 +11,7 @@ so the reader under test opens them the way it opens a real one:
     the smallest file showing each construct; ``REAL`` below says which.
     Kept small on purpose (~130 kB): Fe-56 and anything else full-size is
     read from the whole library by the ``tape``-marked tests instead
-    (``KIKA_G4NDL``, see the repository ``conftest.py``).
+    (``$KIKA_NUCLEAR_DATA/g4ndl``, see the repository ``conftest.py``).
 
 ``inelastic/JEFF-4.0/`` and ``inelastic/G4NDL-4.7.1/``
     Real ``Inelastic/`` files, byte for byte, kept apart from the elastic

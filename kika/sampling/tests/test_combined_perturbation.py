@@ -5,7 +5,7 @@ with MF33 PENDF perturbation and runs NJOY ACER per pair. It is skipped when
 NJOY or the reference ENDF file are absent.
 
 The ``njoy_exe`` and ``fe56_host_tape`` fixtures come from the root
-``conftest.py``; see there for ``$KIKA_TAPES``, ``$NJOY_EXECUTABLE`` and
+``conftest.py``; see there for ``$KIKA_NUCLEAR_DATA``, ``$NJOY_EXECUTABLE`` and
 ``--deep``.
 """
 from __future__ import annotations

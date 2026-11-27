@@ -9,17 +9,18 @@
   times the cross section to the processing tolerance, and a tape with
   resonance parameters is refused.
 * With IRDFF-II beside the library tapes (``dosimetry/irdff2`` next to
-  ``KIKA_LIB_TAPES``, as ``gnds/`` is for the GNDS oracle): Mg, Al-27
+  ``$KIKA_NUCLEAR_DATA``, as ``gnds/`` is for the GNDS oracle): Mg, Al-27
   and Ti come out as the IAEA's ACE library writes them, MT 5 products numbered
   by their product and the tape's blank-exponent numbers read.
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import numpy as np
 import pytest
+
+from kika._nuclear_data import nuclear_data
 
 from kika._text import read_text
 from kika.ace import read_ace
@@ -137,8 +138,7 @@ def test_a_tape_with_resonance_parameters_is_refused(tmp_path):
 
 
 def _irdff2() -> Path | None:
-    tapes = os.environ.get("KIKA_LIB_TAPES")
-    return Path(tapes).parent / "dosimetry" / "irdff2" if tapes else None
+    return nuclear_data("dosimetry", "irdff2")
 
 
 IRDFF2 = _irdff2()
@@ -156,7 +156,7 @@ def _irdffMaterial(mat, out):
 @pytest.mark.parametrize("mat", [1200, 1325, 2200])
 def test_irdff2_agrees_with_the_iaea_ace_library(mat, tmp_path):
     if IRDFF2 is None or not (IRDFF2 / "endf" / "IRDFF-II.endf").exists():
-        pytest.skip("no IRDFF-II in dosimetry/irdff2 beside KIKA_LIB_TAPES")
+        pytest.skip("no IRDFF-II in dosimetry/irdff2 under KIKA_NUCLEAR_DATA")
     mine = read_ace(str(dosimetry_ace(_irdffMaterial(mat, tmp_path), tmp_path, xsdir=False)))
     ref = read_ace(str(IRDFF2 / "ace" / "IRDFF-II" / f"dos-irdff2-{mat}.acef"))
     assert set(ref.mt_numbers) <= set(mine.mt_numbers) and set(mine.mt_numbers) - set(ref.mt_numbers) <= {1}

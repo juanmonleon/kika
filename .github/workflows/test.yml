@@ -37,7 +37,7 @@ jobs:
         run: poetry install --with dev
 
       - name: Run the fast lane
-        # KIKA_TAPES points nowhere on purpose: the marker filter should
+        # KIKA_NUCLEAR_DATA points nowhere on purpose: the marker filter should
         # already exclude every test that needs it, and if one slips through
         # unmarked it must skip loudly rather than pick up a stray file.
         #
@@ -57,7 +57,7 @@ jobs:
         # the machine where the numbers are reproducible. So it keeps 1e-10 and
         # stops being asserted somewhere its premise does not hold.
         env:
-          KIKA_TAPES: /nonexistent
+          KIKA_NUCLEAR_DATA: /nonexistent
         run: >-
           poetry run pytest -q
           -m "not tape and not njoy and not slow and not perf"

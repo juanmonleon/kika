@@ -9,14 +9,15 @@ could not process its own GNDS of Cl-35, and with the suite's atomic masses its
 (n,p) came 1.6e-3 off; now all 163 MF3 sections of the two routes' PENDFs are
 identical.
 
-``KIKA_LIB_TAPES`` points at ``NuclearData/endf`` (``endfb81/`` inside).
+Reads ``$KIKA_NUCLEAR_DATA/endf/endfb81``.
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
+
+from kika._nuclear_data import nuclear_data
 
 import kika
 
@@ -24,8 +25,7 @@ pytestmark = pytest.mark.tape
 
 
 def _tape() -> Path:
-    tapes = os.environ.get("KIKA_LIB_TAPES")
-    return Path(tapes) / "endfb81" / "n-017_Cl_035.endf" if tapes else Path("missing")
+    return nuclear_data("endf", "endfb81", "n-017_Cl_035.endf") or Path("missing")
 
 
 def _pairs(suite):
@@ -40,7 +40,7 @@ def _pairs(suite):
 def test_cl35_pairs_come_back_from_kikas_gnds(tmp_path):
     tape = _tape()
     if not tape.is_file():
-        pytest.skip(f"{tape} not found (set KIKA_LIB_TAPES)")
+        pytest.skip(f"{tape} not found (set KIKA_NUCLEAR_DATA)")
     from kika.gnds.decode import readReactionSuite
     from kika.gnds.xpath import Document
 

@@ -10,15 +10,16 @@ had no MF3 header to read QM from, balanced every level with its QI (Fe-56 by
 GNDS: KERMA x21 above MT51's threshold).
 
 No micro-tape states a flagged MT with QI != QM, so the first tests edit
-B-11's MT103 QI by 100 keV. The tape tests (``KIKA_LIB_TAPES``) compare the
+B-11's MT103 QI by 100 keV. The tape tests (``$KIKA_NUCLEAR_DATA``) compare the
 model read from ENDF with the model read from NNDC's GNDS.
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
+
+from kika._nuclear_data import nuclear_data
 
 import kika
 from kika.endf.model_adapter.derive.reactions import reactionQValues
@@ -97,11 +98,7 @@ def test_every_flagged_mt_is_flagged_even_when_qi_is_qm():
 
 
 def _library(kind: str) -> Path:
-    tapes = os.environ.get("KIKA_LIB_TAPES")
-    if kind == "endf":
-        return Path(tapes) / "endfb81" if tapes else Path("missing")
-    stated = os.environ.get("KIKA_GNDS_LIB")
-    return Path(stated) if stated else (Path(tapes).parent / "gnds" / "endfb81" if tapes else Path("missing"))
+    return nuclear_data(kind, "endfb81") or Path("missing")
 
 
 @pytest.mark.tape
@@ -111,7 +108,7 @@ def test_endf_and_nndcs_gnds_give_the_same_q_values(name):
     endf = _library("endf") / f"{name}.endf"
     gnds = _library("gnds") / f"{name}.endf.gnds.xml"
     if not (endf.is_file() and gnds.is_file()):
-        pytest.skip(f"{endf} or {gnds} not found (set KIKA_LIB_TAPES)")
+        pytest.skip(f"{endf} or {gnds} not found (set KIKA_NUCLEAR_DATA)")
     a = kika.read(str(endf), format="endf", covariances=False)
     b = kika.read(str(gnds), format="gnds", covariances=False)
     qa, qb = reactionQValues(a), reactionQValues(b)

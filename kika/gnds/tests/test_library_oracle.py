@@ -16,8 +16,8 @@ A difference is either zero or one of :data:`EXPECTED`, each with its reason and
 where it has a size, its bound. Anything else fails the test and is printed in
 full. There is no tolerance outside that list.
 
-Data: the tapes from ``KIKA_LIB_TAPES`` (``endfb81/``), NNDC's GNDS from
-``KIKA_GNDS_LIB`` or ``gnds/endfb81`` beside ``KIKA_LIB_TAPES``. Without them
+Data: the tapes from ``$KIKA_NUCLEAR_DATA/endf/endfb81``, NNDC's GNDS from
+``$KIKA_NUCLEAR_DATA/gnds/endfb81``. Without them
 the tests skip. ``KIKA_LIBRARY=jeff40`` runs the library ``jeff40/`` instead;
 with no NNDC GNDS for it, only the reconstruction test runs. ``KIKA_LIBRARY_TAPES``
 restricts the run to a comma-separated list of tapes, by file stem
@@ -39,6 +39,8 @@ from typing import List, Optional
 
 import numpy as np
 import pytest
+
+from kika._nuclear_data import nuclear_data
 
 from kika.nuclear_data.model import (Interpolation, Reference, Regions1d,
                                      ResonancesWithBackground, XYs1d)
@@ -209,11 +211,7 @@ def _assertExplained(tape, differences):
 
 
 def _nndcDirectory() -> Optional[Path]:
-    stated = os.environ.get("KIKA_GNDS_LIB")
-    if stated:
-        return Path(stated)
-    tapes = os.environ.get("KIKA_LIB_TAPES")
-    return Path(tapes).parent / "gnds" / LIBRARY if tapes else None
+    return nuclear_data("gnds", LIBRARY)
 
 
 def _nuclide(symbol, mass, isomer):
@@ -250,7 +248,7 @@ def _tapes():
         raise ValueError(f"KIKA_LIBRARY: {LIBRARY!r} is not one of {sorted(TAPE_GLOBS)}")
     library = _root.resolve_library(LIBRARY)
     if library is None:
-        return None, f"the {LIBRARY} tapes (set KIKA_LIB_TAPES)"
+        return None, f"the {LIBRARY} tapes (set KIKA_NUCLEAR_DATA)"
     stems = sorted(_tapeFiles(library))
     wanted = os.environ.get("KIKA_LIBRARY_TAPES")
     if wanted:
@@ -279,7 +277,7 @@ def endf(tape):
 def paths(tape, endf):
     nndc = _nndcDirectory()
     if nndc is None or not (nndc / f"{tape}.endf.gnds.xml").is_file():
-        pytest.skip(f"NNDC's GNDS of {tape} not reachable (set KIKA_GNDS_LIB or KIKA_LIB_TAPES)")
+        pytest.skip(f"NNDC's GNDS of {tape} not reachable (set KIKA_NUCLEAR_DATA)")
     return endf, nndc
 
 

@@ -18,10 +18,11 @@ into; MF34's LTT=3 when an order-0 row is stated.
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
+
+from kika._nuclear_data import nuclear_data
 
 import kika
 from kika.endf import read_endf
@@ -31,11 +32,7 @@ pytestmark = pytest.mark.slow
 
 
 def _gnds() -> Path:
-    stated = os.environ.get("KIKA_GNDS_LIB")
-    if stated:
-        return Path(stated)
-    tapes = os.environ.get("KIKA_LIB_TAPES")
-    return Path(tapes).parent / "gnds" / "endfb81" if tapes else Path("missing")
+    return nuclear_data("gnds", "endfb81") or Path("missing")
 
 
 def _fields(line):

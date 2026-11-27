@@ -5,6 +5,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from kika._nuclear_data import nuclear_data
+
 from kika.endf import (PROCESSING_REJECTION_CATEGORIES, EndfProcessing, ProcessingPlan,
                        inspect_endf_processing, process_endf)
 from kika.endf import process as staged
@@ -411,8 +413,7 @@ def test_process_gnds_reprocesses_kikas_own_gnds(run, tmp_path):
 
 def test_gnds_and_endf_routes_agree_once_broadened(tmp_path):
     """The same evaluation through both doors: Au-197 B-VIII.1, ENDF and GNDS."""
-    import os
-    root = Path(os.environ.get("KIKA_LIB_TAPES", "/share_snc/lib/endf"))
+    root = nuclear_data("endf") or Path("missing")
     endf = root / "endfb81/n-079_Au_197.endf"
     gnds = root.parent / "gnds/endfb81/n-079_Au_197.endf.gnds.xml"
     if not (endf.exists() and gnds.exists()):

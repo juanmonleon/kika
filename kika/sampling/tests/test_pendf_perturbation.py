@@ -2,7 +2,7 @@
 
 Skipped automatically when NJOY or the reference ENDF tape are absent. The
 ``njoy_exe`` and ``fe56_host_tape`` fixtures come from the root ``conftest.py``;
-see there for ``$KIKA_TAPES``, ``$NJOY_EXECUTABLE`` and ``--deep``.
+see there for ``$KIKA_NUCLEAR_DATA``, ``$NJOY_EXECUTABLE`` and ``--deep``.
 """
 from __future__ import annotations
 

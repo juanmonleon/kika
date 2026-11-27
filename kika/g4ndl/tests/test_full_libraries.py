@@ -1,4 +1,4 @@
-"""The index and the parsers against the two whole libraries. ``tape``-marked: needs ``KIKA_G4NDL``.
+"""The index and the parsers against the two whole libraries. ``tape``-marked: needs ``$KIKA_NUCLEAR_DATA/g4ndl``.
 
 The counts are the ones an independent inventory script
 measured on 2026-10-05 with code that shares nothing with ``kika.g4ndl``.

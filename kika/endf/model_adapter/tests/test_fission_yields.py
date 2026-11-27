@@ -6,18 +6,19 @@ spontaneous-fission yields (NSUB=5), and the Pu-244 decay tape, which also
 carries spontaneous-fission neutron data (MF1/452) that a PoPs has no node for.
 
 Gates: ENDF → model → ENDF byte for byte and model → GNDS → model identical
-(here, and ``-m tape`` over ``KIKA_NFY_TAPES``/``KIKA_SFY_TAPES``: 31 + 9 files);
+(here, and ``-m tape`` over ``nfy/endfb81``/``sfy/endfb81``: 31 + 9 files);
 ``-m fudge``: kika reads FUDGE's GNDS as the yields it decodes from the tape,
 FUDGE reads kika's spontaneous-fission file and writes the same tape from it as
 from its own, and reads the neutron-induced yields from kika's
 ``fissionFragmentData`` file.
 """
 import json
-import os
 from pathlib import Path
 
 import numpy as np
 import pytest
+
+from kika._nuclear_data import nuclear_data
 
 import kika
 from kika.nuclear_data.model import CUMULATIVE, INDEPENDENT, FissionFragmentData, PoPs
@@ -79,29 +80,29 @@ def test_the_yields_alone_are_fudges_fissionFragmentData_file(tmp_path):
     assert modelDifferences(back.productYields, [productYield]) == []
 
 
-def _library(env):
-    root = os.environ.get(env)
+def _library(sublibrary):
+    root = nuclear_data(sublibrary, "endfb81")
     if not root:
-        pytest.skip(f"{env} not set")
+        pytest.skip("KIKA_NUCLEAR_DATA not set")
     paths = sorted(Path(root).glob("*.endf"))
     if not paths:
-        pytest.fail(f"{env}={root!r} holds no *.endf file")
+        pytest.fail(f"{root} holds no *.endf file")
     return paths
 
 
 @pytest.mark.tape
 @pytest.mark.slow
-@pytest.mark.parametrize("env", ["KIKA_NFY_TAPES", "KIKA_SFY_TAPES"])
-def test_every_yield_evaluation_of_the_library_comes_back(env, tmp_path):
-    for path in _library(env):
+@pytest.mark.parametrize("sublibrary", ["nfy", "sfy"])
+def test_every_yield_evaluation_of_the_library_comes_back(sublibrary, tmp_path):
+    for path in _library(sublibrary):
         _roundTrip(path, tmp_path)
 
 
 @pytest.mark.tape
 def test_u235_lists_its_products_per_energy():
-    root = os.environ.get("KIKA_NFY_TAPES")
-    if not root or not (Path(root) / "nfy-092_U_235.endf").exists():
-        pytest.skip("KIKA_NFY_TAPES with nfy-092_U_235.endf not set")
+    root = nuclear_data("nfy", "endfb81")
+    if not root or not (root / "nfy-092_U_235.endf").exists():
+        pytest.skip("nfy/endfb81/nfy-092_U_235.endf not under KIKA_NUCLEAR_DATA")
     _, productYield = _yieldOf(kika.read(Path(root) / "nfy-092_U_235.endf"))
     assert productYield.nuclides is None
     energies = productYield.elapsedTime(INDEPENDENT).incidentEnergies

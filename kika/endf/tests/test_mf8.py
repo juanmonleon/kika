@@ -4,14 +4,15 @@ The fixtures are whole ENDF/B-VIII.1 sublibrary files: Co-60 (one beta- mode,
 gamma/beta/e-/x-ray spectra), Fe-56 (stable, NST=1), Cs-137, Rb-93 (beta- and
 beta-delayed n, with an LCON=1 neutron continuum) and the Cm-242 fission yields.
 
-Library gate (``-m tape``): every file of ``KIKA_DECAY_TAPES`` and
-``KIKA_NFY_TAPES`` -- 3 821 decay and 31 yield evaluations of B-VIII.1 on
+Library gate (``-m tape``): every file of ``decay/endfb81`` and
+``nfy/endfb81`` -- 3 821 decay and 31 yield evaluations of B-VIII.1 on
 2026-10-09, 3 883 sections, all written back byte for byte.
 """
-import os
 from pathlib import Path
 
 import pytest
+
+from kika._nuclear_data import nuclear_data
 
 from kika.endf import read_endf
 from kika.endf.classes.mf8 import MF8FissionYields, MF8MT457
@@ -78,19 +79,19 @@ def test_fission_yields_name_what_they_hold():
     assert sum(e.y for e in entries) == pytest.approx(2.0, rel=0.02)
 
 
-def _library(env: str):
-    root = os.environ.get(env)
+def _library(sublibrary: str):
+    root = nuclear_data(sublibrary, "endfb81")
     if not root:
-        pytest.skip(f"{env} not set")
+        pytest.skip("KIKA_NUCLEAR_DATA not set")
     paths = sorted(Path(root).glob("*.endf"))
     if not paths:
-        pytest.fail(f"{env}={root!r} holds no *.endf file")
+        pytest.fail(f"{root} holds no *.endf file")
     return paths
 
 
 @pytest.mark.tape
 @pytest.mark.slow
-@pytest.mark.parametrize("env", ["KIKA_DECAY_TAPES", "KIKA_NFY_TAPES"])
-def test_every_mf8_of_a_sublibrary_is_written_back(env):
-    paths = _library(env)
+@pytest.mark.parametrize("sublibrary", ["decay", "nfy"])
+def test_every_mf8_of_a_sublibrary_is_written_back(sublibrary):
+    paths = _library(sublibrary)
     assert sum(_assert_round_trip(p) for p in paths) >= len(paths)

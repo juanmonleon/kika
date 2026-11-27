@@ -5,17 +5,18 @@ so the σ an MF13 section is stated against is that background table, not a func
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
+
+from kika._nuclear_data import nuclear_data
 
 import kika
 from kika.endf import read_endf
 
 
 def _tape(name):
-    tapes = Path(os.environ.get("KIKA_LIB_TAPES", "/share_snc/lib/endf"))
+    tapes = nuclear_data("endf") or Path("missing")
     path = tapes / "endfb81" / f"{name}.endf"
     if not path.exists():
         pytest.skip(f"{path} not available")

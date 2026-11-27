@@ -404,7 +404,7 @@ def test_fraction_conversion_with_natural_elements():
 
 # ── Serpent material tests ──────────────────────────────────────────────────
 
-# The PWRSphere input is resolved by the root conftest through $KIKA_TAPES;
+# The PWRSphere input is resolved by the root conftest through $KIKA_NUCLEAR_DATA;
 # these three tests previously hardcoded its absolute path with no guard at
 # all, so they errored rather than skipped on a machine without the mount.
 

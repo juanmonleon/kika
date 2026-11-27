@@ -117,7 +117,7 @@ model and restored on the way out:
 
 Decay sublibraries: ENDF to the model and back to ENDF, byte for byte; model to GNDS and
 back to the model, identical (`kika/endf/model_adapter/tests/test_decay_sublibrary.py`; the
-whole ENDF/B-VIII.1 decay sublibrary, with `KIKA_DECAY_TAPES` set, under `-m tape`:
+whole ENDF/B-VIII.1 decay sublibrary, with `KIKA_NUCLEAR_DATA` set, under `-m tape`:
 `::test_every_decay_evaluation_of_the_library_comes_back`, passed 2026-10-20).
 Thermal scattering and photons come back with the sections unchanged where the model was
 not edited.

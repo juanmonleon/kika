@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from kika._nuclear_data import nuclear_data
+
 from kika.UQ.sandwich import sandwich_uncertainty_propagation
 from kika.UQ.similarity import similarity_ck
 from kika.benchmarks.database import BenchmarksDatabase
@@ -23,11 +25,7 @@ DB_PATH = Path(
     )
 )
 COVERX_PATH = Path(
-    os.environ.get(
-        "KIKA_TEST_SCALE44_COVERX",
-        "/share_snc/projets/INSIDER/SENSIBILITE/"
-        "Covariances_scale_6.2.3_binary/scale.rev05.44groupcov",
-    )
+    nuclear_data("cov", "scale", "scale.rev05.44groupcov") or "missing"
 )
 REFERENCE_PATH = Path(__file__).parent / "data/dice_scale44_calins_reference.json"
 

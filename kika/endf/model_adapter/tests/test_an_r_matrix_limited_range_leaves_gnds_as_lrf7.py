@@ -9,19 +9,20 @@ capture residual and the boundary condition, and comes back the same way.
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import numpy as np
 import pytest
+
+from kika._nuclear_data import nuclear_data
 
 import kika
 from kika.endf import read_endf
 
 
 def _nndc(name):
-    tapes = Path(os.environ.get("KIKA_LIB_TAPES", "/share_snc/lib/endf"))
-    gnds = Path(os.environ.get("KIKA_GNDS_LIB", tapes.parent / "gnds" / "endfb81"))
+    tapes = nuclear_data("endf") or Path("missing")
+    gnds = tapes.parent / "gnds" / "endfb81"
     endf, xml = tapes / "endfb81" / f"{name}.endf", gnds / f"{name}.endf.gnds.xml"
     if not (endf.is_file() and xml.is_file()):
         pytest.skip(f"needs {endf} and {xml}")

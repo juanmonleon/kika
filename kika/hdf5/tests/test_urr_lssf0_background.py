@@ -14,6 +14,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from kika._nuclear_data import nuclear_data
+
 import kika
 from kika.hdf5 import processing as P
 from kika.nuclear_data import model as m
@@ -96,12 +98,10 @@ def test_a_background_mf3_shifts_the_bands_by_what_the_realisation_moved():
 @pytest.mark.tape
 def test_rh103_tables_from_its_lrp2_reconstruction_equal_the_tapes():
     import copy
-    import os
 
-    tapes = os.environ.get("KIKA_LIB_TAPES")
-    path = Path(tapes) / "n-045_Rh_103.endf" if tapes else None
+    path = nuclear_data("endf", "endfb81", "n-045_Rh_103.endf")
     if path is None or not path.is_file():
-        pytest.skip("ENDF/B-VIII.1 Rh-103 not found (set KIKA_LIB_TAPES)")
+        pytest.skip("ENDF/B-VIII.1 Rh-103 not found (set KIKA_NUCLEAR_DATA)")
     suite = kika.read(str(path), covariances=False)
     stated = P.urrTablesOf(suite, [293.6])[293.6]
     work = P._reconstructed(suite, None, m.ConversionReport())

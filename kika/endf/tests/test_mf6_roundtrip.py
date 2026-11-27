@@ -25,10 +25,10 @@ smallest carrier at 591 records; and C-12's MT5 is the readiest ``LCT=3``.
 **LAW=5 is gated against tapes, and the reason it once was not was wrong.**
 Charged-particle elastic scattering does not occur in a neutron sublibrary —
 it needs a charged projectile — and this module used to say that settled it,
-because ``/share_snc/lib/endf`` was believed to hold neutron and TSL
-evaluations only. It does not: ``endfb8/`` is ENDF/B-VIII.0 entire, with
-``protons/``, ``deuterons/``, ``tritons/``, ``helium3s/`` and ``alphas/``
-alongside ``neutrons/``. The 2026-08-18 sweep looked at ``endfb81/``, which
+because the shared library tree was believed to hold neutron and TSL
+evaluations only. It did not: ENDF/B-VIII.0 came entire, with ``protons``,
+``deuterons``, ``tritons``, ``helium3s`` and ``alphas`` alongside the neutrons
+(``$KIKA_NUCLEAR_DATA/<sublibrary>/endfb80``). The 2026-08-18 sweep looked at ``endfb81/``, which
 *is* neutron-only, and generalised from it. 63 charged-particle tapes carry a
 LAW=5 each, all in MT2; the five whole ones committed here cover both axes it
 splits on and the fifth adds LAW=2/LANG=12.
@@ -47,6 +47,8 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+
+from kika._nuclear_data import nuclear_data
 
 from kika.endf import read_endf
 from kika.endf.classes.mf6.laws import (
@@ -596,7 +598,7 @@ def test_law5_tabulated_is_normalised_but_not_a_density():
     # Not a density: the committed fixtures happen to be non-negative, so the
     # signedness is gated on the share instead of quietly going unasserted.
     # 45 kB of p-001_H_002 would buy only this one fact.
-    tape = Path("/share_snc/lib/endf/endfb8/protons/p-001_H_002.endf")
+    tape = nuclear_data("protons", "endfb80", "p-001_H_002.endf") or Path("missing")
     if not tape.exists():
         pytest.skip("ENDF/B-VIII.0 protons not reachable")
     body = law5_body(tape)
@@ -870,13 +872,13 @@ def test_the_whole_charged_particle_census_holds(request):
     ~21 s over the share, which is why it is ``slow``-marked and skips when the
     share is not there, like :func:`test_endfb81_o16_roundtrip`.
     """
-    root = Path("/share_snc/lib/endf/endfb8")
-    if not root.is_dir():
+    root = nuclear_data()
+    if root is None or not (root / "protons" / "endfb80").is_dir():
         pytest.skip("ENDF/B-VIII.0 charged-particle sublibraries not reachable")
 
     tapes = []
     for sub, expected in CP_SUBLIBRARIES.items():
-        found = sorted((root / sub).glob("*.endf"))
+        found = sorted((root / sub / "endfb80").glob("*.endf"))
         assert len(found) == expected, (
             f"{sub}: {len(found)} tapes, census says {expected} — the sweep "
             f"below would report a different library's numbers"
@@ -937,7 +939,7 @@ def test_endfb81_o16_roundtrip(request):
     had read. Kept as a gate because the fixtures are all blank-padded and so
     cannot see it.
     """
-    path = Path("/share_snc/lib/endf/endfb81/n-008_O_016.endf")
+    path = nuclear_data("endf", "endfb81", "n-008_O_016.endf") or Path("missing")
     if not path.exists():
         pytest.skip("ENDF/B-VIII.1 O-16 not reachable")
     for mt in (5, 16, 22):

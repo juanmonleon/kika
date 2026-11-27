@@ -8,7 +8,7 @@ Rb-93 (beta- and beta-delayed n, with a neutron continuum).
 Gates:
 
 - ENDF → model → ENDF byte for byte (here, and ``-m tape`` over all 3 821
-  files of ``KIKA_DECAY_TAPES``);
+  files of ``$KIKA_NUCLEAR_DATA/decay/endfb81``);
 - model → GNDS → model identical;
 - ``-m fudge``: the model kika reads from FUDGE's GNDS is the one it decodes
   from the tape (masses aside: FUDGE takes them from the AME table, kika from
@@ -21,6 +21,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
+
+from kika._nuclear_data import nuclear_data
 
 import kika
 from kika.nuclear_data.model import PoPs
@@ -108,12 +110,12 @@ def test_an_edit_to_the_model_is_not_undone_by_the_kept_fields(tmp_path):
 @pytest.mark.tape
 @pytest.mark.slow
 def test_every_decay_evaluation_of_the_library_comes_back(tmp_path):
-    root = os.environ.get("KIKA_DECAY_TAPES")
+    root = nuclear_data("decay", "endfb81")
     if not root:
-        pytest.skip("KIKA_DECAY_TAPES not set")
+        pytest.skip("KIKA_NUCLEAR_DATA not set")
     paths = sorted(Path(root).glob("*.endf"))
     if not paths:
-        pytest.fail(f"KIKA_DECAY_TAPES={root!r} holds no *.endf file")
+        pytest.fail(f"{root} holds no *.endf file")
     for path in paths:
         _roundTrip(path, tmp_path)
 

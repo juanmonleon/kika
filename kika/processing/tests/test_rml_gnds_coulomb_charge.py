@@ -11,31 +11,27 @@ With ``Z``, measured 2026-10-16: the PENDF of NNDC's GNDS has the grid of the
 ENDF route's in every MT, and its values agree to 1.7e-7 in MT600/103 and
 6e-10 in MT1/2 (3.5e-6 at worst, MT720 at 15 MeV: the GNDS file's digits).
 
-``KIKA_GNDS_LIB`` points at the folder of NNDC's ``n-*.endf.gnds.xml`` files;
-by default ``NuclearData/gnds/endfb81`` beside ``KIKA_LIB_TAPES``.
+NNDC's ``n-*.endf.gnds.xml`` files are read from ``$KIKA_NUCLEAR_DATA/gnds/endfb81``.
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
+
+from kika._nuclear_data import nuclear_data
 
 pytestmark = pytest.mark.tape
 
 
 def _library() -> Path:
-    stated = os.environ.get("KIKA_GNDS_LIB")
-    if stated:
-        return Path(stated)
-    tapes = os.environ.get("KIKA_LIB_TAPES")
-    return Path(tapes).parent / "gnds" / "endfb81" if tapes else Path("missing")
+    return nuclear_data("gnds", "endfb81") or Path("missing")
 
 
 def test_nndc_cl35_proton_channel_is_coulomb_charged():
     path = _library() / "n-017_Cl_035.endf.gnds.xml"
     if not path.is_file():
-        pytest.skip(f"{path} not found (set KIKA_GNDS_LIB)")
+        pytest.skip(f"{path} not found (set KIKA_NUCLEAR_DATA)")
     from kika.endf.process import _context_from_model
     from kika.gnds.decode import readReactionSuite
     from kika.gnds.xpath import Document

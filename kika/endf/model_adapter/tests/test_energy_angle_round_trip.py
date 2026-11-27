@@ -9,11 +9,13 @@ step moves laws from the bytes to the model without moving the result.
 
 The four neutron fixtures carry every LAW a neutron sublibrary has and the five
 charged-particle ones carry LAW=5, so ``micro_mf6_any_tape`` is the whole of
-what is reachable offline. Nothing here reads ``/share_snc``.
+what is reachable offline.
 """
 from __future__ import annotations
 
 import pytest
+
+from kika._nuclear_data import nuclear_data
 
 from kika.endf import read_endf
 from kika.endf.model_adapter import decodeMF6MT, encodeMF6MT
@@ -715,13 +717,12 @@ def test_the_form_census_matches_the_distributed_gnds_translation(tape, mts):
     an excited level from the MT number). What must agree is which §18 form each
     subsection became.
     """
-    import os
     from collections import Counter
     from pathlib import Path
     import xml.etree.ElementTree as ET
 
-    tapes = Path(os.environ.get("KIKA_LIB_TAPES", "/share_snc/lib/endf"))
-    source = Path(os.environ.get("KIKA_GNDS_LIB", tapes.parent / "gnds" / "endfb81"))
+    tapes = nuclear_data("endf") or Path("missing")
+    source = tapes.parent / "gnds" / "endfb81"
     endfPath = tapes / "endfb81" / f"{tape}.endf"
     gndsPath = source / f"{tape}.endf.gnds.xml"
     if not (endfPath.is_file() and gndsPath.is_file()):

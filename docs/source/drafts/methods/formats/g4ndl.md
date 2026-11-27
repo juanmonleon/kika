@@ -132,7 +132,7 @@ name as `target`).
 - Whole distributed libraries, every isotope read and written back
   (`kika/g4ndl/tests/test_full_libraries.py`, `test_capture_full_libraries.py`,
   `test_fission_full_libraries.py`, `test_inelastic_full_libraries.py`), with
-  `KIKA_G4NDL` and the JEFF-4.0 ENDF tapes on disk (and NJOY for the Fe-56
+  `$KIKA_NUCLEAR_DATA/g4ndl` and the JEFF-4.0 ENDF tapes on disk (and NJOY for the Fe-56
   cross-section case): 38 passed on 2026-10-21.
 - The `ThermalScattering` folder: a folder of materials is indexed, its Bragg table and
   outgoing tables are read per temperature, and `kika.read` returns its suite

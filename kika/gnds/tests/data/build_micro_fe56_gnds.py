@@ -70,34 +70,35 @@ blocks their first :data:`MAX_DOC_LINES` lines. The result is **structurally
 faithful and numerically abridged**: it is a fixture for a reader, not an
 evaluation, and no test may treat its cross sections as physics. The oracle
 tests that compare numbers against the ENDF path read the full file from
-``$KIKA_TAPES`` under the ``gnds`` marker instead.
+``$KIKA_NUCLEAR_DATA`` under the ``gnds`` marker instead.
 
 The output is validated against FUDGE's own GNDS 2.0 schema before it is
 written, so a trim that produces a structurally invalid file fails here rather
 than three phases later::
 
-    xmllint --noout --schema /soft_snc/FUDGE/6.10.0/fudge/fudge/gnds.xsd micro_fe56.gnds.xml
+    xmllint --noout --schema $KIKA_FUDGE_DIR/fudge/gnds.xsd micro_fe56.gnds.xml
 """
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
+import os
 from pathlib import Path
+
+from kika._nuclear_data import nuclear_data
 
 HERE = Path(__file__).resolve().parent
 
 #: The root the distributed library sits under. Overridable for a machine whose
 #: share is mounted elsewhere; the default is the one `conftest.py` looks under.
-TAPES = Path(os.environ.get("KIKA_TAPES", "/share_snc/snc/JuanMonleon"))
-NEUTRONS = TAPES / "ENDF-B-VIII.1-GNDS/ENDF-B-VIII.1-GNDS/neutrons"
+NEUTRONS = nuclear_data("gnds", "endfb81", "neutrons") or Path("missing")
 
 #: FUDGE's GNDS 2.0 schema. Absent on a machine without FUDGE, in which case the
 #: validation step is skipped and says so.
-SCHEMA = Path("/soft_snc/FUDGE/6.10.0/fudge/fudge/gnds.xsd")
+SCHEMA = Path(os.environ.get("KIKA_FUDGE_DIR", "missing")) / "fudge" / "gnds.xsd"
 
 #: ``output name -> (source file, the reactions to keep)``. For the two §19
 #: fixtures the kept reactions are exactly the ones the file's own
@@ -254,8 +255,8 @@ def build(source: Path, keepReactions) -> ET.ElementTree:
     if not source.exists():
         raise SystemExit(
             f"{source} is not there. This script cuts the committed fixtures out "
-            f"of the distributed ENDF/B-VIII.1 GNDS library; set KIKA_TAPES to "
-            f"the root that holds ENDF-B-VIII.1-GNDS/."
+            f"of the distributed ENDF/B-VIII.1 GNDS library; set KIKA_NUCLEAR_DATA to "
+            f"the root that holds gnds/endfb81/neutrons/."
         )
 
     tree = ET.parse(source)

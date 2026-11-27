@@ -112,7 +112,7 @@ build-backend = "poetry.core.masonry.api"
 # There is no root tests/ dir; kika/tests/ holds repo-wide invariants only.
 testpaths = ["kika", "scripts"]
 markers = [
-    "tape: needs a real ENDF/ACE tape from the shared data tree ($KIKA_TAPES)",
+    "tape: needs a real ENDF/ACE tape from the data tree ($KIKA_NUCLEAR_DATA)",
     "njoy: spawns the NJOY executable",
     "gnds: needs a GNDS fixture or reader",
     "slow: takes more than a few seconds",

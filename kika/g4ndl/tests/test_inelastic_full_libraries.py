@@ -1,4 +1,4 @@
-"""The inelastic sections against the two whole libraries. ``tape``-marked: needs ``KIKA_G4NDL``.
+"""The inelastic sections against the two whole libraries. ``tape``-marked: needs ``$KIKA_NUCLEAR_DATA/g4ndl``.
 
 Every ``Inelastic/`` file is read to its last token, written back as text and
 read again (the text fixed point), and every inelastic isotope is read into
