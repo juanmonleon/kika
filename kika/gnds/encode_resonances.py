@@ -683,10 +683,12 @@ def _unresolved(parent: ET.Element, region, report: ConversionReport,
 
     node = ET.SubElement(element, "tabulatedWidths")
     policy = getattr(widths, "radiusPolicy", None)
+    # Only "false" is written: GNDS before 2.2 has no such attribute for the URR
+    # and readers (FUDGE, kika) take it as true, which is how NNDC's files read.
     _set(node, label=widths.label or "eval",
          approximation="SingleLevelBreitWigner",
-         calculateChannelRadius=(None if policy is None
-                                 else "true" if policy.channelMode == "mass" else "false"),
+         calculateChannelRadius=(None if policy is None or policy.channelMode == "mass"
+                                 else "false"),
          useForSelfShieldingOnly=_true(widths.selfShieldingOnly))
     if widths.potentialScatteringInterpolation is not None or widths.potentialScatteringEnergies is not None:
         report.lost('URR independent potential-scattering interpolation requires the KIKA opt-in resonance extension')

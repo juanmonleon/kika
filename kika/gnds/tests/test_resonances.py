@@ -583,3 +583,24 @@ def test_a_channel_boundary_condition_is_read_and_written(micro_sr88_gnds,
     kika.write(suite, written)
     back = ET.parse(written).getroot().find(".//spinGroup/channels/channel")
     assert back.attrib["boundaryConditionValue"] == "-1.5"
+
+
+def test_the_urr_writes_calculate_channel_radius_only_when_it_is_false(ta182):
+    """NNDC's URR carries no ``calculateChannelRadius`` (read as true); kika writes the attribute only for ``false``."""
+    import dataclasses
+
+    from kika.gnds.encode_resonances import writeResonances
+
+    def written(resonances):
+        root = ET.Element("reactionSuite")
+        writeResonances(root, resonances, ConversionReport(), ("1", "1000"))
+        return root.find(".//unresolved/tabulatedWidths").attrib.get("calculateChannelRadius")
+
+    resonances = ta182[0].resonances
+    assert resonances.unresolved.tabulatedWidths.radiusPolicy.channelMode == "mass"
+    assert written(resonances) is None
+
+    changed = copy.deepcopy(resonances)
+    widths = changed.unresolved.tabulatedWidths
+    widths.radiusPolicy = dataclasses.replace(widths.radiusPolicy, channelMode="phase")
+    assert written(changed) == "false"
